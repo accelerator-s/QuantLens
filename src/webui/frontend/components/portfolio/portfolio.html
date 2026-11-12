@@ -1,0 +1,57 @@
+<section class="portfolio">
+  <div class="toolbar">
+    <button type="button" class="btn btn--primary" data-account-create>创建账户</button>
+    <div class="select portfolio__account-select" data-account-select></div>
+    <span class="item-row__meta" data-account-meta></span>
+  </div>
+
+  <div data-account-card></div>
+
+  <div class="tabs" data-tabs>
+    <button type="button" class="tabs__btn is-active" data-tab="holdings">持仓</button>
+    <button type="button" class="tabs__btn" data-tab="trades">成交</button>
+    <button type="button" class="tabs__btn" data-tab="snapshots">快照</button>
+    <button type="button" class="tabs__btn" data-tab="plans">计划</button>
+    <button type="button" class="tabs__btn" data-tab="reconcile">对账</button>
+  </div>
+
+  <div data-panel="holdings">
+    <div data-holdings></div>
+  </div>
+  <div data-panel="trades" hidden>
+    <div class="toolbar">
+      <button type="button" class="btn btn--primary" data-trade-add>录入成交</button>
+      <button type="button" class="btn btn--ghost" data-trades-append>批量追加</button>
+      <button type="button" class="btn btn--ghost" data-trades-fix>审计补丁</button>
+    </div>
+    <div data-trades></div>
+    <div class="toolbar">
+      <button type="button" class="btn btn--ghost" data-trades-more hidden>加载更多</button>
+    </div>
+  </div>
+  <div data-panel="snapshots" hidden>
+    <div class="toolbar">
+      <button type="button" class="btn btn--primary" data-snapshot-commit>生成快照</button>
+      <button type="button" class="btn btn--ghost" data-snapshot-submit>导入快照</button>
+    </div>
+    <div data-snapshots></div>
+  </div>
+  <div data-panel="plans" hidden>
+    <div class="toolbar">
+      <button type="button" class="btn btn--primary" data-daily-run>每日策略运行</button>
+      <button type="button" class="btn btn--ghost" data-automation-config>每日调度</button>
+      <button type="button" class="btn btn--ghost" data-shadow-observe>补写到期影子结果</button>
+      <button type="button" class="btn btn--ghost" data-attribution-mature>运行到期归因</button>
+      <button type="button" class="btn btn--ghost" data-execution-recovery>补齐成交关联</button>
+      <button type="button" class="btn btn--ghost" data-decay-scan>扫描衰减</button>
+      <button type="button" class="btn btn--ghost" data-recommend-generate>按策略生成</button>
+      <button type="button" class="btn btn--ghost" data-plan-submit>提交计划</button>
+    </div>
+    <div data-plans></div>
+  </div>
+  <div data-panel="reconcile" hidden>
+    <div data-reconcile></div>
+  </div>
+
+  <div data-empty hidden></div>
+</section>

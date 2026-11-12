@@ -1,0 +1,8 @@
+profile_name: research_growth_revenue_yoy
+display_name: 营收增长研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items: [{name: growth_revenue_yoy, weight: null, direction_override: ''}]
+extra: {purpose: factor_research_only, internal_only: true}

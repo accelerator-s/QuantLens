@@ -1,0 +1,76 @@
+/* ==========================================================================
+   量镜 · 页面布局防溢出与对齐契约 (core/page-contracts.css)
+   ========================================================================== */
+
+.view,
+.overview,
+.factors,
+.experiments,
+.backtest,
+.portfolio,
+.strategy,
+.data,
+.review,
+.ai-config,
+.admin {
+  width: 100%;
+  max-width: 1640px;
+  min-width: 0;
+}
+
+.split > *,
+.detail-card,
+.card,
+.kv__row,
+.kv__item,
+.kv__val {
+  min-width: 0;
+}
+
+.detail-card .kv + h4,
+.detail-card .table-wrap + h4,
+.detail-card .codeblock + h4,
+.detail-card .chart + h4 {
+  margin-top: 6px;
+}
+
+/* Keep visibility and data widgets consistent across the restored pages. */
+[hidden] { display: none !important; }
+.toolbar > .select { flex: 0 1 220px; max-width: 100%; }
+.kv:has(> dt) { grid-template-columns: minmax(80px, .7fr) minmax(0, 1fr); }
+.kv > dt { display: block; color: var(--ink-2); font-size: var(--fs-xs); }
+.kv > dd { margin: 0; overflow-wrap: anywhere; }
+.chart { position: relative; min-width: 0; }
+.chart__svg { width: 100%; height: auto; display: block; overflow: hidden; }
+.chart__line { fill: none; stroke-width: 1.75; stroke-linejoin: round; }
+.chart__tick { fill: var(--ink-2); font-size: 10px; font-family: var(--font-mono); }
+.chart__tick--y { text-anchor: end; }
+
+.chart__cursor { stroke: var(--ink-2); stroke-dasharray: 3 3; }
+.chart__tip {
+  position: absolute; top: 10px; z-index: 2; pointer-events: none;
+  display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm); background: var(--bg-1); color: var(--ink-0);
+  font-size: var(--fs-xs); box-shadow: var(--shadow-sm);
+}
+.chart__tip-row { display: flex; align-items: center; gap: 5px; }
+.chart__tip-row i { width: 7px; height: 7px; border-radius: 50%; }
+.chart-bars { display: grid; gap: 6px; }
+.chart-bars__row { display: grid; grid-template-columns: minmax(76px, 128px) 1fr auto; gap: 8px; align-items: center; font-size: var(--fs-xs); }
+.chart-bars__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-1); }
+.chart-bars__track { height: 6px; background: var(--bg-2); border-radius: 3px; overflow: hidden; }
+.chart-bars__track > span { display: block; height: 100%; background: var(--accent); }
+.chart-bars__value { font-family: var(--font-mono); }
+.ql-table { white-space: nowrap; }
+.ql-progress { width: 100%; height: 6px; accent-color: var(--accent); }
+.ql-list { padding-left: 18px; color: var(--ink-1); font-size: var(--fs-sm); line-height: 1.8; }
+.ql-error { color: var(--danger); }
+.ql-loading { padding: 24px; color: var(--ink-2); text-align: center; }
+.ql-stats { margin: 0; }
+.ql-form > button { align-self: end; }
+.ql-wide { grid-column: 1 / -1; }
+@media (max-width: 600px) {
+  .ql-grid { grid-template-columns: minmax(0, 1fr); }
+  .ql-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ql-form { grid-template-columns: minmax(0, 1fr); }
+}

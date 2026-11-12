@@ -1,0 +1,25 @@
+<section class="experiments">
+  <article class="card evolution-card">
+    <div class="detail-card__head">
+      <div>
+        <h3>实验会话</h3>
+        <p class="item-row__meta">每次研究独立记录。同一因子可以多次实验。</p>
+      </div>
+      <button type="button" class="btn btn--primary" data-evolution-start>新建实验</button>
+    </div>
+    <div data-evolution-list></div>
+  </article>
+  <div class="experiments__evolution-detail" data-evolution-detail></div>
+  <div class="toolbar experiments__logbook-head">
+    <div>
+      <h3>实验记录</h3>
+      <p class="item-row__meta">按因子、策略和组合政策查看回测、版本对比与模型复盘。</p>
+    </div>
+    <span class="toolbar__spacer"></span>
+    <div class="select experiments__filter" data-improved-filter></div>
+  </div>
+  <div class="split">
+    <div class="item-list" data-list></div>
+    <div class="experiments__detail" data-detail></div>
+  </div>
+</section>

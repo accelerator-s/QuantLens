@@ -1,0 +1,27 @@
+schema_version: 1
+execution_delay_days: 1
+price_anchor: next_close
+fill_assumption: all_or_nothing
+block_buy_on_suspension: true
+block_buy_on_limit_up_one_line: true
+block_sell_on_suspension: true
+block_sell_on_limit_down_one_line: true
+fee_source: market_rule
+commission_override_rate: '0.00008'
+model_min_commission: true
+slippage_bps: '10'
+return_field: ret_wd
+valuation_mode: mv_drift
+sell_proceeds_available: same_day
+unaffordable_lot: reject_keep_cash
+delist_force_close: true
+delist_recovery_rate: '0'
+benchmark: universe_equal_weight
+market_rule_name: CN-A-stock
+trading_days_per_year: 244
+lock:
+  locked: true
+  protocol_hash: af207dd6b1f7aa51
+  locked_at: '2026-08-16T02:53:32.382271+00:00'
+  locked_by: human
+  notes: 第二阶段口径评审：next_close/ret_wd漂移/万0.8不免5/滑点10bp

@@ -1,0 +1,8 @@
+profile_name: research_reversal_5
+display_name: 短期超跌反弹研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items: [{name: reversal_5, weight: null, direction_override: ''}]
+extra: {purpose: factor_research_only, internal_only: true}

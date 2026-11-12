@@ -1,0 +1,332 @@
+/* ==========================================================================
+   量镜 · 市场分析与实验中心样式 (components/lens/lens.css)
+   风格：高密度量化数据工作台
+   ========================================================================== */
+
+.ql-page {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 1640px;
+}
+
+.ql-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 2px 10px;
+  border-bottom: 1px solid var(--line-0);
+}
+
+.ql-head small {
+  display: none;
+}
+
+.ql-head h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink-0);
+  letter-spacing: -0.01em;
+}
+
+.ql-head p {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.ql-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ql-notice {
+  display: none;
+}
+
+.ql-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-3);
+}
+
+.ql-card {
+  background: var(--bg-1);
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-md);
+  padding: var(--card-pad);
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.ql-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-0);
+}
+
+.ql-card h3 {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--ink-0);
+}
+
+.ql-card h4 {
+  margin: 6px 0 2px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.ql-card p {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.ql-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 8px 10px;
+}
+
+.ql-stat {
+  padding: 8px 10px;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+  min-width: 0;
+}
+
+.ql-stat span {
+  display: block;
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+}
+
+.ql-stat strong {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink-0);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.ql-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+  gap: 8px 10px;
+  align-items: end;
+}
+
+.ql-form label {
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.ql-form input,
+.ql-form select,
+.ql-form textarea,
+.ql-page button,
+.ql-card a[download] {
+  min-height: var(--control-h);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  color: var(--ink-0);
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.25;
+}
+
+.ql-form input:focus,
+.ql-form select:focus,
+.ql-form textarea:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.ql-form textarea {
+  grid-column: 1 / -1;
+  min-height: 68px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.ql-page button,
+.ql-card a[download] {
+  cursor: pointer;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.ql-page button:hover:not(:disabled),
+.ql-card a[download]:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.ql-page button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ql-page td button {
+  min-height: 26px;
+  padding: 3px 8px;
+  font-size: var(--fs-xs);
+  background: var(--bg-1);
+  color: var(--ink-0);
+  border-color: var(--line-1);
+}
+
+.ql-page td button:hover:not(:disabled) {
+  background: var(--bg-2);
+  color: var(--ink-0);
+  border-color: var(--ink-2);
+}
+
+.ql-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+}
+
+.ql-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.ql-table th,
+.ql-table td {
+  padding: var(--table-cell-pad);
+  border-bottom: 1px solid var(--line-0);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.ql-table th {
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+  background: var(--bg-0);
+  white-space: nowrap;
+}
+
+.ql-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ql-table tbody tr:hover td {
+  background: var(--bg-2);
+}
+
+.ql-empty {
+  padding: 24px 16px;
+  text-align: center;
+  border: 1px dashed var(--line-1);
+  border-radius: var(--radius-md);
+  color: var(--ink-2);
+  background: var(--bg-1);
+}
+
+.ql-empty h3 {
+  margin: 0 0 4px;
+  color: var(--ink-0);
+  font-size: var(--fs-base);
+}
+
+.ql-bar {
+  height: 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.ql-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.ql-up {
+  color: var(--up);
+  font-weight: 600;
+}
+
+.ql-down {
+  color: var(--down);
+  font-weight: 600;
+}
+
+.ql-log {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+  border: 1px solid var(--line-0);
+  color: var(--ink-0);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .ql-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media print {
+  #rail-slot,
+  #topbar-slot,
+  .ql-actions,
+  button,
+  form {
+    display: none !important;
+  }
+  .workspace {
+    padding: 0 !important;
+  }
+  .ql-card {
+    break-inside: avoid;
+    box-shadow: none;
+  }
+}

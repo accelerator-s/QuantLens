@@ -1,0 +1,24 @@
+.ai-config {
+  width: 100%;
+  max-width: 1640px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ai-config .section-title {
+  margin-top: 8px;
+}
+
+.ai-config__discuss {
+  max-width: 420px;
+}
+
+.ai-config__task-select {
+  min-width: 240px;
+}
+
+.ai-config__env {
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}

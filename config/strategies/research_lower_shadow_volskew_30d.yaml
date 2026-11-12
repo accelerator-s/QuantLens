@@ -1,0 +1,8 @@
+profile_name: research_lower_shadow_volskew_30d
+display_name: 下影线量能偏度研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items: [{name: lower_shadow_volskew_30d, weight: null, direction_override: ''}]
+extra: {purpose: factor_research_only, internal_only: true}

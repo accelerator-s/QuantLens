@@ -1,0 +1,131 @@
+.data {
+  width: 100%;
+  max-width: 1640px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.data .section-title {
+  margin-top: 8px;
+}
+
+.data__table-provider {
+  min-width: 220px;
+}
+
+.data__section-head {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+.data__section-head .section-title {
+  margin: 0;
+}
+
+.data__providers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-3);
+}
+
+.data__providers .detail-card {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.data__fresh {
+  margin: 2px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--safe);
+  border-radius: var(--radius-sm);
+  background: var(--safe-soft);
+  color: var(--safe);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.sync-progress {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+}
+
+.sync-progress__head,
+.sync-progress__labels {
+  display: flex;
+}
+
+.sync-progress__pack { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-0); }
+.sync-progress__pack p { margin: 6px 0 0; }
+
+.sync-progress__head {
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.sync-progress__labels {
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sync-progress__current {
+  overflow: hidden;
+  color: var(--ink-0);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-progress__detail,
+.sync-progress__waiting {
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+}
+
+.sync-progress__percent {
+  flex: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-progress__track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--bg-2);
+}
+
+.sync-progress__fill {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.sync-progress__waiting {
+  margin: 8px 0 0;
+}
+
+.sync-progress__log {
+  margin-top: 10px;
+}
+
+.sync-progress__log summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+}
+
+.sync-progress__log .codeblock {
+  max-height: 260px;
+  overflow: auto;
+}

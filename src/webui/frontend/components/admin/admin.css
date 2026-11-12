@@ -1,0 +1,16 @@
+.admin {
+  width: 100%;
+  max-width: 1640px;
+}
+
+.admin__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.admin .detail-card .toolbar {
+  margin-top: 6px;
+  margin-bottom: 0;
+}

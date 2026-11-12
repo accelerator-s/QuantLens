@@ -1,0 +1,17 @@
+version: 1
+providers:
+- name: csmar
+  auth_method: campus_network_auto
+  target_tables:
+  - instruments
+  - prices_daily
+  update_frequency: 历史全量按需；日增量当日 17:30 UTC+8 后可获取
+  source_category: history_authoritative,daily_increment
+  market: CN-A
+  instrument_class: stock
+  status: active
+  manifest_version: v1
+  related_issue_id: ISS-20260517-CQB9
+  notes: 校园网自动登录，无需保存 session 凭据
+  created_at: '2026-05-17T00:00:00+00:00'
+  updated_at: '2026-05-17T00:00:00+00:00'

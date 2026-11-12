@@ -1,0 +1,26 @@
+<section class="review">
+  <div class="tabs" data-tabs>
+    <button type="button" class="tabs__btn is-active" data-tab="proposals">候选评审</button>
+    <button type="button" class="tabs__btn" data-tab="memory">记忆候选</button>
+    <button type="button" class="tabs__btn" data-tab="trash">回收站</button>
+  </div>
+
+  <div data-panel="proposals">
+    <div class="split">
+      <div class="item-list" data-proposal-list></div>
+      <div data-proposal-detail></div>
+    </div>
+  </div>
+
+  <div data-panel="memory" hidden>
+    <div class="review__memory-status" data-memory-status></div>
+    <div class="split">
+      <div class="item-list" data-memory-list></div>
+      <div data-memory-detail></div>
+    </div>
+  </div>
+
+  <div data-panel="trash" hidden>
+    <div data-trash></div>
+  </div>
+</section>

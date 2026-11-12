@@ -1,0 +1,37 @@
+.portfolio {
+  width: 100%;
+  max-width: 1640px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.portfolio__account-select {
+  min-width: 240px;
+}
+
+.portfolio .detail-card + .detail-card {
+  margin-top: 10px;
+}
+
+.portfolio__plan-table {
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.portfolio__plan-reason {
+  white-space: pre-line;
+  margin: 4px 0;
+}
+
+.portfolio__plan-caveats {
+  margin: 4px 0;
+  padding-left: 18px;
+  color: var(--warn);
+}
+
+.portfolio__compare {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-0);
+}

@@ -1,0 +1,44 @@
+profile_name: a_share_research_base
+display_name: A股研究基础规则
+is_template: true
+inheritance_parent: ''
+status: draft
+market: CN-A
+instruments: [stock]
+timescale: daily
+data_frequency: daily
+universe:
+  min_listed_days: 120
+  exclude_suspended: true
+  exclude_st: true
+  notes: 研究股票需上市满120个交易日；停牌股和风险警示股不参与新建仓。
+factors:
+  weighting: equal
+  items:
+  - {name: value_defensive_quality_v2, weight: null, direction_override: ''}
+standardization_chain:
+- {step: winsorize, lower_pct: '0.01', upper_pct: '0.99'}
+- {step: zscore}
+trading_rules: {market_rule: CN-A-stock}
+execution_assumption:
+  price_anchor: next_close
+  fill_assumption: all_or_nothing
+  notes: 每日收盘后生成信号，下一交易日收盘附近执行；因停牌或价格限制无法成交时顺延，并保留未成交记录。
+rebalance_frequency: monthly
+holding_period: 20
+position_constraint:
+  top_n: 20
+  max_weight_per_name: '0.10'
+  min_cash_ratio: '0.05'
+fees_slippage:
+  fee_source: market_rule
+  slippage_bps: '10'
+  manual_fee_bps: null
+risk_control:
+  max_single_name_pct: '0.10'
+  max_industry_pct: '0.30'
+  notes: 单只股票不超过组合的10%，单一行业不超过30%，至少保留5%现金缓冲。
+price_deviation_threshold: '0.02'
+extra:
+  internal_only: true
+  purpose: 为因子研究与候选策略提供统一、可复现的交易和风险口径

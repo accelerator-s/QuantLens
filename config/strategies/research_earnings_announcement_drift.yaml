@@ -1,0 +1,13 @@
+profile_name: research_earnings_announcement_drift
+display_name: 业绩公告后价格延续研究
+is_template: false
+inheritance_parent: a_share_research_base
+status: draft
+related_issue_id: ''
+created_at: '2026-08-19T00:00:00Z'
+updated_at: '2026-08-19T00:00:00Z'
+factors:
+  weighting: equal
+  items:
+  - {name: earnings_announcement_drift, weight: null, direction_override: ''}
+extra: {purpose: factor_research_only, internal_only: true}

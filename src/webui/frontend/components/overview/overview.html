@@ -1,0 +1,64 @@
+<section class="overview">
+  <div class="overview__dashboard card">
+    <div class="overview__doctor">
+      <div class="overview__score" aria-label="工作区就绪度">
+        <svg class="overview__ring" viewBox="0 0 120 120" role="img" aria-label="就绪度图表">
+          <circle class="overview__ring-track" cx="60" cy="60" r="48"></circle>
+          <circle class="overview__ring-value" cx="60" cy="60" r="48" data-readiness-ring></circle>
+        </svg>
+        <div class="overview__score-text">
+          <strong data-readiness-value>0%</strong>
+          <span>就绪度</span>
+        </div>
+      </div>
+
+      <div class="overview__doctor-main">
+        <div class="overview__doctor-head">
+          <h2>运行检查</h2>
+          
+        </div>
+        <div class="overview__chips" data-chips></div>
+        <div class="overview__diagnostic" data-diagnostic>正在检查运行环境…</div>
+      </div>
+    </div>
+
+    <div class="overview__missing" data-dirs hidden></div>
+  </div>
+
+  <div class="overview__stats" data-stat-cards></div>
+
+  <div class="overview__charts overview__charts--two">
+    <article class="overview__chart card">
+      <div class="overview__chart-head">
+        <span class="icon" data-icon="status"></span>
+        <h3>会话状态</h3>
+      </div>
+      <dl class="kv" data-session></dl>
+    </article>
+
+    <article class="overview__chart card">
+      <div class="overview__chart-head">
+        <span class="icon" data-icon="wrench"></span>
+        <h3>运行环境</h3>
+      </div>
+      <dl class="kv" data-env></dl>
+    </article>
+
+    <article class="overview__chart card">
+      <div class="overview__chart-head">
+        <span class="icon" data-icon="check"></span>
+        <h3>研究流程记录</h3>
+      </div>
+      <div class="overview__lifecycle-stats" data-lifecycle></div>
+      <p class="overview__lifecycle-note" data-lifecycle-note></p>
+    </article>
+
+    <article class="overview__chart overview__audit card">
+      <div class="overview__chart-head">
+        <span class="icon" data-icon="doc"></span>
+        <h3>最近的流程与人工确认</h3>
+      </div>
+      <div class="overview__audit-events" data-audit-events></div>
+    </article>
+  </div>
+</section>

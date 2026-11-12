@@ -1,0 +1,42 @@
+<section class="strategy">
+  <div class="tabs" data-tabs>
+    <button type="button" class="tabs__btn is-active" data-tab="profiles">策略配置</button>
+    <button type="button" class="tabs__btn" data-tab="training">多因子训练</button>
+    <button type="button" class="tabs__btn" data-tab="rules">市场规则</button>
+  </div>
+
+  <div data-panel="training" hidden>
+    <div class="toolbar">
+      <p class="toolbar__hint">选择策略配置后，系统按研究规则划分数据、滚动验证并安排锁定测试。</p>
+      <span class="toolbar__spacer"></span>
+      <button type="button" class="btn btn--primary" data-strategy-train>训练策略</button>
+    </div>
+    <div class="split">
+      <div class="item-list" data-training-list></div>
+      <div data-training-detail></div>
+    </div>
+    <div data-champion-slots></div>
+  </div>
+
+  <div data-panel="profiles">
+    <div class="toolbar">
+      <span class="toolbar__spacer"></span>
+      <button type="button" class="btn btn--primary" data-profile-create>新建策略配置</button>
+    </div>
+    <div class="split">
+      <div class="item-list" data-profile-list></div>
+      <div data-profile-detail></div>
+    </div>
+  </div>
+
+  <div data-panel="rules" hidden>
+    <div class="toolbar">
+      <span class="toolbar__spacer"></span>
+      <button type="button" class="btn btn--primary" data-rule-preset>载入预设</button>
+    </div>
+    <div class="split">
+      <div class="item-list" data-rule-list></div>
+      <div data-rule-detail></div>
+    </div>
+  </div>
+</section>

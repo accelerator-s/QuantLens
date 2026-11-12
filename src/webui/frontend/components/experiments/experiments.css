@@ -1,0 +1,270 @@
+.experiments {
+  width: 100%;
+  max-width: 1640px;
+}
+
+.experiments__filter {
+  min-width: 140px;
+}
+
+.experiments__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.evolution-card {
+  min-width: 0;
+  margin-bottom: var(--space-3);
+  padding: var(--card-pad);
+  overflow: hidden;
+}
+
+.evolution-card .table-wrap {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.experiments__evolution-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.experiments__evolution-detail > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.experiments__evolution-detail:empty {
+  display: none;
+}
+
+.experiments__logbook-head h3 {
+  margin: 0;
+}
+
+.experiments__logbook-head p {
+  margin: 2px 0 0;
+}
+
+.evolution-card > .detail-card__head {
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.evolution-card > .detail-card__head > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.evolution-card > .detail-card__head h3,
+.evolution-card > .detail-card__head p {
+  margin: 0;
+}
+
+.evolution-card > .detail-card__head p {
+  margin-top: 3px;
+}
+
+.evolution-card > .detail-card__head > .btn {
+  flex: 0 0 auto;
+  margin-left: 12px;
+  white-space: nowrap;
+}
+
+.evolution-progress {
+  min-width: 0;
+  padding: var(--card-pad);
+  overflow: hidden;
+}
+
+.evolution-progress .table-wrap {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.evolution-progress__title {
+  margin: 12px 0 6px;
+  font-size: var(--fs-xs);
+}
+
+.evolution-progress__hint {
+  margin: 0 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+
+.evolution-events {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: var(--fs-xs);
+}
+
+.evolution-events__row {
+  display: flex;
+  gap: 8px;
+}
+
+.evolution-events__time {
+  flex: none;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.evolution-progress__track {
+  width: 100%;
+  height: 6px;
+  margin: 6px 0 10px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--bg-2);
+}
+
+.evolution-progress__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.evolution-row {
+  cursor: pointer;
+}
+
+.experiments__form {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.experiments__form .input {
+  flex: 1;
+}
+
+.experiments__event-filter {
+  max-width: 200px;
+  margin-bottom: 8px;
+}
+
+.experiments__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.event {
+  padding: 8px 12px;
+  border: 1px solid var(--line-0);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+}
+
+.event__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.event__time {
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+}
+
+.event__text {
+  margin: 0;
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+}
+
+.event__subtitle {
+  margin: 6px 0 3px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+
+.event__list {
+  margin: 0 0 4px;
+  padding-left: 18px;
+  font-size: var(--fs-sm);
+}
+
+.event__list li {
+  margin: 2px 0;
+}
+
+.experiments__chain {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.chain-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+  font-size: var(--fs-sm);
+}
+
+.chain-row.is-current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chain-row__step {
+  flex: none;
+  min-width: 48px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+
+.chain-row__id {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chain-row__id:hover {
+  text-decoration: underline;
+}
+
+.chain-row__run {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+}
+
+.experiments__run-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.experiments__run-link:hover {
+  text-decoration: underline;
+}

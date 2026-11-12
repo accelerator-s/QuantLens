@@ -1,0 +1,17 @@
+profile_name: research_analyst_fy1_revision
+display_name: 分析师盈利预测研究
+is_template: false
+inheritance_parent: a_share_research_base
+status: draft
+related_issue_id: ''
+created_at: '2026-08-19T00:00:00Z'
+updated_at: '2026-08-19T00:00:00Z'
+factors:
+  weighting: equal
+  items:
+  - name: analyst_fy1_revision
+    weight: null
+    direction_override: ''
+extra:
+  purpose: factor_research_only
+  internal_only: true

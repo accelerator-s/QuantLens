@@ -1,0 +1,125 @@
+.backtest {
+  width: 100%;
+  max-width: 1640px;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.backtest .split,
+.backtest .item-list,
+.backtest .backtest__detail,
+.backtest .item-row,
+.backtest .item-list__group {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.backtest .item-list,
+.backtest .backtest__detail {
+  overflow-x: hidden;
+}
+
+.backtest .item-row > *,
+.backtest .item-list__group > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.backtest .item-row__meta > span,
+.backtest .item-list__group > span {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.item-list__group {
+  padding: 8px 10px 3px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.item-list__group-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.metric-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+  margin-top: 10px;
+}
+
+.metric-group {
+  padding: 10px 12px;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+}
+
+.metric-group > h4 {
+  margin: 0 0 8px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.metric-group__items {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 10px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.metric__label {
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+
+.metric__value {
+  margin-top: 2px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.heatmap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.heatmap__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+}
+
+.heatmap__month {
+  font-size: var(--fs-xs);
+  color: var(--ink-1);
+}
+
+.heatmap__value {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.backtest__date-select {
+  min-width: 170px;
+}

@@ -1,0 +1,13 @@
+version: 1
+profiles:
+- a_share_research_base
+- candidate_balanced_multifactor
+- candidate_value_quality_defensive
+- research_analyst_fy1_revision
+- research_earnings_announcement_drift
+- research_growth_revenue_yoy
+- research_industry_momentum_60
+- research_institutional_holding_change
+- research_quality_cashflow_assets
+- research_quality_gross_margin
+- research_reversal_5

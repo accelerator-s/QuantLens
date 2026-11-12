@@ -1,0 +1,210 @@
+/* ==========================================================================
+   量镜 · 三层设计令牌系统 (Primitive -> Semantic -> Component)
+   风格：高密度量化数据工作台 (Data-Dense Quantitative Workbench)
+   ========================================================================== */
+
+:root {
+  /* ------------------------------------------------------------------------
+     第一层：基础原子令牌 (Primitive Tokens)
+     ------------------------------------------------------------------------ */
+  --p-slate-50: #f8fafc;
+  --p-slate-100: #f1f5f9;
+  --p-slate-200: #e2e8f0;
+  --p-slate-300: #cbd5e1;
+  --p-slate-400: #94a3b8;
+  --p-slate-500: #64748b;
+  --p-slate-600: #475569;
+  --p-slate-700: #334155;
+  --p-slate-800: #1e293b;
+  --p-slate-900: #0f172a;
+  --p-slate-950: #090d16;
+
+  --p-blue-50: #eff6ff;
+  --p-blue-100: #dbeafe;
+  --p-blue-500: #3b82f6;
+  --p-blue-600: #2563eb;
+  --p-blue-700: #1d4ed8;
+  --p-blue-800: #1e40af;
+
+  --p-amber-50: #fffbeb;
+  --p-amber-100: #fef3c7;
+  --p-amber-400: #fbbf24;
+  --p-amber-600: #d97706;
+  --p-amber-700: #b45309;
+
+  --p-emerald-50: #ecfdf5;
+  --p-emerald-100: #d1fae5;
+  --p-emerald-400: #34d399;
+  --p-emerald-600: #059669;
+  --p-emerald-700: #047857;
+
+  --p-red-50: #fef2f2;
+  --p-red-100: #fee2e2;
+  --p-red-400: #f87171;
+  --p-red-600: #dc2626;
+  --p-red-700: #b91c1c;
+
+  --p-green-100: #dcfce7;
+  --p-green-400: #4ade80;
+  --p-green-700: #15803d;
+
+  /* 字体栈：无衬线数据字体 + 等宽数值字体 */
+  --font-sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Mono", "Consolas", "Liberation Mono", monospace;
+
+  /* 字号阶梯 (紧凑高信息密度) */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+
+  /* 间距尺度 (4px 基准网格) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 28px;
+
+  /* 圆角尺度 (克制、利落的金融终端圆角) */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 5px;
+  --radius-lg: 6px;
+  --radius: var(--radius-md);
+
+  /* 动效节奏 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease: var(--ease-out);
+  --dur-fast: 100ms;
+  --dur-med: 160ms;
+  --dur: var(--dur-med);
+
+  /* ------------------------------------------------------------------------
+     第二层：语义令牌 (Semantic Tokens - 浅色模式默认)
+     ------------------------------------------------------------------------ */
+  --bg-0: var(--p-slate-50);
+  --bg-1: #ffffff;
+  --bg-2: var(--p-slate-100);
+  --bg-3: var(--p-slate-200);
+
+  --ink-0: var(--p-slate-900);
+  --ink-1: var(--p-slate-700);
+  --ink-2: var(--p-slate-500);
+
+  --line-0: var(--p-slate-200);
+  --line-1: var(--p-slate-300);
+
+  --accent: var(--p-blue-800);
+  --accent-hover: var(--p-blue-700);
+  --accent-strong: var(--p-blue-800);
+  --accent-ink: #ffffff;
+  --accent-soft: var(--p-blue-50);
+
+  --focus-ring: var(--p-blue-600);
+
+  /* 状态语义色 */
+  --safe: var(--p-emerald-700);
+  --safe-soft: var(--p-emerald-50);
+  --warn: var(--p-amber-700);
+  --warn-soft: var(--p-amber-50);
+  --pending: var(--warn);
+  --pending-soft: var(--warn-soft);
+  --danger: var(--p-red-700);
+  --danger-soft: var(--p-red-50);
+
+  /* 境内证券涨跌语义色 (红涨绿跌) */
+  --up: var(--p-red-600);
+  --up-soft: var(--p-red-50);
+  --down: var(--p-green-700);
+  --down-soft: var(--p-green-100);
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.14);
+  --shadow: var(--shadow-sm);
+
+  /* 组件兼容语义映射 */
+  --bg: var(--bg-0);
+  --bg-soft: var(--bg-2);
+  --surface: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --fg: var(--ink-0);
+  --fg-soft: var(--ink-1);
+  --fg-faint: var(--ink-2);
+  --border: var(--line-0);
+  --border-strong: var(--line-1);
+
+  /* ------------------------------------------------------------------------
+     第三层：组件令牌 (Component Tokens)
+     ------------------------------------------------------------------------ */
+  --rail-w: 204px;
+  --topbar-h: 48px;
+  --control-h: 32px;
+  --card-pad: 14px 16px;
+  --table-cell-pad: 7px 10px;
+
+  /* 滚动条：淡色中性滑块，避免使用强调色造成视觉抢眼 */
+  --scroll-thumb: var(--p-slate-300);
+  --scroll-thumb-hover: var(--p-slate-400);
+}
+
+:root[data-theme="dark"] {
+  --bg-0: var(--p-slate-950);
+  --bg-1: #111827;
+  --bg-2: var(--p-slate-800);
+  --bg-3: #283548;
+
+  --ink-0: var(--p-slate-50);
+  --ink-1: var(--p-slate-300);
+  --ink-2: var(--p-slate-400);
+
+  --line-0: var(--p-slate-800);
+  --line-1: var(--p-slate-700);
+
+  --accent: var(--p-blue-500);
+  --accent-hover: var(--p-blue-600);
+  --accent-strong: var(--p-blue-500);
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(59, 130, 246, 0.16);
+
+  --focus-ring: var(--p-blue-500);
+
+  --safe: var(--p-emerald-400);
+  --safe-soft: rgba(52, 211, 153, 0.14);
+  --warn: var(--p-amber-400);
+  --warn-soft: rgba(251, 191, 36, 0.15);
+  --pending: var(--warn);
+  --pending-soft: var(--warn-soft);
+  --danger: var(--p-red-400);
+  --danger-soft: rgba(248, 113, 113, 0.15);
+
+  --up: var(--p-red-400);
+  --up-soft: rgba(248, 113, 113, 0.15);
+  --down: var(--p-green-400);
+  --down-soft: rgba(74, 222, 128, 0.15);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.65);
+  --shadow: var(--shadow-sm);
+
+  /* 深色模式下的滚动条滑块同样保持淡色中性，避免高亮 */
+  --scroll-thumb: var(--p-slate-600);
+  --scroll-thumb-hover: var(--p-slate-500);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

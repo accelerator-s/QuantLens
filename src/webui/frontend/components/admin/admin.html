@@ -1,0 +1,28 @@
+<section class="admin">
+  <div class="admin__grid">
+    <article class="card detail-card">
+      <div class="detail-card__head"><h3>会话设置</h3></div>
+      <div data-session></div>
+      <div class="toolbar">
+        <button type="button" class="btn btn--primary" data-market-set>切换市场</button>
+        <button type="button" class="btn btn--ghost" data-fee-set>设置费率</button>
+      </div>
+    </article>
+
+    <article class="card detail-card">
+      <div class="detail-card__head"><h3>工作区维护</h3></div>
+      <p class="item-row__meta">补齐目录可以放心重复执行；清理回收站会永久删除，无法找回。</p>
+      <div class="toolbar">
+        <button type="button" class="btn btn--primary" data-doctor-init>补齐工作区目录</button>
+        <button type="button" class="btn btn--ghost" data-memory-config>记忆服务配置</button>
+        <button type="button" class="btn btn--danger" data-trash-purge>清理回收站</button>
+      </div>
+    </article>
+  </div>
+
+  <article class="card detail-card">
+    <div class="detail-card__head"><h3>数据源</h3></div>
+    <p class="item-row__meta">查看已配置的数据源。</p>
+    <div data-providers></div>
+  </article>
+</section>

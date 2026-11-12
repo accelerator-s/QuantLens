@@ -1,0 +1,22 @@
+profile_name: candidate_balanced_multifactor
+display_name: 稳健质量景气候选策略
+is_template: false
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items:
+  - {name: value_defensive_quality_v2, weight: null, direction_override: ''}
+  - {name: quality_cashflow_assets, weight: null, direction_override: ''}
+  - {name: analyst_fy1_revision, weight: null, direction_override: ''}
+  - {name: industry_momentum_60, weight: null, direction_override: ''}
+standardization_chain:
+- {step: winsorize, lower_pct: '0.01', upper_pct: '0.99'}
+- {step: industry_neutral, industry_source: P0221}
+- {step: size_neutral, size_field: log_mktcap}
+- {step: zscore}
+extra:
+  internal_only: false
+  purpose: 多因子训练起点，交由 AI 逐类修改并执行因子剔除实验
+  hypothesis: 价值与经营现金流提供基本面支撑，盈利预测修正反映信息扩散，行业趋势反映景气位置；四类来源有望降低单一风格失效风险
+  production_ready: false

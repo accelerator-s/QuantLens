@@ -1,0 +1,17 @@
+profile_name: research_quality_gross_margin
+display_name: 毛利率质量研究
+is_template: false
+inheritance_parent: a_share_research_base
+status: draft
+related_issue_id: ''
+created_at: '2026-08-19T00:00:00Z'
+updated_at: '2026-08-19T00:00:00Z'
+factors:
+  weighting: equal
+  items:
+  - name: quality_gross_margin
+    weight: null
+    direction_override: ''
+extra:
+  purpose: factor_research_only
+  internal_only: true

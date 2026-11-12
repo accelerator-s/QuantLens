@@ -1,0 +1,395 @@
+version: 1
+factors:
+- name: analyst_fy1_revision
+  display_name: 分析师盈利预测上调
+  assumption: 预期修正假设：多机构覆盖下 FY1 净利润一致预期上调的公司短中期可能继续表现
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - consensus_fy1_mean
+  - consensus_fy1_coverage
+  output_frequency: daily
+  direction: positive
+  parameters:
+    lookback_days: 20
+    min_coverage: 2
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 机构覆盖存在样本选择偏差，且 FY1 切换日附近需单独检查
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - coverage
+  - turnover
+  - decay
+  status: draft
+  version: v1
+  code_hash: e7130e2de65029be
+  plugin_path: factors/analyst_fy1_revision.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T00:00:00Z'
+- name: earnings_announcement_drift
+  display_name: 业绩公告后价格延续
+  assumption: 公告事件假设：PIT 可见的 TTM 归母净利润更新幅度在披露后 20 日可能继续被市场消化
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - net_profit_ttm_parent
+  output_frequency: daily
+  direction: positive
+  parameters:
+    post_event_days: 20
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 仅以披露日 PIT 更新为事件，不使用未来报告期；极端基数需缩尾
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - event_decay
+  - turnover
+  status: draft
+  version: v1
+  code_hash: 715326cf6789d38b
+  plugin_path: factors/earnings_announcement_drift.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T00:00:00Z'
+- name: growth_revenue_yoy
+  display_name: 营收增长
+  assumption: PIT 可见的营业收入同比增长可能代表企业景气上行
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - revenue
+  output_frequency: daily
+  direction: positive
+  parameters:
+    year_days: 252
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 累计口径、披露节奏和基数效应需通过年度稳定性检查
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - annual_stability
+  - decay
+  status: draft
+  version: v1
+  code_hash: 414916a6ec9e9d65
+  plugin_path: factors/growth_revenue_yoy.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T00:00:00Z'
+- name: industry_momentum_60
+  display_name: 行业景气趋势
+  assumption: 行业景气假设：PIT 行业分类下过去 60 日整体强势的行业可能延续景气和资金趋势
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - adj_close_wd
+  - industry_code
+  output_frequency: daily
+  direction: positive
+  parameters:
+    lookback_days: 60
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 行业分类变更必须按生效日 PIT 展开，行业反转期可能快速失效
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - regime
+  - decay
+  status: draft
+  version: v1
+  code_hash: 42072892b328631e
+  plugin_path: factors/industry_momentum_60.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T00:00:00Z'
+- name: institutional_holding_change
+  display_name: 机构增持变化
+  assumption: 资金行为假设：长线机构持股比例环比增加可能代表基本面认可上升
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - inst_longline_chg
+  output_frequency: daily
+  direction: positive
+  parameters: {}
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 股东披露低频且滞后，只能按披露日 PIT 生效，并需控制换手
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - coverage
+  - turnover
+  - decay
+  status: draft
+  version: v1
+  code_hash: e61b07855dee52e9
+  plugin_path: factors/institutional_holding_change.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T00:00:00Z'
+- name: lower_shadow_volskew_30d
+  display_name: 下影线量能偏度
+  assumption: 下影线承接假设：个股出现异常长的下影线，且成交量变化分布偏负（少数放量日主导），同时价格仍高于 30 日均线时，可能代表盘中抛压被承接、筹码交换后继续上行；若该形态只集中在流动性尾部，或扣费后无法跑赢同池等权基准，则假设失效。
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - open
+  - high
+  - low
+  - close
+  - volume
+  - amount
+  - adj_close_wd
+  - is_trading
+  - listed_days
+  output_frequency: daily
+  direction: undecided
+  parameters:
+    lookback_days: 30
+    pool_days: 20
+    pool_size: 500
+    min_listed_days: 120
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 下影线是稀疏变量，零值占比高，截面排名会出现大量并列；因子自带成交额前 500 股池，池外为 NaN，超额收益基准仍是策略 universe
+    等权，与原始研报的 top500 基准不完全一致；原始版本未做行业/市值中性。
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - coverage
+  - turnover
+  - decay
+  - regime
+  status: draft
+  version: v1
+  code_hash: 5e9ea20a42d43ddd
+  plugin_path: factors/lower_shadow_volskew_30d.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-11-12T06:19:38.855456Z'
+  updated_at: '2026-11-12T06:19:38.873433Z'
+- name: quality_cashflow_assets
+  display_name: 经营现金流质量
+  assumption: 经营现金流相对资产更高的公司利润质量和财务韧性可能更强
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - cfo_net
+  - total_assets
+  output_frequency: daily
+  direction: positive
+  parameters: {}
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 现金流累计口径季节性强，需与 TTM 变体分开评价
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - annual_stability
+  - decay
+  status: draft
+  version: v1
+  code_hash: 904e67e50f614928
+  plugin_path: factors/quality_cashflow_assets.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T00:00:00Z'
+- name: quality_gross_margin
+  display_name: 毛利率质量
+  assumption: 盈利能力假设：较高 TTM 毛利率可能代表产品议价权和竞争优势
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - gross_margin_ttm
+  output_frequency: daily
+  direction: positive
+  parameters: {}
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 行业间天然差异大，行业中性化是必测变体
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - decay
+  - stability
+  status: draft
+  version: v1
+  code_hash: d667c117cec4ab6a
+  plugin_path: factors/quality_gross_margin.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T00:00:00Z'
+- name: reversal_5
+  display_name: 短期超跌反弹
+  assumption: 短期过度反应后近 5 日弱势股可能均值回归
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - adj_close_wd
+  output_frequency: daily
+  direction: positive
+  parameters:
+    lookback_days: 5
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 趋势市中可能持续失效，需市场状态变体
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - turnover
+  - regime
+  status: draft
+  version: v1
+  code_hash: 72f57b1f93ded057
+  plugin_path: factors/reversal_5.py
+  last_evaluated_at: null
+  decay_history: []
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T00:00:00Z'
+- name: value_defensive_quality_v2
+  display_name: 价值盈利防御
+  assumption: 金融现象假设：当期盈利相对购买价格较高、资产使用效率较好且价格波动较低的公司，可能同时受益于价值重估、经营质量和防御性需求；若溢价只来自低波动风格拥挤或周期顶点的会计盈利，则该传导链应在后续样本失效
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: monthly
+  dependencies:
+  - net_profit_ttm_parent
+  - total_assets
+  - mktcap_total
+  - ret_wd
+  output_frequency: daily
+  direction: positive
+  parameters:
+    component_weighting: equal
+    volatility_days: 60
+    parent_factor: value_defensive_quality
+    only_change: remove_low_leverage
+  standardization:
+  - industry_neutral
+  - size_neutral
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: 该版本仅移除验证期无增量的低杠杆分项；与盈利收益率及父版信号相关性较高，成本化集中持仓未通过回撤门槛。保持 draft，不开封锁定测试、不获得生产权限
+  evaluation_metrics:
+  - ic
+  - grouped_return
+  - annual_stability
+  - turnover
+  - drawdown
+  - ablation
+  status: draft
+  version: v2
+  code_hash: a7121caeb70e6604
+  plugin_path: factors/value_defensive_quality_v2.py
+  last_evaluated_at: '2026-08-19T07:58:02.198550Z'
+  decay_history:
+  - run_id: EVAL-20260819-075348
+    period: 2016-01-01..2020-12-31
+    return_field: ret_wd
+    primary_horizon: 20
+    ic_mean_raw: 0.076112
+    neutralization_comparison:
+      raw:
+        ic_mean: 0.076112
+        icir: 0.488404
+        icir_annualized: 1.705923
+        win_rate: 0.704433
+        n_valid_days: 1218
+      industry_size:
+        ic_mean: 0.074559
+        icir: 0.829618
+        icir_annualized: 2.89773
+        win_rate: 0.812808
+        n_valid_days: 1218
+  - run_id: EVAL-20260819-075609
+    period: 2021-01-01..2024-12-31
+    return_field: ret_wd
+    primary_horizon: 20
+    ic_mean_raw: 0.058629
+    neutralization_comparison:
+      raw:
+        ic_mean: 0.058629
+        icir: 0.317386
+        icir_annualized: 1.108582
+        win_rate: 0.588235
+        n_valid_days: 969
+      industry_size:
+        ic_mean: 0.053522
+        icir: 0.441579
+        icir_annualized: 1.542368
+        win_rate: 0.627451
+        n_valid_days: 969
+  related_issue_id: ''
+  created_at: '2026-08-19T00:00:00Z'
+  updated_at: '2026-08-19T07:58:02.228400Z'

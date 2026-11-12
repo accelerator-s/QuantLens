@@ -1,0 +1,8 @@
+profile_name: research_quality_cashflow_assets
+display_name: 经营现金流质量研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items: [{name: quality_cashflow_assets, weight: null, direction_override: ''}]
+extra: {purpose: factor_research_only, internal_only: true}
