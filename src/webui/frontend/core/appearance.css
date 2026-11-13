@@ -91,7 +91,7 @@ button, input, select, textarea { font-family: var(--font-sans); }
   flex-shrink: 0;
   stroke-width: var(--icon-stroke);
 }
-.section-title .icon { width: var(--icon-md); height: var(--icon-md); }
+.section-title .icon { width: var(--icon-md); height: var(--icon-md); color: var(--text-blue); }
 .rail__icon svg, .rail__mark svg, .section-title .icon svg {
   width: var(--icon-md);
   height: var(--icon-md);
