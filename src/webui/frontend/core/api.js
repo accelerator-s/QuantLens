@@ -3,6 +3,7 @@
 
 
 import { fetchApi } from './page-cache.js';
+import { requestChat } from './chat-request.js';
 
 async function request(method, path, body) {
   const opts = { method, headers: {} };
@@ -108,7 +109,7 @@ export const api = {
   factorTransition: (name, payload) =>
     request("POST", `/api/factors/${name}/transition`, payload),
   factorRemove: (name, payload) => request("POST", `/api/factors/${name}/remove`, payload),
-  factorResearchChat: (payload) => request("POST", "/api/factors/chat", payload),
+  factorResearchChat: (payload, options) => requestChat("/api/factors/chat", payload, options),
   factorResearchStart: (payload) => request("POST", "/api/factors/chat/research", payload),
   factorEvalRuns: (name) => request("GET", `/api/factors/${name}/eval-runs`),
   factorEvalRun: (name, runId) => request("GET", `/api/factors/${name}/eval-runs/${runId}`),
@@ -122,7 +123,7 @@ export const api = {
   strategyTransition: (name, payload) =>
     request("POST", `/api/strategies/${name}/transition`, payload),
   strategyDelete: (name, payload) => request("POST", `/api/strategies/${name}/delete`, payload),
-  strategyChat: (payload) => request("POST", "/api/strategies/chat", payload),
+  strategyChat: (payload, options) => requestChat("/api/strategies/chat", payload, options),
   strategyChatFinalize: (payload) => request("POST", "/api/strategies/chat/finalize", payload),
   strategyEvolutions: () => request("GET", "/api/strategy-evolution"),
   strategyEvolution: (id) => request("GET", `/api/strategy-evolution/${id}`),

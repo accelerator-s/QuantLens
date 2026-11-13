@@ -54,12 +54,12 @@ export async function openStrategyChat(ctx, { onYaml, profileName = "" }) {
     greeting: profileName
       ? "说说要改哪些地方，其余设置保持不变。"
       : "想用哪些因子、持有多久、怎么控制风险？",
-    send: async (history) => {
+    send: async (history, options) => {
       const res = await ctx.api.strategyChat({
         model: modelSelect.value || "",
         profile_name: profileName,
         messages: history,
-      });
+      }, options);
       return { text: res.reply, reasoning: res.reasoning || "", model: res.model || "" };
     },
   });

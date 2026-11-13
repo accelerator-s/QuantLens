@@ -307,11 +307,11 @@ async function mountContent(root, ctx) {
       greeting:
         "描述你观察到的现象，一起讨论它的原因、作用时间和失效条件。",
       placeholder: "填写想验证的现象或假设…",
-      send: async (history) => {
+      send: async (history, options) => {
         const res = await ctx.api.factorResearchChat({
           model: modelSelect.value,
           messages: history,
-        });
+        }, options);
         return { text: res.reply, reasoning: res.reasoning || "", model: res.model || modelSelect.value };
       },
     });
