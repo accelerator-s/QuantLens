@@ -34,14 +34,21 @@ class FrontendContracts(unittest.TestCase):
             with self.subTest(method=method, path=path):
                 self.assertIn((method, normalize(path)), self.routes)
 
-    def test_lens_api_methods_exist_on_backend(self):
-        source = (FRONTEND / 'components/lens/lens.js').read_text()
-        calls = re.findall(r"\bapi\((['\"`])(/.+?)\1\s*([,)])", source)
-        self.assertGreater(len(calls), 25)
-        for _, path, ending in calls:
-            method = 'POST' if ending == ',' else 'GET'
-            with self.subTest(method=method, path=path):
-                self.assertIn((method, normalize('/api/lens' + path)), self.routes)
+    def test_serving_api_methods_exist_on_backend(self):
+        source=(FRONTEND/'components/lens/lens.js').read_text()
+        calls=re.findall(r"request\((['\"`])(/.+?)\1\s*([,)])",source)
+        self.assertGreater(len(calls),15)
+        for _,path,ending in calls:
+            method='POST' if ending==',' else 'GET'
+            self.assertIn((method,normalize('/api'+path)),self.routes)
+
+    def test_six_navigation_routes_and_no_removed_pages(self):
+        source=(FRONTEND/'components/rail/rail.html').read_text()
+        routes=re.findall(r'data-route="([^"]+)"',source)
+        self.assertEqual(routes,['dashboard','screen','factors','backtest','portfolio','settings'])
+        app=(FRONTEND/'app.js').read_text()
+        self.assertNotIn("'models'",app)
+        self.assertNotIn("'assistant'",app.split('initTheme();')[0])
 
     def test_components_only_call_defined_shared_api_methods(self):
         source = (FRONTEND / 'core/api.js').read_text()

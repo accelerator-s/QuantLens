@@ -1,5 +1,5 @@
 /* ==========================================================================
-   量镜 · 市场分析与实验中心样式 (components/lens/lens.css)
+   投研工坊 · 市场分析与实验中心样式 (components/lens/lens.css)
    风格：高密度量化数据工作台
    ========================================================================== */
 
@@ -145,7 +145,7 @@
 .ql-form input,
 .ql-form select,
 .ql-form textarea,
-.ql-page button,
+.ql-page button:not(.btn),
 .ql-card a[download] {
   min-height: var(--control-h);
   border-radius: var(--radius-sm);
@@ -173,9 +173,11 @@
   line-height: 1.5;
 }
 
-.ql-page button,
+.ql-page button:not(.btn),
 .ql-card a[download] {
   cursor: pointer;
+  padding-top: 4.5px;
+  padding-bottom: 5.5px;
   background: var(--accent);
   color: var(--accent-ink);
   border-color: var(--accent);
@@ -190,18 +192,18 @@
     border-color var(--dur-fast) var(--ease-out);
 }
 
-.ql-page button:hover:not(:disabled),
+.ql-page button:not(.btn):hover:not(:disabled),
 .ql-card a[download]:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
 
-.ql-page button:disabled {
+.ql-page button:not(.btn):disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.ql-page td button {
+.ql-page td button:not(.btn) {
   min-height: 26px;
   padding: 3px 8px;
   font-size: var(--fs-xs);
@@ -210,7 +212,7 @@
   border-color: var(--line-1);
 }
 
-.ql-page td button:hover:not(:disabled) {
+.ql-page td button:not(.btn):hover:not(:disabled) {
   background: var(--bg-2);
   color: var(--ink-0);
   border-color: var(--ink-2);
@@ -307,6 +309,39 @@
   white-space: pre-wrap;
 }
 
+.ql-task-dialog {
+  width: min(800px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  color: var(--ink-0);
+  box-shadow: var(--shadow-lg);
+  overflow: auto;
+}
+
+.ql-task-dialog::backdrop {
+  background: rgb(9 13 22 / 52%);
+}
+
+.ql-task-dialog [data-job-content] {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ql-task-dialog .ql-log {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ql-task-dialog .ql-task-error,
+.ql-task-dialog .ql-task-error .ql-log {
+  color: var(--danger);
+}
+
 @media (max-width: 900px) {
   .ql-head {
     flex-direction: column;
@@ -329,4 +364,73 @@
     break-inside: avoid;
     box-shadow: none;
   }
+}
+
+.ql-attention-scroll { max-height: 240px; overflow: auto; scrollbar-gutter: stable; }
+.ql-attention-scroll .ql-table-wrap { overflow: visible; }
+.ql-attention-scroll th { position: sticky; top: 0; z-index: 1; background: var(--bg-1); }
+
+.ql-page[data-pane="dashboard"] > .ql-dashboard-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--space-3);
+}
+.ql-dashboard-row > .ql-card {
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+.ql-dashboard-row > .ql-dashboard-market {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.ql-dashboard-scroll {
+  min-width: 0;
+  min-height: 0;
+  max-height: 240px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.ql-dashboard-scroll > .ql-table-wrap {
+  max-height: none;
+  overflow: visible;
+}
+.ql-dashboard-row--activity .ql-dashboard-scroll { max-height: 220px; }
+.ql-dashboard-market [data-market-chart] { min-width: 0; }
+.ql-dashboard-row > .ql-card {
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+.ql-dashboard-row .ql-card > header { padding-bottom: 10px; }
+.ql-dashboard-row .ql-table-wrap { border: 0; border-radius: 0; }
+.ql-dashboard-row .ql-table :is(th, td) { padding: 9px 12px; }
+.ql-dashboard-row .ql-table th {
+  background: var(--bg-0);
+  font-weight: 500;
+  letter-spacing: .02em;
+}
+.ql-dashboard-row .ql-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-0) 40%, var(--bg-1));
+}
+.ql-dashboard-row .ql-table tbody tr:hover td { background: var(--accent-soft); }
+.ql-dashboard-row .ql-table td:first-child { font-weight: 500; }
+.ql-dashboard-quality .ql-table :is(th, td):last-child {
+  width: 84px;
+  white-space: nowrap;
+  text-align: center;
+}
+.ql-dashboard-quality .badge { min-width: 48px; justify-content: center; }
+.ql-dashboard-market .chart { padding-top: 4px; }
+.ql-dashboard-market .chart__line { stroke-width: 1.65; vector-effect: non-scaling-stroke; }
+.ql-dashboard-market .chart__grid { opacity: .65; }
+.ql-dashboard-market .chart__zero { opacity: 1; stroke-dasharray: none; }
+.ql-dashboard-market .chart__tip { border-radius: 8px; padding: 10px 12px; }
+.ql-market-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+.ql-market-summary strong { color: var(--ink-0); font-weight: 600; }
+.ql-market-summary .ql-market-up { color: var(--up); }
+.ql-market-summary .ql-market-down { color: var(--down); }
+
+@media (max-width: 1000px) {
+  .ql-page[data-pane="dashboard"] > .ql-dashboard-row { grid-template-columns: minmax(0, 1fr); }
 }

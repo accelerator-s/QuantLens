@@ -43,7 +43,7 @@ class CapabilityMatrix(BaseModel):
             message=f"矩阵中未声明任务：{name}",
             context={"task": name},
             blocking=True,
-            suggested_action="先通过 framework issue 在矩阵中加入该任务。",
+            suggested_action="先在任务配置中声明该任务。",
         )
 
     def task_names(self) -> list[str]:
@@ -85,7 +85,7 @@ def _validate_matrix(matrix: CapabilityMatrix) -> None:
                     suggested_action="在 tags: 顶层列表中加入该标签，或修正任务声明。",
                 )
         for ex in t.permitted_executors:
-            if ex not in {"api_model", "external_ide_ai", "human", "mixed"}:
+            if ex not in {"api_model", "human", "mixed"}:
                 raise QuantTrainingError(
                     code="AI_MATRIX_BAD_EXECUTOR",
                     message=f"任务 {t.task} 的执行者类型非法：{ex}",

@@ -21,6 +21,17 @@ CREATE TABLE IF NOT EXISTS webui_tasks (
 )
 """
 
+def task_category(record: dict) -> str:
+    if record.get("category"):
+        return record["category"]
+    name = str(record.get("name") or "")
+    if name.startswith("data-sync:"):
+        return "data_sync"
+    if name in {"分层因子研究批次", "重建研究缓存"} or name.startswith(("factor-evolution:", "strategy-evolution:")):
+        return "research"
+    return "other"
+
+
 class TaskReporter:
 
     def __init__(self, manager: "TaskManager", record: dict[str, Any]) -> None:
@@ -229,6 +240,7 @@ class TaskManager:
         fn: Callable[[TaskReporter], Any],
         *,
         resource: str = "",
+        category: str = "",
     ) -> str:
         task_id = f"task-{uuid.uuid4().hex[:8]}"
         record: dict[str, Any] = {
@@ -236,13 +248,14 @@ class TaskManager:
             "name": name,
             "status": "running",
             "resource": resource,
+            "category": category or task_category({"name": name}),
             "log": [],
             "error": "",
             "result": None,
             "progress": {
                 "state": "queued",
                 "percent": 0.0,
-                "step": "准备同步",
+                "step": "准备同步" if (category or task_category({"name": name})) == "data_sync" else "等待执行",
                 "step_index": 0,
                 "step_total": 0,
             },
@@ -309,13 +322,14 @@ class TaskManager:
                 )
             return {**record, "log": list(record["log"]), "progress": dict(record["progress"])}
 
-    def latest(self, *, resource: str, running_only: bool = False) -> dict[str, Any] | None:
+    def latest(self, *, resource: str | None = None, running_only: bool = False, category: str | None = None) -> dict[str, Any] | None:
         
         with self._lock:
             matches = [
                 record
                 for record in self._tasks.values()
-                if record.get("resource") == resource
+                if (resource is None or record.get("resource") == resource)
+                and (category is None or task_category(record) == category)
                 and (not running_only or record["status"] == "running")
             ]
             if not matches:

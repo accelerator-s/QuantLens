@@ -1,0 +1,10 @@
+label_version: v1
+horizons:
+- 1
+- 5
+- 10
+- 20
+entry_offset: 1
+exit_offset: horizon+1
+price_field: adj_close
+benchmark: universe_equal_weight

@@ -11,7 +11,7 @@
 .rail__brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 4px 8px 10px;
   border-bottom: 1px solid var(--line-0);
 }
@@ -34,6 +34,7 @@
 }
 
 .rail__brand-text {
+  flex: 1;
   min-width: 0;
 }
 
@@ -42,6 +43,7 @@
   font-weight: 700;
   color: var(--ink-0);
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .rail__ver {
@@ -49,6 +51,8 @@
   color: var(--ink-2);
   font-family: var(--font-mono);
   margin-top: 2px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .rail__groups {

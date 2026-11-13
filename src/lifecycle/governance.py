@@ -11,10 +11,8 @@ class ChampionPolicy(BaseModel):
 
     min_shadow_observations: int = Field(ge=1, le=252)
     shadow_observation_days: int = Field(ge=1, le=252)
-    min_challenger_net_excess_return: float = Field(ge=-1, le=1)
-    max_cost_rate_increase: float = Field(ge=0, le=1)
-    max_drawdown_worsening: float = Field(ge=0, le=1)
-    max_turnover_increase: float = Field(ge=0)
+    ranking: str = 'protocol_objective'
+    tie_breakers: list[str] = Field(default_factory=lambda:['max_drawdown','annualized_turnover_oneside'])
 
 def load_champion_policy() -> ChampionPolicy:
     path = workspace().config / "champion_policy.yaml"

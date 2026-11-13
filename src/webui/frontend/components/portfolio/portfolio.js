@@ -1,3 +1,5 @@
+import {mountTabs} from '../../core/tabs.js';
+import {mount as mountLens} from '../lens/lens.js';
 import {labelText} from "../../core/labels.js";
 import { renderState } from "../state-card/state-card.js";
 import { runWithConfirm } from "../confirm-dialog/confirm-dialog.js";
@@ -38,8 +40,9 @@ const COMPARE_METRIC_LABELS = [
 ];
 
 
-export async function mount(root, ctx) {
+async function mountContent(root, ctx) {
   await hydrateIcons(root);
+  const stockCell = code => { const link=el('button','ql-link',code);link.type='button';link.addEventListener('click',()=>{ctx.stock=code;ctx.bus.emit('route','stocks');});return link; };
 
   const accountMeta = root.querySelector("[data-account-meta]");
   const accountCard = root.querySelector("[data-account-card]");
@@ -66,8 +69,9 @@ export async function mount(root, ctx) {
     },
   });
 
-  let currentAccount = "";
+  let currentAccount = ctx.accountId || "";
   let accounts = [];
+  let defaultAccountId = '';
   let loaded = new Set();
   let tradesOffset = 0;
   let tradesTotal = 0;
@@ -79,6 +83,7 @@ export async function mount(root, ctx) {
     emptyLabel: "（无账户）",
     onChange: (id) => {
       currentAccount = id;
+      ctx.accountId = id;
       resetAndLoad();
     },
   });
@@ -110,7 +115,10 @@ export async function mount(root, ctx) {
     try {
       const data = await ctx.api.accounts();
       accounts = data.items || [];
+      defaultAccountId = data.default_account_id || '';
       if (!accounts.length) {
+        currentAccount = "";
+        ctx.accountId = "";
         tabsBar.hidden = true;
         panels.forEach((p) => {
           p.hidden = true;
@@ -129,11 +137,12 @@ export async function mount(root, ctx) {
       tabsBar.hidden = false;
       const options = accounts.map((a) => ({
         value: a.account_id,
-        label: a.alias ? `${a.account_id}（${a.alias}）` : a.account_id,
+        label: a.alias || a.account_id,
       }));
-      accountSelect.setOptions(options, currentAccount);
+      accountSelect.setOptions(options, currentAccount || defaultAccountId);
       if (force || !currentAccount || !accounts.some((a) => a.account_id === currentAccount)) {
         currentAccount = accountSelect.value;
+        ctx.accountId = currentAccount;
         resetAndLoad();
       }
     } catch (err) {
@@ -166,8 +175,8 @@ export async function mount(root, ctx) {
     accountMeta.textContent = `${labelText(account.market)} / ${labelText(account.instrument_class)}`;
     const card = el("article", "card detail-card");
     const head = el("div", "detail-card__head");
-    head.append(el("h3", "", account.account_id));
-    if (account.alias) head.append(el("span", "item-row__meta", account.alias));
+    head.append(el("h3", "", account.alias || account.account_id));
+    if (account.account_id === defaultAccountId) head.append(badge('默认账户', 'accent'));
     head.append(badge(account.market, "accent"), badge(account.instrument_class, "muted"));
     card.append(head);
     const cashNode = el("span", "tag-badges");
@@ -180,6 +189,7 @@ export async function mount(root, ctx) {
         ["记账币种", account.reporting_currency],
         ["现金", cashNode],
         ["券商", account.broker],
+        ["科创板权限", account.star_market_enabled ? "已开通" : "未开通"],
         ["重置次数", String(account.reinit_count ?? 0)],
         ["创建时间", fmtTime(account.created_at)],
         ["备注", account.notes],
@@ -192,6 +202,10 @@ export async function mount(root, ctx) {
       writeOps.cashSet(account.account_id, account.reporting_currency),
     );
     actions.append(cashBtn);
+    const editBtn = el("button", "btn btn--ghost", "修改账户");
+    editBtn.type = "button";
+    editBtn.addEventListener("click", () => writeOps.editAccount(account));
+    actions.append(editBtn);
     const archiveBtn = el("button", "btn btn--ghost", "归档账户");
     archiveBtn.type = "button";
     archiveBtn.addEventListener("click", () => writeOps.archiveAccount(account.account_id));
@@ -229,7 +243,7 @@ export async function mount(root, ctx) {
       hosts.holdings.append(
         tableEl(
           [
-            { key: "instrument_id", label: "标的" },
+            { key: "instrument_id", label: "标的", format: stockCell },
             { key: "side", label: "方向", format: (v) => badge(v, "muted") },
             { key: "qty", label: "数量", num: true, format: (v) => fmtNum(v, 0) },
             { key: "available_qty", label: "可用", num: true, format: (v) => fmtNum(v, 0) },
@@ -394,7 +408,7 @@ export async function mount(root, ctx) {
     card.append(
       head,
       kvEl([
-        ["已保存的策略版本", plan.strategy_version_id],
+        ["策略方案", plan.strategy_version_id],
         ["数据快照", plan.data_snapshot_id],
         ["交易日", plan.trading_date],
         ["执行窗口", plan.execution_window],
@@ -406,7 +420,7 @@ export async function mount(root, ctx) {
       card.append(
         tableEl(
           [
-            { key: "instrument_id", label: "标的" },
+            { key: "instrument_id", label: "标的", format: stockCell },
             { key: "side", label: "方向", format: (v) => badge(v) },
             { key: "quantity", label: "数量", num: true, format: (v) => fmtNum(v, 0) },
             { key: "reference_price", label: "参考价", num: true, format: (v) => fmtNum(v, 4) },
@@ -608,7 +622,7 @@ export async function mount(root, ctx) {
       wrap.append(
         tableEl(
           [
-            { key: "instrument_id", label: "标的" },
+            { key: "instrument_id", label: "标的", format: stockCell },
             { key: "side", label: "方向", format: (v) => badge(v, "muted") },
             { key: "qty", label: "数量", num: true, format: (v) => fmtNum(v, 0) },
             { key: "weight", label: "权重", num: true, format: (v) => (v == null ? "—" : fmtPct(v)) },
@@ -625,7 +639,7 @@ export async function mount(root, ctx) {
       wrap.append(
         tableEl(
           [
-            { key: "instrument_id", label: "标的" },
+            { key: "instrument_id", label: "标的", format: stockCell },
             {
               key: "action",
               label: "动作",
@@ -678,7 +692,7 @@ export async function mount(root, ctx) {
   async function renderComparison(host, payload) {
     host.innerHTML = "";
     const box = el("div", "portfolio__compare");
-    box.append(el("h4", "", "资金口径对比（历史模拟，非预测）"));
+    box.append(el("h4", "", "资金规模对比（历史模拟）"));
     const win = payload.window || {};
     box.append(
       kvEl([
@@ -806,7 +820,7 @@ export async function mount(root, ctx) {
       card.append(head);
       card.append(
         kvEl([
-          ["对账口径", "成交推导、当前持仓与最新快照"],
+          ["对账依据", "成交记录推算、当前持仓与最新快照"],
           ["有快照", data.has_snapshot ? "是" : "否"],
           ["重置断点", data.since_reinit ? fmtTime(data.since_reinit) : "（无）"],
         ]),
@@ -817,7 +831,7 @@ export async function mount(root, ctx) {
         card.append(
           tableEl(
             [
-              { key: "instrument_id", label: "标的" },
+              { key: "instrument_id", label: "标的", format: stockCell },
               { key: "side", label: "方向", format: (v) => badge(v, "muted") },
               { key: "derived_qty", label: "成交推导", num: true, format: (v) => fmtNum(v, 0) },
               { key: "holdings_qty", label: "持仓表", num: true, format: (v) => fmtNum(v, 0) },
@@ -845,7 +859,7 @@ export async function mount(root, ctx) {
           tableEl(
             [
               { key: "window", label: "标签区间" },
-              { key: "strategy", label: "策略版本" },
+              { key: "strategy", label: "策略方案" },
               { key: "realized", label: "实际收益", num: true, format: (v) => fmtPct(v) },
               { key: "signal", label: "信号", num: true, format: (v) => fmtPct(v) },
               { key: "constraint", label: "约束", num: true, format: (v) => fmtPct(v) },
@@ -914,3 +928,5 @@ export async function mount(root, ctx) {
     }
   }
 }
+
+export async function mount(root,ctx) { const html=root.innerHTML; await mountTabs(root,ctx,'portfolio',[{id:'candidates',label:'候选池',pane:'candidates',mount:mountLens},{id:'holdings',label:'持仓',html,mount:mountContent},{id:'attribution',label:'归因',pane:'attribution',mount:mountLens}]); }

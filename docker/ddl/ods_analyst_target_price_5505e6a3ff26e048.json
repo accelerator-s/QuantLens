@@ -1,0 +1,90 @@
+{
+  "table": "analyst_target_price",
+  "schema_version": "5505e6a3ff26e048",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "source_record_key",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "report_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "report_date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "price_term",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "publish_date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "target_price_max",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "target_price_min",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "downloaded_at",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "publish_date_source",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "institution_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "institution_name",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "analyst_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "analyst_name",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    }
+  ]
+}

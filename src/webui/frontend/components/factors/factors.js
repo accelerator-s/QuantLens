@@ -1,10 +1,12 @@
+import {mountTabs} from '../../core/tabs.js';
 import { renderState } from "../state-card/state-card.js";
 import { runWithConfirm } from "../confirm-dialog/confirm-dialog.js";
 import { createChat } from "../chat-stream/chat-stream.js";
+import { createChatDialog } from "../chat-stream/chat-dialog.js";
 import { hydrateIcons } from "../../core/icons.js";
 import { createSelect } from "../../core/select.js";
 import { toastError } from "../../core/toast.js";
-import { updateTaskLog } from "../../core/task-log.js";
+import { captureLogScroll, updateTaskLog } from "../../core/task-log.js";
 import { badge, fmtNum, fmtPct, fmtTime } from "../../core/fmt.js";
 import { el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
 
@@ -31,14 +33,10 @@ const TASK_STATUS_LABEL = {
   interrupted: "已中断",
 };
 const EVAL_STATE_LABEL = { running: "评价中", completed: "已完成", failed: "失败" };
-const EVAL_VARIANT_LABEL = {
-  raw: "原始口径",
-  industry: "剔除行业影响",
-  strict: "严格基本面口径",
-};
+const EVAL_STATE_TONE = { running: "accent", completed: "safe", failed: "danger", interrupted: "warn", queued: "warn" };
 
 // 因子研究入口
-export async function mount(root, ctx) {
+async function mountContent(root, ctx) {
   const listHost = root.querySelector("[data-list]");
   const detailHost = root.querySelector("[data-detail]");
   const statusRoot = root.querySelector("[data-status-select]");
@@ -113,7 +111,7 @@ export async function mount(root, ctx) {
       const meta = el("span", "item-row__meta");
       meta.append(badge(STATUS_LABEL[item.status] || item.status));
       if (item.ai_generated) meta.append(badge("模型生成", "accent"));
-      meta.append(el("span", "", `${TIMESCALE_LABEL[item.timescale] || item.timescale || "?"} · ${item.version}`));
+      meta.append(el("span", "", TIMESCALE_LABEL[item.timescale] || item.timescale || "—"));
       row.append(meta);
       row.addEventListener("click", () => {
         currentName = item.name;
@@ -165,7 +163,6 @@ export async function mount(root, ctx) {
         ["适用标的", (factor.applicable_instruments || []).join("、")],
         ["时间尺度", TIMESCALE_LABEL[factor.timescale] || factor.timescale],
         ["方向", DIRECTION_LABEL[factor.direction] || factor.direction],
-        ["版本", factor.version],
         ["最近评估", fmtTime(factor.last_evaluated_at)],
         ["更新时间", fmtTime(factor.updated_at)],
       ]),
@@ -191,7 +188,7 @@ export async function mount(root, ctx) {
       card.append(el("p", "item-row__meta", factor.risk_notes));
     }
 
-    card.append(el("h4", "", "评价运行"));
+    card.append(el("h4", "", "评价记录"));
     const evalRunsHost = el("div");
     card.append(evalRunsHost);
     if (evalRefreshTimer) clearTimeout(evalRefreshTimer);
@@ -266,91 +263,73 @@ export async function mount(root, ctx) {
       });
       return;
     }
-    const backdrop = el("div", "dialog-backdrop");
-    const dialog = el("div", "dialog dialog--wide");
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("aria-modal", "true");
-    backdrop.append(dialog);
-    dialog.append(el("div", "dialog__title", "研究新因子"));
-
-    const body = el("div", "dialog__body");
-    body.append(
-      el(
-        "p",
-        "item-row__meta factors__research-intro",
-        "填写研究想法，模型会讨论原因、作用时间和失效条件，再生成因子并用历史数据测试。",
-      ),
-    );
-    const modelField = el("div", "confirm__field");
-    const modelLabel = el("span", "", "研究模型（优先使用所选模型）");
+    let chat, modelSelect;
+    const { toolbar, chatHost, historyHost, actions, close } = createChatDialog({
+      title: "研究新因子",
+      history: true,
+      onClose: () => { chat?.destroy(); modelSelect?.destroy(); },
+    });
+    const modelField = el("div", "chat-dialog__model");
+    const modelLabel = el("span", "", "研究模型");
     modelLabel.id = "factor-research-model-label";
-    const modelReason = el("span", "item-row__meta factors__model-reason");
-    const modelSelectRoot = el("div", "select confirm__select");
+    const modelSelectRoot = el("div", "select");
     modelSelectRoot.innerHTML = selectMarkup("研究模型");
     modelSelectRoot
       .querySelector("[data-select-trigger]")
       ?.setAttribute("aria-labelledby", modelLabel.id);
-    let modelSelect;
-    const updateModelReason = () => {
-      const selected = modelItems.find((item) => item.name === modelSelect.value);
-      modelReason.textContent = selected?.reason || recommendationData.policy || "";
-    };
-    modelSelect = createSelect(modelSelectRoot, { onChange: updateModelReason });
+    const modelTrigger = modelSelectRoot.querySelector("[data-select-trigger]");
+    modelSelect = createSelect(modelSelectRoot, {});
+    const modelOptions = modelItems.map(item => ({
+      value: item.name,
+      label: `${item.name}${item.recommended ? "（自动匹配）" : ""}`,
+    }));
     modelSelect.setOptions(
-      modelItems.map((item) => ({
-        value: item.name,
-        label: `${item.name}${item.recommended ? "（自动匹配）" : ""}`,
-      })),
+      modelOptions,
       recommendationData.recommended,
       "研究模型",
     );
-    modelField.append(modelLabel, modelSelectRoot, modelReason);
-    body.append(modelField);
-    updateModelReason();
-    const chatHost = el("div");
-    body.append(chatHost);
-    dialog.append(body);
-
-    const chat = createChat(chatHost, {
+    modelField.append(modelLabel, modelSelectRoot);
+    toolbar.append(modelField);
+    const start = el("button", "btn btn--primary", "开始自动研究");
+    start.type = "button";
+    actions.append(start);
+    start.disabled = true;
+    chat = createChat(chatHost, {
+      historyHost,
+      historyKey: "factor-research",
+      getMetadata: () => ({ model: modelSelect.value }),
+      onRestore: metadata => modelSelect.setOptions(modelOptions, metadata.model || recommendationData.recommended),
+      title: "从一个现象开始研究",
+      onStateChange: (state) => {
+        start.disabled = state.busy || state.disabled || state.loading || !state.hasUserMessages;
+        modelTrigger.disabled = state.busy || state.disabled || state.loading;
+      },
       greeting:
-        "例如：业绩持续改善的公司，之后一个月的收益是否更高？",
+        "描述你观察到的现象，一起讨论它的原因、作用时间和失效条件。",
       placeholder: "填写想验证的现象或假设…",
       send: async (history) => {
         const res = await ctx.api.factorResearchChat({
           model: modelSelect.value,
           messages: history,
         });
-        return { text: res.reply };
+        return { text: res.reply, reasoning: res.reasoning || "", model: res.model || modelSelect.value };
       },
     });
 
-    const actions = el("div", "dialog__actions");
-    const cancel = el("button", "btn btn--ghost", "取消");
-    cancel.type = "button";
-    const start = el("button", "btn btn--primary", "开始自动研究");
-    start.type = "button";
-    actions.append(cancel, start);
-    dialog.append(actions);
-    document.body.append(backdrop);
-
-    function close() {
-      backdrop.remove();
-    }
-    cancel.addEventListener("click", close);
-    backdrop.addEventListener("click", (ev) => {
-      if (ev.target === backdrop) close();
-    });
     start.addEventListener("click", async () => {
+      if (chat.busy) return;
       if (!chat.history.some((item) => item.role === "user")) {
         ctx.bus.emit("toast", { kind: "info", title: "请先填写研究想法" });
         return;
       }
       start.disabled = true;
       start.textContent = "正在启动…";
+      chat.setDisabled(true);
+      modelTrigger.disabled = true;
       try {
         const result = await ctx.api.factorResearchStart({
           model: modelSelect.value,
-          messages: chat.history,
+          messages: chat.context,
         });
         close();
         ctx.bus.emit("toast", { kind: "info", title: "自动研究已启动" });
@@ -361,8 +340,9 @@ export async function mount(root, ctx) {
           onComplete: load,
         });
       } catch (err) {
-        start.disabled = false;
         start.textContent = "开始自动研究";
+        chat.setDisabled(false);
+        modelTrigger.disabled = false;
         toastError(ctx.bus, err, "自动研究启动失败");
       }
     });
@@ -379,12 +359,12 @@ export async function mount(root, ctx) {
       el(
         "p",
         "item-row__meta",
-        "语法检查和数据试运行已通过，正在评价并比较版本。正式使用仍需人工批准。",
+        "语法检查和数据试运行已通过，正在评价并比较研究结果。正式使用仍需人工批准。",
       ),
     );
     const open = el("button", "btn btn--ghost", "查看自动研究进展");
     open.type = "button";
-    open.addEventListener("click", () => ctx.bus.emit("route", "experiments"));
+    open.addEventListener("click", () => ctx.bus.emit("route", "factors/experiments"));
     summary.append(open);
     target.append(summary);
   }
@@ -394,37 +374,36 @@ export async function mount(root, ctx) {
       const data = await ctx.api.factorEvalRuns(name);
       host.innerHTML = "";
       if (!data.items.length) {
-        host.append(el("p", "item-row__meta", "暂无评价运行。"));
+        host.append(el("p", "item-row__meta", "暂无评价记录。"));
         return;
       }
-      host.append(
-        tableEl(
-          [
-            { key: "run_id", label: "评价编号" },
-            {
-              key: "state",
-              label: "状态",
-              format: (value) => EVAL_STATE_LABEL[value] || value || "—",
-            },
-            { key: "period", label: "窗口" },
-            { key: "primary_horizon", label: "核心持有期", format: (v) => (v ? `${v}日` : "—") },
-            {
-              key: "variant",
-              label: "展示口径",
-              format: (value) => EVAL_VARIANT_LABEL[value] || value || "—",
-            },
-            { key: "ic_mean", label: "相关系数", num: true, format: (v) => fmtNum(v, 4) },
-            { key: "icir_annualized", label: "信息系数比率", num: true, format: (v) => fmtNum(v, 3) },
-            { key: "long_short_annualized", label: "多空年化", num: true, format: fmtPct },
-            { key: "max_drawdown", label: "回撤", num: true, format: fmtPct },
-            { key: "updated_at", label: "更新时间", format: fmtTime },
-          ],
-          data.items,
-          { onRowClick: (row) => showEvalRun(name, row.run_id, host) },
-        ),
-      );
+      const columns = [
+        { key: "run_id", label: "记录", format: (value, row) => {
+          const label = el("span", "factors__eval-id", value);
+          label.title = `${value}${row.updated_at ? `\n更新于 ${fmtTime(row.updated_at)}` : ""}`;
+          return label;
+        } },
+        {
+          key: "state",
+          label: "状态",
+          format: (value) => badge(EVAL_STATE_LABEL[value] || value || "—", EVAL_STATE_TONE[value] || "muted"),
+        },
+        { key: "period", label: "日期区间" },
+        { key: "primary_horizon", label: "持有期", format: (v) => (v ? `${v}日` : "—") },
+        { key: "ic_mean", label: "Rank IC", num: true, format: (v) => fmtNum(v, 4) },
+        { key: "icir_annualized", label: "ICIR（年化）", num: true, format: (v) => fmtNum(v, 3) },
+      ];
+      for (const column of [
+        {key: "long_short_annualized", label: "多空年化收益", num: true, format: (v) => fmtPct(v)},
+        {key: "max_drawdown", label: "最大回撤", num: true, format: (v) => fmtPct(v)},
+      ]) {
+        if (data.items.some(row => row[column.key] !== null && row[column.key] !== undefined)) columns.push(column);
+      }
+      const table = tableEl(columns, data.items, {onRowClick: row => showEvalRun(name, row.run_id, host)});
+      table.classList.add("factors__eval-runs");
+      host.append(table);
     } catch (err) {
-      host.append(el("p", "item-row__meta", `评价运行加载失败：${err.message}`));
+      host.append(el("p", "item-row__meta", `评价记录加载失败：${err.message}`));
     }
   }
 
@@ -445,7 +424,8 @@ export async function mount(root, ctx) {
       const variant = variants.industry_size || variants.raw || Object.values(variants)[0] || {};
       const ic = variant.ic || {};
       const yearly = variant.yearly_ic || [];
-      const positiveYears = yearly.filter((item) => Number(item.ic_mean) > 0).length;
+      const direction = data.metrics?.direction === 'negative' ? -1 : 1;
+      const positiveYears = yearly.filter((item) => Number(item.ic_mean) * direction > 0).length;
       const latest = yearly.length ? yearly[yearly.length - 1] : null;
       const g5 = variant.groups?.g5 || Object.values(variant.groups || {})[0] || {};
       const spread = g5.long_short || {};
@@ -454,7 +434,7 @@ export async function mount(root, ctx) {
           ["平均相关系数", fmtNum(ic.ic_mean, 4)],
           ["稳定性", fmtNum(ic.icir_annualized, 3)],
           ["有效交易日", ic.n_valid_days ?? "—"],
-          ["正向年份", yearly.length ? `${positiveYears}/${yearly.length}` : "—"],
+          ["符合方向年份", yearly.length ? `${positiveYears}/${yearly.length}` : "—"],
           ["最近一年", latest ? `${latest.year}，有效性 ${fmtNum(latest.ic_mean, 4)}` : "—"],
           ["分组收益差", fmtPct(spread.annualized_return)],
           ["分组最大回撤", fmtPct(spread.max_drawdown)],
@@ -463,7 +443,7 @@ export async function mount(root, ctx) {
       );
       const weak = Math.abs(Number(ic.ic_mean) || 0) < 0.01;
       const unstable = yearly.length >= 2 && positiveYears / yearly.length < 0.67;
-      const latestWeak = latest && Number(latest.ic_mean) <= 0;
+      const latestWeak = latest && Number(latest.ic_mean) * direction <= 0;
       let conclusion = "该区间存在正向信号，仍需检验滚动表现和交易成本。";
       if (weak) conclusion = "平均信号较弱，单个分组的高收益不足以支持假设。";
       else if (latestWeak) conclusion = "历史整体存在信号，但最近一年转弱或反向，需要继续观察。";
@@ -516,6 +496,7 @@ export async function mount(root, ctx) {
 
   function renderTaskCard(host, task) {
     const previousLog = host.querySelector("[data-task-log]");
+    const restoreScroll = captureLogScroll(previousLog);
     const card = el("article", "card detail-card");
     const head = el("div", "detail-card__head");
     head.append(el("h4", "", task.name));
@@ -544,5 +525,8 @@ export async function mount(root, ctx) {
     });
     if (taskLog) card.append(taskLog);
     host.replaceChildren(card);
+    restoreScroll();
   }
 }
+
+export async function mount(root,ctx) { const html=root.innerHTML; await mountTabs(root,ctx,'factors',[{id:'list',label:'因子列表',html,mount:mountContent},{id:'experiments',label:'迭代实验',component:'experiments'}]); }

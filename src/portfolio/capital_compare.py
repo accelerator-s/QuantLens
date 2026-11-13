@@ -74,7 +74,7 @@ def _window() -> tuple[str, str]:
             code="portfolio.comparison_window_unavailable",
             message="矩阵缓存不存在或缺少构建参数，无法确定对比窗口",
             blocking=True,
-            suggested_action="先执行 `data sync` 或 `data rebuild-cache` 构建面板缓存",
+            suggested_action="先同步数据并发布 DWD/ADS 批次",
         )
     start = (date.fromisoformat(cache_end) - timedelta(days=_WINDOW_DAYS)).isoformat()
     if cache_start and start < cache_start:
@@ -106,6 +106,7 @@ def _run_once(
     end: str,
     capital: Decimal,
     console: Console | None,
+    account: Account | None = None,
 ):
     from backtest.config import BacktestConfig, resolve_and_check  
     from backtest.engine import run_backtest  
@@ -116,6 +117,9 @@ def _run_once(
         start=start,
         end=end,
         initial_capital=capital,
+        account_id=account.account_id if account else None,
+        account_name=account.alias if account else None,
+        star_market_enabled=account.star_market_enabled if account else True,
     )
     protocol = verify_protocol_or_raise()
     resolved = resolve_and_check(config, protocol)
@@ -231,10 +235,10 @@ def run_capital_comparison(
     account_capital = _account_capital(account)
 
     reference_run = _run_once(
-        profile_name, start=start, end=end, capital=reference_capital, console=console
+        profile_name, start=start, end=end, capital=reference_capital, console=console, account=account
     )
     account_run = _run_once(
-        profile_name, start=start, end=end, capital=account_capital, console=console
+        profile_name, start=start, end=end, capital=account_capital, console=console, account=account
     )
     deltas = _metric_deltas(reference_run.metrics, account_run.metrics)
 

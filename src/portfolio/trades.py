@@ -263,7 +263,6 @@ def replay_trades(trades_df: pd.DataFrame) -> Positions:
                 ),
                 context={"trade_id": str(row["trade_id"])},
                 blocking=True,
-                can_open_issue=True,
                 suggested_action=(
                     "请检查该笔成交是否录入有误；如需修正，"
                     "在持仓与成交页面提交审计补丁。"

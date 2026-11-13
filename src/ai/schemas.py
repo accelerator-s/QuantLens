@@ -19,7 +19,6 @@ class _BaseAIOutput(BaseModel):
     produced_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     model_name: str
 
-    related_issue_id: str = ""
 
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     rationale: str = ""
@@ -30,13 +29,13 @@ class FactorCandidate(_BaseAIOutput):
     display_name: str = ""
 
     assumption: str
-    direction: Literal["long_only_positive", "long_only_negative", "long_short", "undecided"]
+    direction: Literal["positive", "negative"]
     timescale: Literal["daily", "weekly", "monthly", "quarterly", "event_driven"]
     dependencies: list[str] = Field(default_factory=list)
 
     parameters: dict[str, Any] = Field(default_factory=dict)
     standardization: list[str] = Field(default_factory=list)
-    missing_handling: Literal["drop", "fill_zero", "forward_fill", "model_specific"] = "drop"
+    missing_handling: Literal["drop", "fill"] = "drop"
     code: str
 
     evaluation_metric_hints: list[str] = Field(default_factory=list)
@@ -76,7 +75,6 @@ class StrategyCritique(_BaseAIOutput):
     findings: list[str] = Field(min_length=1)
     risks: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
-    must_open_issue_types: list[str] = Field(default_factory=list)
 
 class MemoryCandidate(_BaseAIOutput):
     task: Literal["memory_candidate"] = "memory_candidate"
@@ -86,7 +84,6 @@ class MemoryCandidate(_BaseAIOutput):
         "risk_preference",
         "rebalance_aversion",
         "provider_decision",
-        "issue_decision",
         "strategy_choice",
         "review_summary",
         "execution_deviation",
@@ -119,19 +116,6 @@ class MemoryCandidate(_BaseAIOutput):
                 raise ValueError(f"memory 候选可能含敏感字段（命中：{pat}），拒绝入库。")
         return v
 
-class IssueTriage(_BaseAIOutput):
-    task: Literal["issue_triage"] = "issue_triage"
-    suggested_type: str
-    suggested_priority: Literal["p0", "p1", "p2", "p3"]
-    suggested_title: str
-    suggested_owner: str = ""
-    background: str
-    goal: str
-    scope: str
-    acceptance: str
-    risks: str = ""
-    extra: dict[str, Any] = Field(default_factory=dict)
-
 class StructuredConfig(_BaseAIOutput):
     task: Literal["structured_config"] = "structured_config"
     config_kind: str
@@ -157,7 +141,7 @@ class DataQualityMerge(_BaseAIOutput):
 class RiskReview(_BaseAIOutput):
     task: Literal["risk_review"] = "risk_review"
     plan_id: str
-    blocking_issues: list[str] = Field(default_factory=list)
+    blocking_findings: list[str] = Field(default_factory=list)
     cautions: list[str] = Field(default_factory=list)
     approvals: list[str] = Field(default_factory=list)
 
@@ -173,25 +157,15 @@ class CheapBatchLabel(_BaseAIOutput):
                 raise ValueError("cheap_batch_label.items 每项必须含 id 与 label。")
         return v
 
-class CodeEditFrameworkReport(_BaseAIOutput):
-
-    task: Literal["code_edit_framework"] = "code_edit_framework"
-    summary: str
-    verification: str
-    requires_cli_restart: bool = False
-    related_issue_id: str
-
 SCHEMA_REGISTRY: dict[str, type[_BaseAIOutput]] = {
     "factor_candidate": FactorCandidate,
     "provider_mapping": ProviderMapping,
     "strategy_critique": StrategyCritique,
     "memory_candidate": MemoryCandidate,
-    "issue_triage": IssueTriage,
     "structured_config": StructuredConfig,
     "data_quality_merge": DataQualityMerge,
     "risk_review": RiskReview,
     "cheap_batch_label": CheapBatchLabel,
-    "code_edit_framework": CodeEditFrameworkReport,
 }
 
 def validate_ai_output(task: str, payload: dict[str, Any]) -> _BaseAIOutput:
@@ -220,10 +194,8 @@ __all__ = [
     "SCHEMA_REGISTRY",
     "SCHEMA_VERSION",
     "CheapBatchLabel",
-    "CodeEditFrameworkReport",
     "DataQualityMerge",
     "FactorCandidate",
-    "IssueTriage",
     "MemoryCandidate",
     "ProviderFieldMapping",
     "ProviderMapping",

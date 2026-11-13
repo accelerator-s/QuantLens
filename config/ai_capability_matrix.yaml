@@ -1,85 +1,92 @@
 version: 1
-
 tags:
-  - reasoning_high
-  - coding_high
-  - cheap_batch
-  - long_context
-  - review_strict
-  - structured_output
-  - debugging
-  - risk_aware
-  - web_browsing
-
+- reasoning_high
+- coding_high
+- cheap_batch
+- long_context
+- review_strict
+- structured_output
+- debugging
+- risk_aware
+- web_browsing
 tasks:
-  - task: factor_candidate
-    description: 因子候选生成
-    required_tags: [reasoning_high, structured_output]
-    optional_tags: [coding_high, long_context]
-    permitted_executors: [api_model, external_ide_ai]
-
-  - task: provider_mapping
-    description: 数据源字段映射建议
-    required_tags: [structured_output]
-    optional_tags: [coding_high]
-    permitted_executors: [api_model, external_ide_ai]
-
-  - task: strategy_critique
-    description: 策略配置评审建议
-    required_tags: [reasoning_high, review_strict]
-    optional_tags: [risk_aware, long_context]
-    permitted_executors: [api_model]
-
-  - task: memory_candidate
-    description: 复盘候选与记忆候选生成
-    required_tags: [structured_output]
-    optional_tags: [reasoning_high]
-    permitted_executors: [api_model]
-
-  - task: issue_triage
-    description: 事项摘要、分类与优先级建议
-    required_tags: [structured_output]
-    optional_tags: [cheap_batch]
-    permitted_executors: [api_model]
-
-  - task: structured_config
-    description: 将讨论结果整理为配置
-    required_tags: [structured_output]
-    optional_tags: [reasoning_high]
-    permitted_executors: [api_model]
-
-  - task: data_quality_merge
-    description: 数据质量冲突合并规则建议
-    required_tags: [reasoning_high, structured_output]
-    optional_tags: [review_strict]
-    permitted_executors: [api_model]
-
-  - task: risk_review
-    description: 风控 / 调仓建议复核
-    required_tags: [risk_aware, review_strict]
-    optional_tags: [reasoning_high]
-    permitted_executors: [api_model]
-
-  - task: code_edit_framework
-    description: 按事项修改程序（外部开发助手）
-    required_tags: [coding_high, debugging]
-    optional_tags: [review_strict]
-    permitted_executors: [external_ide_ai]
-
-  - task: cheap_batch_label
-    description: 批量标注与聚类
-    required_tags: [cheap_batch, structured_output]
-    optional_tags: []
-    permitted_executors: [api_model]
-
-  - task: web_search
-    description: 根据查询检索网页链接
-    required_tags: [structured_output]
-    optional_tags: [web_browsing, reasoning_high]
-    permitted_executors: [api_model]
-
-  - task: web_fetch
-    description: 读取网页正文，供模型分析
-    required_tags: [structured_output]
-    optional_tags: [web_browsing, long_context]
-    permitted_executors: [api_model]
+- task: factor_candidate
+  description: 因子候选生成
+  required_tags:
+  - reasoning_high
+  - structured_output
+  optional_tags:
+  - coding_high
+  - long_context
+  permitted_executors:
+  - api_model
+- task: provider_mapping
+  description: 数据源字段映射建议
+  required_tags:
+  - structured_output
+  optional_tags:
+  - coding_high
+  permitted_executors:
+  - api_model
+- task: strategy_critique
+  description: 策略配置评审建议
+  required_tags:
+  - reasoning_high
+  - review_strict
+  optional_tags:
+  - risk_aware
+  - long_context
+  permitted_executors:
+  - api_model
+- task: structured_config
+  description: 将讨论结果整理为配置
+  required_tags:
+  - structured_output
+  optional_tags:
+  - reasoning_high
+  permitted_executors:
+  - api_model
+- task: data_quality_merge
+  description: 数据质量冲突合并规则建议
+  required_tags:
+  - reasoning_high
+  - structured_output
+  optional_tags:
+  - review_strict
+  permitted_executors:
+  - api_model
+- task: risk_review
+  description: 风控 / 调仓建议复核
+  required_tags:
+  - risk_aware
+  - review_strict
+  optional_tags:
+  - reasoning_high
+  permitted_executors:
+  - api_model
+- task: cheap_batch_label
+  description: 批量标注与聚类
+  required_tags:
+  - cheap_batch
+  - structured_output
+  optional_tags: []
+  permitted_executors:
+  - api_model
+- task: web_search
+  description: 根据查询检索网页链接
+  required_tags:
+  - structured_output
+  optional_tags:
+  - web_browsing
+  - reasoning_high
+  permitted_executors:
+  - api_model
+- task: web_fetch
+  description: 读取网页正文，供模型分析
+  required_tags:
+  - structured_output
+  optional_tags:
+  - web_browsing
+  - long_context
+  permitted_executors:
+  - api_model

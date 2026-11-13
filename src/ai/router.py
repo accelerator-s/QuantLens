@@ -8,7 +8,7 @@ from datetime import UTC
 from typing import Any
 
 from exceptions import ContractViolation, ModelRouteError
-from net import create_http_client
+from .transport import completion
 
 from .matrix import CapabilityMatrix, load_matrix
 from .permissions import check_permission, score_model_for_task
@@ -57,7 +57,7 @@ def _api_key_for(model: AIModel) -> str:
         suggested_action=(
             f"运行 `python main.py configure ai update-model {model.name}`，"
             "并在交互引导中写入 API key；"
-            "禁止把 key 写入注册表 / issue / 记忆。"
+            "禁止把 key 写入注册表 / 日志 / 记忆。"
         ),
     )
 
@@ -115,7 +115,6 @@ class AIRouter:
         prompt: str,
         model_name: str | None = None,
         system: str = "",
-        related_issue_id: str = "",
         enable_tools: bool = False,
         max_tool_turns: int = 4,
     ) -> dict[str, Any]:
@@ -131,7 +130,6 @@ class AIRouter:
                 system=system,
                 user=prompt,
                 max_tool_turns=max_tool_turns,
-                related_issue_id=related_issue_id,
             )
         else:
             raw = self._chat_completion(model, api_key, system=system, user=prompt)
@@ -141,8 +139,6 @@ class AIRouter:
         
         payload.setdefault("task", task)
         payload.setdefault("model_name", model.name)
-        if related_issue_id:
-            payload.setdefault("related_issue_id", related_issue_id)
         
         try:
             validated = validate_ai_output(task, payload)
@@ -169,61 +165,11 @@ class AIRouter:
         user: str,
     ) -> str:
         
-        try:
-            import httpx  
-        except ImportError as exc:  
-            raise ModelRouteError(
-                code="AI_HTTP_DEPENDENCY_MISSING",
-                message="未安装 httpx，无法调用 OpenAI 兼容接口。",
-                blocking=True,
-                suggested_action="在虚拟环境中安装 httpx：pip install httpx",
-            ) from exc
-
-        url = model.provider_endpoint.rstrip("/") + "/chat/completions"
-        messages: list[dict[str, str]] = []
+        messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
-        body = {
-            "model": model.api_model_id,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-        }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-        try:
-            with create_http_client(timeout=self.request_timeout) as client:
-                resp = client.post(url, headers=headers, json=body)
-        except httpx.HTTPError as exc:
-            raise ModelRouteError(
-                code="AI_HTTP_TRANSPORT_ERROR",
-                message=f"调用 {model.name} 失败：{exc}",
-                context={"model": model.name, "url": url},
-                blocking=True,
-                suggested_action="检查网络与 endpoint；本框架不会自动切换其它模型。",
-            ) from exc
-
-        if resp.status_code >= 400:
-            raise ModelRouteError(
-                code="AI_HTTP_STATUS_ERROR",
-                message=f"{model.name} 返回 HTTP {resp.status_code}: {resp.text[:500]}",
-                context={"model": model.name, "status": resp.status_code},
-                blocking=True,
-            )
-
-        try:
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, ValueError, TypeError) as exc:
-            raise ModelRouteError(
-                code="AI_HTTP_RESPONSE_INVALID",
-                message=f"{model.name} 响应格式异常：{exc}",
-                context={"model": model.name, "raw": resp.text[:500]},
-                blocking=True,
-            ) from exc
+        return completion(model, api_key, messages, timeout=self.request_timeout, json_output=True).get("content") or ""
 
     @staticmethod
     def _parse_json_payload(raw: str) -> dict[str, Any]:
@@ -257,28 +203,11 @@ class AIRouter:
         system: str,
         user: str,
         max_tool_turns: int,
-        related_issue_id: str,
     ) -> str:
         
-        try:
-            import httpx
-        except ImportError as exc:  
-            raise ModelRouteError(
-                code="AI_HTTP_DEPENDENCY_MISSING",
-                message="未安装 httpx，无法调用 OpenAI 兼容接口。",
-                blocking=True,
-                suggested_action="pip install httpx",
-            ) from exc
-
         from .tools import all_tool_specs, get_tool
 
         tool_specs = all_tool_specs()
-        url = model.provider_endpoint.rstrip("/") + "/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        
         sys_prompt = ((system + "\n\n") if system else "") + (
             "你可以调用 web_search / web_fetch 检索公开互联网信息。"
             "工具结果可能被截断（truncated=true 时只返回前 N 字符）。"
@@ -291,43 +220,11 @@ class AIRouter:
         ]
 
         for turn in range(max_tool_turns + 1):
-            body = {
-                "model": model.api_model_id,
-                "messages": messages,
-                "tools": tool_specs,
-                "tool_choice": "auto",
-            }
-            
-            if turn == max_tool_turns:
-                body["tool_choice"] = "none"
-                body["response_format"] = {"type": "json_object"}
-            try:
-                with create_http_client(timeout=self.request_timeout) as client:
-                    resp = client.post(url, headers=headers, json=body)
-            except httpx.HTTPError as exc:
-                raise ModelRouteError(
-                    code="AI_HTTP_TRANSPORT_ERROR",
-                    message=f"调用 {model.name} 失败：{exc}",
-                    context={"model": model.name, "url": url},
-                    blocking=True,
-                ) from exc
-            if resp.status_code >= 400:
-                raise ModelRouteError(
-                    code="AI_HTTP_STATUS_ERROR",
-                    message=f"{model.name} 返回 HTTP {resp.status_code}: {resp.text[:500]}",
-                    context={"model": model.name, "status": resp.status_code},
-                    blocking=True,
-                )
-            try:
-                data = resp.json()
-                msg = data["choices"][0]["message"]
-            except (KeyError, IndexError, ValueError, TypeError) as exc:
-                raise ModelRouteError(
-                    code="AI_HTTP_RESPONSE_INVALID",
-                    message=f"{model.name} 响应格式异常：{exc}",
-                    context={"model": model.name, "raw": resp.text[:500]},
-                    blocking=True,
-                ) from exc
+            msg = completion(
+                model, api_key, messages, timeout=self.request_timeout,
+                tools=tool_specs, tool_choice="none" if turn == max_tool_turns else "auto",
+                json_output=turn == max_tool_turns,
+            )
 
             tool_calls = msg.get("tool_calls") or []
             if not tool_calls:
@@ -340,13 +237,7 @@ class AIRouter:
                     )
                 return content
 
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": msg.get("content") or "",
-                    "tool_calls": tool_calls,
-                }
-            )
+            messages.append(msg)
             for call in tool_calls:
                 fn = (call.get("function") or {}).get("name", "")
                 tool = get_tool(fn)
@@ -383,8 +274,7 @@ class AIRouter:
 
                 _audit_tool_call(
                     task=task,
-                    related_issue_id=related_issue_id,
-                    model_name=model.name,
+                        model_name=model.name,
                     tool=fn,
                     arguments=arguments,
                     result=result,
@@ -408,7 +298,6 @@ class AIRouter:
 def _audit_tool_call(
     *,
     task: str,
-    related_issue_id: str,
     model_name: str,
     tool: str,
     arguments: dict[str, Any],
@@ -424,7 +313,6 @@ def _audit_tool_call(
     record = {
         "ts": datetime.now(UTC).isoformat(),
         "task": task,
-        "issue_id": related_issue_id,
         "model": model_name,
         "tool": tool,
         "arguments": arguments,

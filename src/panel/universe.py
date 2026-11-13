@@ -51,7 +51,7 @@ def build_universe_mask(
                 message="ST 过滤不可用：缓存中无 trading_status 字段（returns_daily 未接入）。",
                 blocking=True,
                 suggested_action=(
-                    "核对 returns_daily 字段 id 并执行 data update + data rebuild-cache 后重试。"
+                    "核对 returns_daily 字段映射并重新发布 DWD 批次。"
                 ),
             )
         mask &= ~trading_status.isin(sorted(_ST_STATUS_CODES))

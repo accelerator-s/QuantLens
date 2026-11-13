@@ -1,0 +1,5 @@
+FROM quantlens/hadoop:locked
+ARG HBASE_VERSION=2.2.7
+RUN curl -fSL --retry 3 https://archive.apache.org/dist/hbase/${HBASE_VERSION}/hbase-${HBASE_VERSION}-bin.tar.gz | tar --no-same-owner -xz -C /opt && mv /opt/hbase-${HBASE_VERSION} /opt/hbase
+ENV HBASE_HOME=/opt/hbase HBASE_CONF_DIR=/etc/hbase/conf HBASE_HEAPSIZE=1024 PATH=/opt/hbase/bin:$PATH
+CMD ["bash", "/opt/quantlens/init/hbase.sh"]

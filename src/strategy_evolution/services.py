@@ -332,6 +332,9 @@ class StrategyEvolutionServices:
         protocol = verify_protocol_or_raise()
         profile = self.profile_for(candidate)
         runtime = self.runtime_factors(candidate)
+        from quantlens.research_candidate import prepare_profile
+        profile=prepare_profile(profile,runtime)
+        runtime=None
         run_id = f"BT-SE-{uuid.uuid4().hex[:20].upper()}"
         evaluation_run_id = f"ER-{run_id}"
         artifact_ref = str(
@@ -587,23 +590,12 @@ class StrategyEvolutionServices:
         payload = base.model_dump(mode="json")
         names = self._factor_names(strategy)
         payload["factors"] = {
-            "weighting": "manual",
+            "weighting": "equal",
             "items": [
-                {"name": names[item.factor_version_id], "weight": str(item.weight)}
+                {"name": names[item.factor_version_id], "weight_override": str(item.weight)}
                 for item in strategy.factor_inputs
             ],
         }
-        chains = {tuple(item.transformations) for item in strategy.factor_inputs}
-        if len(chains) != 1:
-            raise ContractViolation(
-                code="STRATEGY_ENGINE_PER_FACTOR_TRANSFORM_UNSUPPORTED",
-                message="当前回测引擎要求各因子使用同一标准化链。",
-                blocking=False,
-                suggested_action="本轮只提议全局 standardization 变体。",
-            )
-        payload["standardization_chain"] = [
-            json.loads(token) for token in next(iter(chains), ())
-        ]
         portfolio = strategy.portfolio_policy
         payload["position_constraint"].update(
             {
@@ -612,6 +604,7 @@ class StrategyEvolutionServices:
                 "min_cash_ratio": str(portfolio["cash_ratio"]),
             }
         )
+        payload["constraints"].update(max_positions=portfolio["top_n"],max_weight=float(portfolio["single_name_cap"]),cash_reserve=float(portfolio["cash_ratio"]))
         payload["rebalance_frequency"] = portfolio["rebalance_frequency"]
         payload["holding_period"] = portfolio["minimum_holding_period"]
         risk = strategy.risk_policy
@@ -621,6 +614,7 @@ class StrategyEvolutionServices:
                 "max_industry_pct": str(risk["max_industry_pct"]),
             }
         )
+        payload["constraints"].update(max_weight=min(float(portfolio["single_name_cap"]),float(risk["max_single_name_pct"])),max_industry_weight=float(risk["max_industry_pct"]))
         return ResolvedStrategyProfile.model_validate(payload)
 
     def runtime_factors(self, strategy: StrategyVersion) -> dict[str, RuntimeFactor]:
@@ -633,6 +627,9 @@ class StrategyEvolutionServices:
                 source=artifact["code"],
                 dependencies=tuple(factor.dependencies),
                 direction=str(artifact.get("direction") or "undecided"),
+                standardization=tuple(item.transformations),
+                missing_handling=artifact.get("missing_handling", "drop"),
+                parameters=dict(artifact.get("parameters") or {}),
             )
         return result
 
@@ -702,19 +699,15 @@ class StrategyEvolutionServices:
                 suggested_action="先在实验页对这些因子完成 AI 进化和唯一锁定测试。",
             )
         raw_weights = [
-            float(item.weight) if item.weight is not None else 1.0
+            float(item.weight_override) if item.weight_override is not None else 1.0
             for item in profile.factors.items
         ]
         total = sum(raw_weights)
-        chain = [
-            json.dumps(step.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
-            for step in profile.standardization_chain
-        ]
         return [
             StrategyFactorInput(
                 factor_version_id=by_name[item.name]["factor_version_id"],
                 weight=weight / total,
-                transformations=chain,
+                transformations=by_name[item.name].get('transformations',[]),
             )
             for item, weight in zip(profile.factors.items, raw_weights, strict=True)
         ]
@@ -724,15 +717,15 @@ class StrategyEvolutionServices:
         return {
             "combination_policy": {"weighting": profile.factors.weighting.value},
             "portfolio_policy": {
-                "top_n": profile.position_constraint.top_n,
+                "top_n": profile.constraints.max_positions,
                 "rebalance_frequency": profile.rebalance_frequency.value,
                 "minimum_holding_period": profile.holding_period,
-                "single_name_cap": float(profile.position_constraint.max_weight_per_name),
-                "cash_ratio": float(profile.position_constraint.min_cash_ratio),
+                "single_name_cap": float(profile.constraints.max_weight),
+                "cash_ratio": float(profile.constraints.cash_reserve),
             },
             "risk_policy": {
-                "max_single_name_pct": float(profile.risk_control.max_single_name_pct),
-                "max_industry_pct": float(profile.risk_control.max_industry_pct),
+                "max_single_name_pct": float(profile.constraints.max_weight),
+                "max_industry_pct": float(profile.constraints.max_industry_weight),
             },
             "execution_policy": {
                 "price_anchor": profile.execution_assumption.price_anchor,

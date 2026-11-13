@@ -1,8 +1,11 @@
+import {mountTabs} from '../../core/tabs.js';
 import { renderState } from "../state-card/state-card.js";
 import { createSelect } from "../../core/select.js";
 import { areaChart, barChart, lineChart } from "../../core/charts.js";
 import { badge, fmtDate, fmtNum, fmtPct, fmtTime, signClass } from "../../core/fmt.js";
 import { el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
+import { formDialog } from "../confirm-dialog/form-dialog.js";
+import { toastError } from "../../core/toast.js";
 
 const TRADES_PAGE = 100;
 
@@ -64,7 +67,28 @@ function runStateBadge(state) {
   return badge(RUN_STATE_LABEL[state] || state || "?", RUN_STATE_TONE[state] || "muted");
 }
 
-export async function mount(root, ctx) {
+function bindBacktestStart(root, ctx) {
+  root.querySelector('[data-backtest-start]').addEventListener('click', async (event) => {
+    const button=event.currentTarget;
+    button.disabled=true;
+    try {
+      const [strategies,accounts]=await Promise.all([ctx.api.strategies(),ctx.api.accounts()]);
+      const values=await formDialog({title:'新建回测',submitLabel:'运行回测',
+        fields:[
+          {key:'strategy_id',label:'策略',kind:'select',required:true,options:strategies.items.filter(s=>!s.is_template).map(s=>({value:s.profile_name,label:s.display_name||s.profile_name}))},
+          {key:'account_id',label:'账户',kind:'select',required:true,value:ctx.accountId||accounts.default_account_id,options:accounts.items.map(a=>({value:a.account_id,label:a.alias||a.account_id}))},
+          {key:'start',label:'开始日期',kind:'date',required:true},
+          {key:'end',label:'结束日期',kind:'date',required:true},
+        ]});
+      if (!values) return;
+      const result=await ctx.api.backtestStart(values);
+      ctx.bus.emit('toast',{kind:'success',title:'回测已提交，可在任务列表查看进度',detail:result.task_id});
+    } catch (error) { toastError(ctx.bus,error,'回测提交失败'); }
+    finally { button.disabled=false; }
+  });
+}
+
+async function mountContent(root, ctx) {
   const listHost = root.querySelector("[data-list]");
   const detailHost = root.querySelector("[data-detail]");
 
@@ -83,7 +107,7 @@ export async function mount(root, ctx) {
   function factorSummary(factors) {
     const items = factors?.items || [];
     if (!items.length) return "";
-    const names = items.map((f) => (f.weight != null ? `${f.name}（权重 ${f.weight}）` : f.name));
+    const names = items.map((f) => (f.weight_override != null ? `${f.name}（权重 ${f.weight_override}）` : f.name));
     const tail = factors.weighting === "equal" && items.length > 1 ? "，等权合成" : "";
     return `${names.join("、")}${tail}`;
   }
@@ -110,7 +134,6 @@ export async function mount(root, ctx) {
       renderState(listHost, {
         kind: "empty",
         title: "暂无回测运行",
-        detail: "在“自动研究”启动实验后，可在此查看回测。",
       });
       detailHost.innerHTML = "";
       return;
@@ -122,15 +145,18 @@ export async function mount(root, ctx) {
       groups.get(item.profile).push(item);
     }
     for (const [profile, runs] of groups) {
+      const group = el("section", "backtest__run-group");
       const groupEl = el("div", "item-list__group");
       const displayName = runs[0].profile_display_name || profile;
       groupEl.append(el("span", "", displayName));
       if (runs[0].archived) groupEl.append(badge("历史归档", "muted"));
-      listHost.append(groupEl);
+      group.append(groupEl);
       const factorNames = runs[0].factor_display_names || [];
       if (factorNames.length) {
         groupEl.append(el("span", "item-list__group-sub", `使用因子：${factorNames.join("、")}`));
       }
+      const runItems = el("div", "backtest__run-items");
+      group.append(runItems);
       for (const item of runs) {
         const row = el("button", "item-row");
         row.type = "button";
@@ -139,6 +165,7 @@ export async function mount(root, ctx) {
         row.append(el("span", "item-row__title", item.run_id));
         const meta = el("span", "item-row__meta");
         meta.append(runStateBadge(item.state), el("span", "", `${item.start} ~ ${item.end}`));
+        if(item.account_name)meta.append(badge(item.account_name,'accent'));
         if (item.protocol_locked === false) meta.append(badge("协议未锁定", "warn"));
         row.append(meta);
         row.addEventListener("click", () => {
@@ -148,8 +175,9 @@ export async function mount(root, ctx) {
           });
           loadDetail(item.run_id);
         });
-        listHost.append(row);
+        runItems.append(row);
       }
+      listHost.append(group);
     }
     if (!currentId || !items.some((i) => i.run_id === currentId)) {
       currentId = items[0].run_id;
@@ -221,6 +249,8 @@ export async function mount(root, ctx) {
         ["市场 / 频率", profile.market ? `${profile.market} · ${timescale || "?"}` : null],
         ["回测区间", `${run.config?.config?.start || "?"} ~ ${run.config?.config?.end || "?"}`],
         ["初始资金", fmtNum(run.config?.config?.initial_capital, 0)],
+        ["账户", run.config?.config?.account_name || "通用研究"],
+        ["科创板权限", run.config?.config?.star_market_enabled === false ? "未开通（已排除）" : "包含科创板"],
         ["config_hash", run.config?.config_hash],
         ["protocol_hash", run.config?.protocol_hash],
         ["最近更新", fmtTime(run.status?.updated_at)],
@@ -257,7 +287,7 @@ export async function mount(root, ctx) {
       }
       card.append(grid);
     } else {
-      card.append(el("p", "item-row__meta", "暂无指标，请查看运行状态。"));
+      card.append(el("p", "item-row__meta", "暂无指标"));
     }
 
     // ---- 净值与回撤
@@ -437,7 +467,7 @@ export async function mount(root, ctx) {
       card.append(head);
       if (!analyses.length) {
         card.append(
-          el("p", "item-row__meta", "暂无模型复盘。评价完成后自动生成。"),
+          el("p", "item-row__meta", "暂无复盘"),
         );
         return card;
       }
@@ -466,4 +496,18 @@ export async function mount(root, ctx) {
       return null;
     }
   }
+}
+
+export async function mount(root, ctx) {
+  const html = root.innerHTML;
+  root.classList.add('backtest-page');
+  await mountTabs(root, ctx, 'backtest', [
+    {id: 'strategy', label: '策略配置', component: 'strategy'},
+    {id: 'results', label: '回测结果', html, mount: mountContent},
+  ]);
+  const createButton = el('button', 'btn btn--primary', '新建回测');
+  createButton.type = 'button';
+  createButton.dataset.backtestStart = '';
+  root.append(createButton);
+  bindBacktestStart(root, ctx);
 }

@@ -147,10 +147,10 @@ def build_cn_a_stock() -> MarketRuleConfig:
             items=[
                 FeeItem(
                     name="佣金",
-                    rate=Decimal("0.0003"),
+                    rate=Decimal("0.00008"),
                     min_amount=Decimal("5"),
                     direction=TradeDirection.BOTH,
-                    notes="万分之三（行业普遍水平），单笔最低 5 元",
+                    notes="万0.8，单笔最低 5 元",
                 ),
                 FeeItem(
                     name="过户费",
@@ -159,7 +159,6 @@ def build_cn_a_stock() -> MarketRuleConfig:
                     notes="万分之零点一（2022年4月29日起沪深统一）",
                 ),
             ],
-            notes="佣金费率可因券商调整，此处采用行业普遍水平",
         ),
         taxes=TaxSchedule(
             items=[
@@ -199,31 +198,10 @@ def build_cn_a_stock() -> MarketRuleConfig:
                     notes="年报：会计年度结束后 4 个月内（次年 4 月 30 日前）披露",
                 ),
             ],
-            notes=(
-                "依据《上市公司信息披露管理办法》及沪深北交易所现行规则口径；"
-                "历史特殊年份的延期安排（如 2020 年疫情延期）不单独建模，"
-                "V1 统一采用现行标准口径（issue ISS-20260805-4MM3 风险 1）。"
-            ),
         ),
         settlement="中国结算 A 股 T+1 交收；资金 T+1 可用、T+1 可取",
         price_anchor="收盘价",
         backtest_anchor="收盘价",
         live_window="14:30-14:57 下单，以接近收盘价成交为目标",
-        sample_tests=(
-            "1. 2024-02-09（除夕）应为非交易日\n"
-            "2. 2024-02-19（春节后首个交易日）应为交易日\n"
-            "3. T+1：2024-01-02 买入，2024-01-03 可卖\n"
-            "4. 10 万元卖出费用：佣金 30 元 + 过户费 1 元 + 印花税 50 元 = 81 元\n"
-            "5. 前收盘价 20.00 元主板股票：涨停 22.00 元，跌停 18.00 元\n"
-            "6. 前收盘价 20.00 元科创板股票：涨停 24.00 元，跌停 16.00 元\n"
-            "7. 前收盘价 20.00 元北交所股票：涨停 26.00 元，跌停 14.00 元\n"
-            "8. 科创板最小交易单位：200 股起，201 股合法，150 股不合法"
-        ),
-        verification_sources=[
-            "上海证券交易所 https://www.sse.com.cn",
-            "深圳证券交易所 https://www.szse.cn",
-            "中国证券登记结算 https://www.chinaclear.cn",
-            "中国证监会 https://www.csrc.gov.cn",
-        ],
         status=MarketRuleStatus.DRAFT,
     )

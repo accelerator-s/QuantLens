@@ -1,0 +1,78 @@
+{
+  "table": "fs_cashflow",
+  "schema_version": "78f6e49191c64edf",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "report_period",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "statement_type",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "cfo_net",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "capex_cash",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "cfi_net",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "cff_net",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "cash_net_increase",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "downloaded_at",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "ann_date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "effective_date",
+      "arrow_type": "string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "ann_date_imputed",
+      "arrow_type": "string",
+      "hive_type": "string",
+      "nullable": true
+    }
+  ]
+}

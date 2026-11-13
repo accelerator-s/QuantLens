@@ -4,10 +4,10 @@ import hashlib
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from exceptions import QuantTrainingError
 from paths import workspace
@@ -40,8 +40,13 @@ class FactorMetadata(BaseModel):
     applicable_instruments: list[str] = Field(default_factory=list)
     timescale: str = "daily"
     dependencies: list[str] = Field(default_factory=list)
+    eligibility: dict[str,float] = Field(default_factory=dict)
+    min_history: int = Field(default=120, ge=0)
+    window_days: int = Field(default=60, ge=1)
+    scope: Literal["stock", "cross_section"] = "stock"
+    engine: Literal["pandas", "spark"] = "pandas"
     output_frequency: str = "daily"
-    direction: str = "undecided"
+    direction: Literal["positive", "negative"] = "positive"
     parameters: dict[str, Any] = Field(default_factory=dict)
     standardization: list[str] = Field(default_factory=list)
     missing_handling: str = "drop"
@@ -58,9 +63,15 @@ class FactorMetadata(BaseModel):
 
     last_evaluated_at: datetime | None = None
     decay_history: list[dict[str, Any]] = Field(default_factory=list)
-    related_issue_id: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+    @model_validator(mode='after')
+    def _eligibility_fields(self):
+        import math
+        if set(self.eligibility)-set(self.dependencies) or any(not math.isfinite(value) for value in self.eligibility.values()):
+            raise ValueError('因子适用范围必须引用已声明依赖，并给出有限的最低值')
+        return self
 
     @field_validator("name")
     @classmethod

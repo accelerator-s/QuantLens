@@ -11,7 +11,6 @@ providers:
   instrument_class: stock
   status: active
   manifest_version: v1
-  related_issue_id: ISS-20260517-CQB9
-  notes: 校园网自动登录，无需保存 session 凭据
+  notes: ''
   created_at: '2026-05-17T00:00:00+00:00'
   updated_at: '2026-05-17T00:00:00+00:00'

@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pandas as pd
 import yaml
 
 from exceptions import QuantTrainingError
@@ -11,7 +10,6 @@ from paths import workspace
 
 from .config import EvaluationConfig
 
-_CHUNK_FRAMES = ("ic", "groups", "turnover")
 
 def _utcnow_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
@@ -84,63 +82,6 @@ class RunStore:
     def run_id(self) -> str:
         return self.run_dir.name
 
-    def _chunk_dir(self, label: str, year: int) -> Path:
-        return self.run_dir / "chunks" / label / str(year)
-
-    def is_chunk_done(self, label: str, year: int) -> bool:
-        return (self._chunk_dir(label, year) / "done.yaml").exists()
-
-    def write_chunk(
-        self,
-        label: str,
-        year: int,
-        frames: dict[str, pd.DataFrame],
-        *,
-        notes: list[str],
-    ) -> None:
-        
-        chunk_dir = self._chunk_dir(label, year)
-        chunk_dir.mkdir(parents=True, exist_ok=True)
-        for name in _CHUNK_FRAMES:
-            frame = frames.get(name)
-            if frame is None:
-                continue
-            out = frame.copy()
-            out.index = out.index.astype(str)
-            out.to_parquet(chunk_dir / f"{name}.parquet")
-        _write_yaml(
-            chunk_dir / "done.yaml",
-            {"finished_at": _utcnow_iso(), "rows": len(frames["ic"]), "notes": notes},
-        )
-
-    def read_chunks(self, label: str, years: list[int], name: str) -> pd.DataFrame:
-        parts: list[pd.DataFrame] = []
-        for year in years:
-            path = self._chunk_dir(label, year) / f"{name}.parquet"
-            if not path.exists():
-                raise QuantTrainingError(
-                    code="EVALUATION_CHUNK_MISSING",
-                    message=f"分块数据缺失：{label}/{year}/{name}.parquet。",
-                    blocking=True,
-                    suggested_action="用 --resume 补算缺失分块后重试。",
-                )
-            frame = pd.read_parquet(path)
-            frame.index = pd.to_datetime(frame.index)
-            parts.append(frame)
-        merged = pd.concat(parts, axis=0)
-        return merged.sort_index()
-
-    def chunk_notes(self, label: str, years: list[int]) -> list[str]:
-        notes: list[str] = []
-        for year in years:
-            path = self._chunk_dir(label, year) / "done.yaml"
-            if path.exists():
-                payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-                for note in payload.get("notes") or []:
-                    if note not in notes:
-                        notes.append(note)
-        return notes
-
     def update_status(self, *, state: str, extra: dict | None = None) -> None:
         _write_yaml(
             self.run_dir / "status.yaml",
@@ -149,12 +90,5 @@ class RunStore:
 
     def write_metrics(self, metrics: dict) -> None:
         _write_yaml(self.run_dir / "metrics.yaml", metrics)
-
-    def write_chart(self, name: str, frame: pd.DataFrame) -> None:
-        charts = self.run_dir / "charts"
-        charts.mkdir(parents=True, exist_ok=True)
-        out = frame.copy()
-        out.index = out.index.astype(str)
-        out.to_csv(charts / f"{name}.csv", float_format="%.8g")
 
 __all__ = ["RunStore"]

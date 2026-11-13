@@ -114,48 +114,17 @@ class FactorResearchIndex:
         self, factor: FactorVersion, other: FactorVersion
     ) -> dict[str, Any]:
         
-        from ai.execution import run_factor
-        from panel import cache_status, load_panel
-
-        program = self.store.get(
-            ObjectType.RESEARCH_PROGRAM, factor.research_program_id
-        )
+        from quantlens.research_data import factor_matrix
+        from factors.registry import FactorRegistry
+        program=self.store.get(ObjectType.RESEARCH_PROGRAM,factor.research_program_id)
         if program.validation_window is None:
-            return {
-                "signal_correlation_status": "window_missing",
-                "signal_correlation_error": "研究任务缺少验证区间",
-            }
-        validation_start = pd.Timestamp(program.validation_window.start)
-        validation_end = min(
-            pd.Timestamp(program.validation_window.end),
-            validation_start + pd.Timedelta(days=365),
-        )
-        load_start = validation_start - pd.Timedelta(days=400)
-        meta = cache_status()["default"].meta or {}
-        bounds = meta.get("build_params") or {}
-        if bounds.get("start"):
-            load_start = max(load_start, pd.Timestamp(bounds["start"]))
-        if bounds.get("end"):
-            validation_end = min(validation_end, pd.Timestamp(bounds["end"]))
-        if load_start > validation_end:
-            return {
-                "signal_correlation_status": "data_unavailable",
-                "signal_correlation_error": "验证样本与面板缓存无交集",
-            }
-        fields = sorted(set(factor.dependencies) | set(other.dependencies))
-        panel = load_panel(
-            fields,
-            start=load_start.date().isoformat(),
-            end=validation_end.date().isoformat(),
-        )
-
-        def scores(record: FactorVersion) -> pd.DataFrame:
-            value = run_factor(source=self._source(record), panel_payload=panel)
-            if not isinstance(value, pd.DataFrame):
-                raise LifecycleError(code='FACTOR_SIGNAL_OUTPUT_INVALID', message='因子去重需要二维矩阵',
-                                     suggested_action='检查因子代码')
-            return value.loc[(value.index >= validation_start) & (value.index <= validation_end)]
-
+            return {'signal_correlation_status':'window_missing','signal_correlation_error':'研究任务缺少验证区间'}
+        validation_start=pd.Timestamp(program.validation_window.start)
+        validation_end=pd.Timestamp(program.validation_window.end)
+        def scores(record):
+            name=record.factor_name
+            meta=FactorRegistry().get(name)
+            return factor_matrix(name,meta.version,validation_start.date().isoformat(),validation_end.date().isoformat())
         try:
             left, right = scores(factor).align(scores(other), join="inner")
         except LifecycleError as exc:

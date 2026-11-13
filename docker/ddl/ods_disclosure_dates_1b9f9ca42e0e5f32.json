@@ -1,0 +1,36 @@
+{
+  "table": "disclosure_dates",
+  "schema_version": "1b9f9ca42e0e5f32",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "report_period",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "report_type",
+      "arrow_type": "int64",
+      "hive_type": "bigint",
+      "nullable": true
+    },
+    {
+      "name": "ann_date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "downloaded_at",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    }
+  ]
+}

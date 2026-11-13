@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import yaml
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 
 from ai import secrets
-from ai.discuss import _SYSTEM_PROMPT, _TRIAGE_TO_WIZARD
 from ai.matrix import load_matrix, matrix_path
 from ai.permissions import score_model_for_task
 from ai.registry import AIModel, ModelKind, ModelRegistry
-from ai.router import AIRouter, env_var_name
+from ai.router import AIRouter, _api_key_for, env_var_name
+from ai.transport import discover_models, endpoint_base, probe_model
 from exceptions import ContractViolation
 
-from ..ai_chat import chat_once, pick_chat_model
+from ..ai_chat import pick_chat_model
 from ..schemas import ConfirmPayload, confirm_preview, parse_enum
 from ..serialize import json_safe
 
@@ -147,6 +149,7 @@ class ModelPayload(BaseModel):
     name: str
     kind: str
     provider_endpoint: str = ""
+    api_type: Literal["openai", "anthropic"] = "openai"
     api_model_id: str = ""
     capability_tags: list[str] = []
     notes: str = ""
@@ -178,7 +181,8 @@ def _build_model(payload: ModelPayload, *, name: str | None = None) -> AIModel:
     return AIModel(
         name=name or payload.name,
         kind=parse_enum(ModelKind, payload.kind, "kind"),
-        provider_endpoint=payload.provider_endpoint,
+        provider_endpoint=endpoint_base(payload.provider_endpoint),
+        api_type=payload.api_type,
         api_model_id=payload.api_model_id,
         capability_tags=payload.capability_tags,
         notes=payload.notes,
@@ -203,7 +207,9 @@ def add_model(payload: ModelPayload) -> dict:
 @router.put("/ai/models/{name}")
 def update_model(name: str, payload: ModelPayload) -> dict:
     registry = ModelRegistry()
-    registry.get(name)
+    old = registry.get(name)
+    if not payload.api_key.strip() and (endpoint_base(old.provider_endpoint) != endpoint_base(payload.provider_endpoint) or old.api_type != payload.api_type):
+        raise ContractViolation(code="AI_API_KEY_REQUIRED", message="更换服务地址或接口类型后，请重新填写接口密钥。", blocking=True)
     registry.add(_build_model(payload, name=name), override=True)
     key_saved = _store_api_key(name, payload.api_key)
     return json_safe({"model": registry.get(name), "key_saved": key_saved})
@@ -267,12 +273,42 @@ def test_model(name: str) -> dict:
             code="WEBUI_MODEL_NOT_TESTABLE",
             message=f"模型 {name} 不是 api_model，无法做连通性测试。",
         )
-    reply = chat_once(
-        ai_router,
-        model,
-        [{"role": "user", "content": "请计算 17*23，直接给出数字。"}],
-    )
-    return {"ok": True, "model": name, "reply": reply.strip()}
+    return probe_model(model, _api_key_for(model))
+
+
+class ConnectionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_endpoint: str
+    api_type: Literal["openai", "anthropic"] = "openai"
+    api_key: str = ""
+    existing_name: str = ""
+    api_model_id: str = ""
+
+
+def _connection_key(payload: ConnectionPayload) -> str:
+    if payload.api_key.strip():
+        return payload.api_key.strip()
+    if payload.existing_name:
+        model = ModelRegistry().get(payload.existing_name)
+        if endpoint_base(model.provider_endpoint) == endpoint_base(payload.provider_endpoint) and model.api_type == payload.api_type:
+            return _api_key_for(model)
+    raise ContractViolation(code="AI_API_KEY_REQUIRED", message="请填写接口密钥；更换服务地址或接口类型后需重新填写。", blocking=True)
+
+
+@router.post("/ai/connection/models")
+def fetch_connection_models(payload: ConnectionPayload) -> dict:
+    key = _connection_key(payload)
+    return {"items": discover_models(payload.provider_endpoint, payload.api_type, key)}
+
+
+@router.post("/ai/connection/test")
+def test_connection(payload: ConnectionPayload) -> dict:
+    key = _connection_key(payload)
+    if not payload.api_model_id.strip():
+        raise ContractViolation(code="AI_MODEL_REQUIRED", message="请先获取并选择服务端模型。", blocking=True)
+    model = AIModel(name="连接测试", kind=ModelKind.API_MODEL, provider_endpoint=endpoint_base(payload.provider_endpoint), api_type=payload.api_type, api_model_id=payload.api_model_id.strip(), capability_tags=["structured_output"])
+    return probe_model(model, key)
 
 @router.post("/ai/models/{name}/enabled")
 def set_model_enabled(name: str, payload: EnabledPayload) -> dict:
@@ -286,88 +322,7 @@ def set_discuss_model(payload: DiscussModelPayload) -> dict:
     registry.set_discuss_model(payload.name)
     return {"discuss_model": registry.get_discuss_model()}
 
-class ChatMessage(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    role: str
-    content: str
-
-class ChatPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    model: str = ""
-    messages: list[ChatMessage] = []
-
-@router.post("/ai/chat")
-def ai_chat(payload: ChatPayload) -> dict:
-    ai_router = AIRouter()
-    model = pick_chat_model(ai_router, payload.model.strip())
-    system = _SYSTEM_PROMPT + "上下文：用户正在 界面 中梳理一个待创建的 issue。\n"
-    messages = [{"role": "system", "content": system}]
-    for msg in payload.messages:
-        if msg.role not in ("user", "assistant"):
-            continue
-        messages.append({"role": msg.role, "content": msg.content})
-    reply = chat_once(ai_router, model, messages)
-    return {"reply": reply, "model": model.name}
-
-@router.post("/ai/chat/finalize")
-def ai_chat_finalize(payload: ChatPayload) -> dict:
-    ai_router = AIRouter()
-    lines = []
-    for msg in payload.messages:
-        prefix = "用户" if msg.role == "user" else "AI"
-        lines.append(f"{prefix}：{msg.content}")
-    summary = "\n".join(lines)
-
-    base_prompt = (
-        "根据以下用户与 AI 的多轮讨论内容，生成一个 issue_triage 结构化建议。\n\n"
-        f"讨论记录：\n{summary}\n\n"
-        "请输出 JSON 格式的 issue_triage。所有字段均为纯文本字符串（str），"
-        "禁止使用 dict 或 list 作为字段值。具体字段：\n"
-        "- suggested_type: str, issue 类型（如 'market_rule', 'framework' 等）\n"
-        "- suggested_priority: str, 优先级，只能是 'p0'/'p1'/'p2'/'p3' 之一\n"
-        "- suggested_title: str, 简洁的 issue 标题\n"
-        "- background: str, 背景说明\n"
-        "- goal: str, 目标\n"
-        "- scope: str, 影响范围（纯文本，多项用逗号分隔，不要用 list/dict）\n"
-        "- acceptance: str, 验收标准（纯文本，多项用分号分隔，不要用 list/dict）\n"
-        "- risks: str, 风险说明（纯文本，不要用 list/dict，可留空字符串）\n"
-        "- confidence: float, 对该建议的置信度（0-1）\n"
-        "- rationale: str, 理由\n"
-    )
-
-    max_retries = 3
-    prompt = base_prompt
-    result: dict | None = None
-    for attempt in range(max_retries):
-        try:
-            result = ai_router.run_task(
-                task="issue_triage",
-                prompt=prompt,
-                system="根据讨论记录为用户生成 issue 建议。输出必须是纯 JSON 对象，"
-                "所有字段为字符串类型，不得使用数组或嵌套对象。",
-                model_name=payload.model.strip() or None,
-            )
-            break
-        except ContractViolation as exc:
-            if attempt >= max_retries - 1:
-                raise
-            prompt = (
-                f"{base_prompt}\n\n"
-                f"注意：你上一次的输出校验失败：{exc.message}\n"
-                "请严格按照上述字段类型要求重新输出，所有值必须是字符串。"
-            )
-
-    assert result is not None
-    suggestion = {}
-    for triage_key, wizard_key in _TRIAGE_TO_WIZARD.items():
-        value = result.get(triage_key, "")
-        if value:
-            suggestion[wizard_key] = str(value)
-    return json_safe({"suggestion": suggestion, "raw": result})
-
-_EXECUTORS = ["api_model", "external_ide_ai", "human", "mixed"]
+_EXECUTORS = ["api_model", "human", "mixed"]
 
 class SetTaskPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -408,7 +363,7 @@ def set_matrix_task(task_name: str, payload: SetTaskPayload) -> dict:
         )
 
     def _fmt(values: list[str]) -> str:
-        labels={"api_model":"接口模型","external_ide_ai":"外部开发助手","human":"人工","mixed":"人工与模型",
+        labels={"api_model":"接口模型","human":"人工","mixed":"人工与模型",
                 "reasoning_high":"深度推理","coding_high":"代码生成","cheap_batch":"低成本批处理","long_context":"长上下文",
                 "review_strict":"严格复核","structured_output":"结构化输出","debugging":"调试诊断","risk_aware":"风险识别","web_browsing":"联网检索"}
         return "、".join(labels.get(v,v) for v in values) or "—"

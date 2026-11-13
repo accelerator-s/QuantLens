@@ -17,7 +17,7 @@ from proposals import ProposalSource, ProposalStore
 from strategy.models import FactorRef, FactorSpec, StrategyProfileDoc, StrategyStatus, WeightMode
 from strategy.store import StrategyProfileStore
 
-from ..ai_chat import chat_once, pick_chat_model
+from ..ai_chat import chat_reply, pick_chat_model
 from ..serialize import json_safe
 from ..tasks import manager
 from .factor_evolution import start_factor_evolution
@@ -91,8 +91,7 @@ def factor_chat(payload: FactorChatPayload) -> dict:
     model = pick_chat_model(ai_router, payload.model.strip())
     messages = [{"role": "system", "content": _DISCUSSION_SYSTEM + "\n\n" + _factor_context()}]
     messages.extend(_conversation(payload.messages))
-    reply = chat_once(ai_router, model, messages)
-    return {"reply": reply, "model": model.name}
+    return {**chat_reply(ai_router, model, messages), "model": model.name}
 
 def _sample_panel(dependencies: list[str]) -> dict[str, pd.DataFrame]:
     status = cache_status().get("default")

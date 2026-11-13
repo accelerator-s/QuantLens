@@ -136,7 +136,7 @@ class StrategyProfileStore:
                 continue
             if meta.status != FactorStatus.ACTIVE:
                 warnings.append(
-                    f"因子 {ref.name} 状态为 {meta.status.value}（未经 factor issue 验收启用）。"
+                    f"因子 {ref.name} 状态为 {meta.status.value}（尚未完成因子验收）。"
                 )
         if missing_factors:
             raise StrategyProfileError(
@@ -146,7 +146,7 @@ class StrategyProfileStore:
                 ),
                 context={"profile": name, "missing_factors": missing_factors},
                 blocking=True,
-                suggested_action="先通过 factor issue 落地并注册相关因子，再激活策略。",
+                suggested_action="先注册相关因子并完成验收，再激活策略。",
                 related_subjects={"strategy_profile": name},
             )
 

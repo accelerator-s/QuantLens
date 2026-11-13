@@ -25,19 +25,13 @@ const PROPOSAL_STATUS_TONE = {
 const ROLE_LABEL = {
   factor_candidate: "因子候选",
   factor_evolution: "因子进化",
-  issue_triage: "事项整理",
   strategy_profile: "策略配置",
   memory_entry: "记忆条目",
 };
-const ADAPTER_STATUS_LABEL = { ready: "正常", degraded: "降级（仅本地）" };
-const ADAPTER_STATUS_TONE = { ready: "safe", degraded: "warn" };
-const CANDIDATE_STATUS_LABEL = { pending: "待评审", committed: "已入库", discarded: "已丢弃" };
-const CANDIDATE_STATUS_TONE = { pending: "warn", committed: "safe", discarded: "muted" };
 const TRASH_CATEGORY_LABEL = {
   factor: "因子",
   strategy: "策略",
   strategy_profile: "策略配置",
-  issue: "issue",
   proposal: "候选",
   memory: "记忆",
   data: "数据",
@@ -45,7 +39,6 @@ const TRASH_CATEGORY_LABEL = {
 };
 const SOURCE_LABEL = {
   api_model: "模型生成",
-  external_ide_ai: "外部开发助手",
   human: "人工录入",
   cli: "本机操作",
 };
@@ -55,7 +48,6 @@ const PAYLOAD_KEY_LABEL = {
   task: "任务类型",
   produced_at: "产出时间",
   model_name: "产出模型",
-  related_issue_id: "关联事项",
   confidence: "置信度",
   rationale: "设计思路",
   factor_name: "因子名",
@@ -96,7 +88,6 @@ const PAYLOAD_VALUE_LABEL = {
   task: {
     factor_candidate: "因子候选",
     factor_evolution: "因子进化",
-    issue_triage: "事项整理",
   },
   direction: {
     positive: "正向（值越大越看多）",
@@ -252,13 +243,9 @@ export async function mount(root, ctx) {
   const hosts = {
     proposalList: root.querySelector("[data-proposal-list]"),
     proposalDetail: root.querySelector("[data-proposal-detail]"),
-    memoryStatus: root.querySelector("[data-memory-status]"),
-    memoryList: root.querySelector("[data-memory-list]"),
-    memoryDetail: root.querySelector("[data-memory-detail]"),
     trash: root.querySelector("[data-trash]"),
   };
   let currentProposal = "";
-  let currentCandidate = "";
 
   for (const btn of tabs) {
     btn.addEventListener("click", () => {
@@ -282,7 +269,6 @@ export async function mount(root, ctx) {
     if (loaded.has(tab)) return;
     loaded.add(tab);
     if (tab === "proposals") await loadProposals();
-    if (tab === "memory") await loadMemory();
     if (tab === "trash") await loadTrash();
   }
 
@@ -296,7 +282,6 @@ export async function mount(root, ctx) {
         renderState(hosts.proposalList, {
           kind: "empty",
           title: "暂无候选",
-          detail: "模型生成的候选在此等待人工评审。",
         });
         hosts.proposalDetail.innerHTML = "";
         return;
@@ -359,7 +344,6 @@ export async function mount(root, ctx) {
         kvEl([
           ["来源", SOURCE_LABEL[p.source] || p.source],
           ["模型", p.model_name],
-          ["关联事项", p.related_issue_id],
           ["创建时间", fmtTime(p.created_at)],
           ["决策人", p.decided_by],
           ["决策备注", p.decision_note],
@@ -412,192 +396,6 @@ export async function mount(root, ctx) {
   }
 
   
-  async function loadMemory() {
-    renderState(hosts.memoryList, { kind: "loading", title: "加载记忆候选…" });
-    try {
-      const status = await ctx.api.memoryStatus();
-      hosts.memoryStatus.innerHTML = "";
-      const card = el("article", "card detail-card");
-      const head = el("div", "detail-card__head");
-      head.append(el("h3", "", "记忆适配器"));
-      head.append(
-        badge(
-          ADAPTER_STATUS_LABEL[status.status] || status.status,
-          ADAPTER_STATUS_TONE[status.status] || "muted",
-        ),
-      );
-      card.append(head);
-      card.append(
-        kvEl([
-          ["外部框架", status.package_name],
-          ["固定版本", status.pinned_version || "（未配置）"],
-          ["上次检查", fmtTime(status.last_check)],
-        ]),
-      );
-      hosts.memoryStatus.append(card);
-    } catch (err) {
-      hosts.memoryStatus.innerHTML = "";
-      renderState(hosts.memoryStatus, {
-        kind: "error",
-        title: "适配器状态加载失败",
-        detail: err.message,
-      });
-    }
-
-    try {
-      const data = await ctx.api.memoryCandidates();
-      hosts.memoryList.innerHTML = "";
-      if (!data.items.length) {
-        renderState(hosts.memoryList, {
-          kind: "empty",
-          title: "暂无记忆候选",
-          detail: "模型讨论记录需经人工确认后存入记忆。",
-        });
-        hosts.memoryDetail.innerHTML = "";
-        return;
-      }
-      for (const item of data.items) {
-        const row = el("button", "item-row");
-        row.type = "button";
-        row.dataset.id = item.candidate_id;
-        if (item.candidate_id === currentCandidate) row.classList.add("is-active");
-        row.append(el("span", "item-row__title", item.candidate_id));
-        const meta = el("span", "item-row__meta");
-        meta.append(
-          badge(
-            CANDIDATE_STATUS_LABEL[item.status] || item.status,
-            CANDIDATE_STATUS_TONE[item.status] || "muted",
-          ),
-          el("span", "", fmtTime(item.created_at)),
-        );
-        row.append(meta);
-        row.addEventListener("click", () => {
-          currentCandidate = item.candidate_id;
-          hosts.memoryList.querySelectorAll(".item-row").forEach((n) => {
-            n.classList.toggle("is-active", n.dataset.id === currentCandidate);
-          });
-          loadCandidateDetail(item.candidate_id);
-        });
-        hosts.memoryList.append(row);
-      }
-      if (!currentCandidate || !data.items.some((i) => i.candidate_id === currentCandidate)) {
-        currentCandidate = data.items[0].candidate_id;
-        hosts.memoryList.querySelector(".item-row")?.classList.add("is-active");
-      }
-      loadCandidateDetail(currentCandidate);
-    } catch (err) {
-      await renderState(hosts.memoryList, {
-        kind: "error",
-        title: "记忆候选加载失败",
-        detail: err.message,
-        retry: () => loadMemory(),
-      });
-    }
-  }
-
-  async function loadCandidateDetail(id) {
-    await renderState(hosts.memoryDetail, { kind: "loading", title: "加载候选详情…" });
-    try {
-      const data = await ctx.api.memoryCandidate(id);
-      const rec = data.candidate;
-      hosts.memoryDetail.innerHTML = "";
-      const card = el("article", "card detail-card");
-      const head = el("div", "detail-card__head");
-      head.append(el("h3", "", rec.candidate_id));
-      head.append(
-        badge(
-          CANDIDATE_STATUS_LABEL[rec.status] || rec.status,
-          CANDIDATE_STATUS_TONE[rec.status] || "muted",
-        ),
-      );
-      if (data.secret_matches.length) head.append(badge("疑似密钥", "danger"));
-      card.append(head);
-      card.append(
-        kvEl([
-          ["创建时间", fmtTime(rec.created_at)],
-          ["提交时间", fmtTime(rec.committed_at)],
-          ["决策人", rec.decided_by],
-          ["文件路径", data.path],
-        ]),
-      );
-      if (data.secret_matches.length) {
-        card.append(el("h4", "", "密钥扫描命中"));
-        for (const m of data.secret_matches) {
-          const p = el("p", "item-row__meta");
-          p.append(badge(m.name, "danger"), el("span", "", m.excerpt));
-          card.append(p);
-        }
-      }
-      if (rec.status === "pending") {
-        const ops = el("div", "detail-card__head");
-        ops.append(el("h4", "", "评审"));
-        const commitBtn = el("button", "btn btn--primary", "入长期记忆");
-        commitBtn.type = "button";
-        commitBtn.addEventListener("click", () =>
-          commitCandidate(rec.candidate_id, data.secret_matches.length),
-        );
-        const discardBtn = el("button", "btn btn--danger", "丢弃");
-        discardBtn.type = "button";
-        discardBtn.addEventListener("click", () => discardCandidate(rec.candidate_id));
-        ops.append(commitBtn, discardBtn);
-        card.append(ops);
-      }
-      card.append(el("h4", "", "候选内容"));
-      card.append(payloadEl(rec.payload));
-      hosts.memoryDetail.append(card);
-    } catch (err) {
-      await renderState(hosts.memoryDetail, {
-        kind: "error",
-        title: "候选详情加载失败",
-        detail: err.message,
-        retry: () => loadCandidateDetail(id),
-      });
-    }
-  }
-
-  async function commitCandidate(id, secretCount) {
-    try {
-      const result = await runWithConfirm({
-        execute: (extra) => ctx.api.memoryCommit(id, extra),
-        title: "候选入长期记忆",
-        message: secretCount
-          ? `密钥扫描命中 ${secretCount} 处，请先确认内容安全再提交！`
-          : "确认后由记忆适配器写入长期记忆文件。",
-        requireDecidedBy: true,
-        confirmLabel: "确认入库",
-        danger: secretCount > 0,
-      });
-      if (!result) return;
-      ctx.bus.emit("toast", {
-        kind: "success",
-        title: `${id} 已入长期记忆`,
-        detail: result.long_term_file,
-      });
-      await loadMemory();
-    } catch (err) {
-      toastError(ctx.bus, err, "记忆入库失败");
-    }
-  }
-
-  async function discardCandidate(id) {
-    try {
-      const result = await runWithConfirm({
-        execute: (extra) => ctx.api.memoryDiscard(id, extra),
-        title: "丢弃记忆候选",
-        requireDecidedBy: true,
-        notePlaceholder: "丢弃原因",
-        confirmLabel: "确认丢弃",
-        danger: true,
-      });
-      if (!result) return;
-      ctx.bus.emit("toast", { kind: "success", title: `${id} 已丢弃` });
-      await loadMemory();
-    } catch (err) {
-      toastError(ctx.bus, err, "记忆丢弃失败");
-    }
-  }
-
-  
   async function loadTrash() {
     await renderState(hosts.trash, { kind: "loading", title: "加载回收站…" });
     try {
@@ -607,7 +405,6 @@ export async function mount(root, ctx) {
         renderState(hosts.trash, {
           kind: "empty",
           title: "回收站为空",
-          detail: "被删除的因子、策略等条目会进入回收站，可恢复或清除。",
         });
         return;
       }

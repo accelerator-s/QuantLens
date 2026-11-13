@@ -17,7 +17,7 @@ class WorkspaceSession(BaseModel):
     active_market: Literal["CN-A"] = "CN-A"
     active_instrument_class: Literal["stock"] = "stock"
     last_login: str = ""
-    commission_rate: str = ""
+    commission_rate: str = "0.00008"
     last_data_update: str = ""
 
 def _session_path() -> Path:

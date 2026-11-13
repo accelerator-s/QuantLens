@@ -1,7 +1,7 @@
 import { api } from './core/api.js';
 import { icons } from './core/icons.js';
 import { createBus } from './core/bus.js';
-import { initHealth } from './core/health.js';
+import { initHealth, createRestartDetector } from './core/health.js';
 import { initTheme } from './core/theme.js';
 import { initToast, toastError } from './core/toast.js';
 import { mountRail } from './components/rail/rail.js';
@@ -9,8 +9,8 @@ import { mountTopbar } from './components/topbar/topbar.js';
 import { mount as mountLens } from './components/lens/lens.js';
 import { createPageCache, prefetchApi, invalidateRequests } from './core/page-cache.js';
 
-const LENS = new Set(['dashboard','market','stocks','screen','models','watch','assistant','journal','system']);
-const PAGES = new Set([...LENS,'factors','experiments','backtest','portfolio','strategy','data','review','ai-config','overview','admin']);
+const LENS = new Set(['dashboard','stocks','screen']);
+const PAGES = new Set([...LENS,'factors','backtest','portfolio','settings']);
 initTheme();
 const bus = createBus();
 initHealth(bus);
@@ -20,10 +20,10 @@ const views = new Map();
 const pending = new Map();
 const assets = new Map();
 const pageCache = createPageCache();
-const shared = {api, icons, navigate, stock:'', backtestRun:''};
+const shared = {api, icons, navigate, stock:'', backtestRun:'', tabState:{}};
 let currentRoute = '';
 let navigationVersion = 0;
-bus.on('backtest:open', id => { shared.backtestRun = id; pageCache.invalidate('backtest'); });
+bus.on('backtest:open', id => { shared.backtestRun = id; shared.tabState.backtest='results'; bus.emit('subtab',{page:'backtest',tab:'results'}); pageCache.invalidate('backtest'); });
 window.addEventListener('quantlens:changed', () => pageCache.invalidate());
 document.querySelector('[data-rail-backdrop]').addEventListener('click', () => document.body.classList.remove('rail-open'));
 
@@ -41,11 +41,7 @@ function loadAssets(id) {
   return assets.get(id);
 }
 
-const READ_AHEAD = {
-  dashboard: ['/api/lens/overview'], market: ['/api/lens/market'],
-  models: ['/api/lens/research', '/api/lens/rolling'], watch: ['/api/lens/watch'],
-  journal: ['/api/lens/journal'], data: ['/api/providers'],
-};
+const READ_AHEAD = {dashboard:['/api/overview'], factors:['/api/factors'], settings:['/api/settings/data']};
 async function prefetchPage(id) {
   if (!PAGES.has(id) || views.has(id)) return;
   if (!LENS.has(id)) await loadAssets(id);
@@ -104,11 +100,15 @@ async function ensureView(id) {
 }
 
 async function navigate(target, {refresh = false} = {}) {
-  const id = PAGES.has(target) ? target : 'dashboard';
+  const [page, tab] = String(target).split('/');
+  const id = PAGES.has(page) ? page : 'dashboard';
+  if (tab) shared.tabState[id] = tab;
+  closeAssistant();
   const version = ++navigationVersion;
   const mounted = views.has(id) && !pending.has(id);
   currentRoute = id;
-  if (location.hash !== `#${id}`) history.pushState(null, '', `#${id}`);
+  const hash = `#${id}${tab ? '/'+tab : ''}`;
+  if (location.hash !== hash) history.pushState(null, '', hash);
   document.body.classList.remove('rail-open');
   views.forEach((view, key) => { view.hidden = key !== id; });
   bus.emit('route', id);
@@ -116,6 +116,7 @@ async function navigate(target, {refresh = false} = {}) {
     const view = await ensureView(id);
     if (version !== navigationVersion) return;
     view.hidden = false;
+    if (tab) bus.emit('subtab', {page:id,tab});
     if (mounted && (refresh || pageCache.needsRefresh(id))) {
       pageCache.mark(id);
       bus.emit('view:activate', id);
@@ -125,10 +126,52 @@ async function navigate(target, {refresh = false} = {}) {
   }
 }
 
-async function pollHealth() {
-  try { bus.emit('health', await api.status()); }
-  catch { bus.emit('health', null); }
+let assistantPanel = null, assistantTrigger = null, assistantReady = null;
+function closeAssistant() {
+  if (assistantPanel && !assistantPanel.hidden) { assistantPanel.hidden = true; assistantTrigger?.focus(); }
 }
+bus.on('assistant:open', async () => {
+  const openingVersion = navigationVersion;
+  assistantTrigger = document.activeElement;
+  if (!assistantPanel) {
+    assistantPanel = document.createElement('aside'); assistantPanel.className='assistant-drawer'; assistantPanel.hidden=true;
+    assistantPanel.setAttribute('role','dialog'); assistantPanel.setAttribute('aria-modal','true'); assistantPanel.setAttribute('aria-label','研究助手');
+    const close=document.createElement('button'); close.type='button'; close.className='btn btn--ghost assistant-drawer__close'; close.textContent='关闭助手'; close.onclick=closeAssistant;
+    const content=document.createElement('section'); content.dataset.pane='assistant';
+    assistantPanel.append(close,content); document.body.append(assistantPanel);
+    assistantPanel.addEventListener('keydown',event=>{
+      if(event.key==='Escape') closeAssistant();
+      if(event.key==='Tab') {
+        const focusable=[...assistantPanel.querySelectorAll('button,input,textarea,a[href]')].filter(el=>!el.disabled);
+        const first=focusable[0],last=focusable.at(-1);
+        if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+      }
+    });
+    assistantReady=mountLens(content,{...shared,bus});
+  }
+  await assistantReady;
+  if (openingVersion !== navigationVersion) { assistantPanel.hidden=true; return; }
+  assistantPanel.hidden=false; assistantPanel.querySelector('button').focus();
+});
+
+let healthTimer, healthRequest = 0;
+const backendRestarted = createRestartDetector();
+async function pollHealth() {
+  clearTimeout(healthTimer);
+  const requestId = ++healthRequest;
+  let starting = false;
+  try {
+    const status = await api.status();
+    if (requestId !== healthRequest) return;
+    if (backendRestarted(status)) { window.location.reload(); return; }
+    starting = status.service_startup?.status === 'running';
+    bus.emit('health', status);
+  }
+  catch { if (requestId !== healthRequest) return; bus.emit('health', null); }
+  healthTimer = setTimeout(pollHealth, starting ? 2000 : 10000);
+}
+bus.on('health:refresh', pollHealth);
 
 async function boot() {
   await Promise.all([
@@ -140,10 +183,9 @@ async function boot() {
     }),
   ]);
   await pollHealth();
-  setInterval(pollHealth, 30000);
   window.addEventListener('hashchange', () => {
     const id = location.hash.slice(1);
-    if (id !== currentRoute) navigate(id);
+    if (id !== currentRoute || id.includes('/')) navigate(id);
   });
   await navigate(location.hash.slice(1));
   const rail = document.getElementById('rail-slot');

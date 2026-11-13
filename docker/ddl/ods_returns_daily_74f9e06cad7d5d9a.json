@@ -1,0 +1,60 @@
+{
+  "table": "returns_daily",
+  "schema_version": "74f9e06cad7d5d9a",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "mktcap_float",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "mktcap_total",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "ret_wd",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "ret_nd",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "adj_close_wd",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "adj_close_nd",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "trading_status",
+      "arrow_type": "int64",
+      "hive_type": "bigint",
+      "nullable": true
+    }
+  ]
+}

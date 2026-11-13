@@ -19,10 +19,9 @@ from .execution import Fill, Order, execute_day, force_close
 from .metrics import compute_metrics
 from .protocol import BacktestProtocol
 from .report import BacktestRunStore
-from .signal import RuntimeFactor, compute_composite_scores, target_weights
+from .signal import RuntimeFactor
 from .tradability import build_tradability
 
-_MARKET_FIELDS = ["close", "high", "low", "is_trading", "listed_days", "trading_status", "ret_wd"]
 _PRICE_BUFFER_DAYS = 45
 
 @dataclass
@@ -53,33 +52,6 @@ def _signal_days(eval_index: pd.DatetimeIndex, frequency: Frequency) -> set[pd.T
         )
     days.add(eval_index[0])
     return days
-
-def _data_fingerprint(field_names: list[str]) -> dict:
-    
-    from panel import cache_status
-
-    meta = cache_status()["default"].meta or {}
-    axes = meta.get("axes") or {}
-    fields_meta = meta.get("fields") or {}
-    return {
-        "axes": {
-            "dates_hash": axes.get("dates_hash"),
-            "instruments_hash": axes.get("instruments_hash"),
-        },
-        "fields": {
-            name: (fields_meta.get(name) or {}).get("data_hash")
-            for name in sorted(set(field_names))
-        },
-    }
-
-def _factor_dependencies(profile: ResolvedStrategyProfile) -> list[str]:
-    from factors.registry import FactorRegistry
-
-    registry = FactorRegistry()
-    deps: set[str] = set()
-    for ref in profile.factors.items:
-        deps.update(registry.get(ref.name).dependencies)
-    return sorted(deps)
 
 def _delist_disposal(
     ledger: Ledger,
@@ -171,6 +143,16 @@ def _rebalance_orders(
             )
     return sells, buys
 
+def assess_objective(metrics, protocol):
+    returns, risk, trading = metrics["returns"], metrics["risk"], metrics["trading"]
+    drawdown = abs(risk["max_drawdown"])
+    values = {"calmar":returns["annualized_return"]/drawdown if drawdown else 0.0,
+              "sharpe":risk["sharpe"], "total_return":returns["total_return"]}
+    constraints = protocol.objective.constraints
+    eligible = drawdown <= constraints.max_drawdown and trading["annualized_turnover_oneside"] <= constraints.max_turnover
+    return {"primary":protocol.objective.primary,"value":round(values[protocol.objective.primary],6),
+            "eligible":eligible,"constraints":constraints.model_dump()}
+
 # 主入口
 
 def run_backtest(
@@ -181,67 +163,52 @@ def run_backtest(
     console: Console | None = None,
     runtime_factors: dict[str, RuntimeFactor] | None = None,
     run_id: str | None = None,
+    warehouse_inputs: dict | None = None,
 ) -> BacktestOutcome:
     
     console = console or Console()
+    if runtime_factors:
+        from quantlens.research_candidate import prepare_profile
+        profile=prepare_profile(profile,runtime_factors)
+        runtime_factors=None
+    import os
+    if warehouse_inputs is None and os.environ.get('QUANTLENS_COMPUTE_LOCAL')!='1' and not os.path.isdir('/workspace'):
+        from quantlens.remote_backtest import run_remote
+        return run_remote(config,profile,protocol,run_id=run_id)
     if protocol.price_anchor != "next_close":
         raise BacktestError(
             code="BACKTEST_UNSUPPORTED_ANCHOR",
-            message=f"V1 引擎仅支持 price_anchor=next_close，当前口径为 {protocol.price_anchor}。",
+            message=f"撮合引擎仅支持 price_anchor=next_close，当前口径为 {protocol.price_anchor}。",
             blocking=True,
-            suggested_action="V1 请使用 next_close；next_open 属后续扩展。",
+            suggested_action="请使用锁定协议的 next_close。",
         )
 
     rule_engine = RuleEngine(MarketRuleRegistry().get(protocol.market_rule_name))
 
-    # -- 信号 --
-    console.print("[dim]信号：本地执行因子 → 标准化链 → 合成得分…[/dim]")
-    sig = compute_composite_scores(
-        profile,
-        start=config.start,
-        end=config.end,
-        lookback_buffer_days=config.lookback_buffer_days,
-        runtime_factors=runtime_factors,
-    )
+    from quantlens.backtest_inputs import inputs
+    from portfolio.construct import construct, Constraints
+    payload = warehouse_inputs or inputs(profile, config.start, config.end)
+    sig = payload["signal"]
     eval_index = pd.DatetimeIndex(sig.scores.index)
-
-    console.print("[dim]行情：加载执行面板与可交易性掩码…[/dim]")
-    from panel import load_panel
-    from panel.universe import build_universe_mask
-
-    from .signal import _cache_bounds, _clamp  # 复用缓存收边逻辑
-
-    cache_lo, cache_hi = _cache_bounds()
-    load_start = _clamp(
-        (pd.Timestamp(config.start) - pd.Timedelta(days=_PRICE_BUFFER_DAYS)).strftime("%Y-%m-%d"),
-        cache_lo,
-        cache_hi,
-    )
-    load_end = _clamp(config.end, cache_lo, cache_hi)
-    market = load_panel(_MARKET_FIELDS, start=load_start, end=load_end)
-    is_trading_full = load_panel(["is_trading"])["is_trading"]
-    trad = build_tradability(market, rule_engine, is_trading_full=is_trading_full)
-
-    close = market["close"]
-    ret_wd = market["ret_wd"]
-
-    bench_mask = build_universe_mask(
-        profile.universe.to_panel_config(),
-        is_trading=market["is_trading"],
-        listed_days=market["listed_days"],
-        trading_status=market["trading_status"],
-    )
+    if len(eval_index) == 0:
+        raise BacktestError(code="BACKTEST_EMPTY_WINDOW",message="区间内无已发布信号",suggested_action="补齐 DWS 因子和权重")
+    market = payload["market"]
+    trad = build_tradability(market, rule_engine, delisting_dates=payload["delisting_dates"])
+    close, ret_wd = market["close"], market["ret_wd"]
+    bench_mask = payload["mask"].reindex(index=ret_wd.index,columns=ret_wd.columns).shift(1).fillna(False)
     bench_series = ret_wd.where(bench_mask).mean(axis=1).reindex(eval_index).fillna(0.0)
+    benchmark_fallback_dates = []
+    if protocol.benchmark == "same_cluster_equal_weight":
+        clusters = payload["clusters"].reindex(ret_wd.index).shift(1).reindex(eval_index)
+        for dt in eval_index:
+            members = clusters.loc[dt].where(bench_mask.loc[dt]).dropna()
+            if members.empty:
+                benchmark_fallback_dates.append(str(dt.date()))
+                continue
 
     signal_days = _signal_days(eval_index, profile.rebalance_frequency)
 
     # -- run 目录 --
-    runtime_dependencies = [
-        dep for factor in (runtime_factors or {}).values() for dep in factor.dependencies
-    ]
-    used_fields = _MARKET_FIELDS + sorted(
-        set(runtime_dependencies or _factor_dependencies(profile))
-    )
     store = BacktestRunStore.create(
         profile_name=profile.profile_name,
         run_id=run_id,
@@ -254,7 +221,9 @@ def run_backtest(
             "profile": profile.model_dump(mode="json"),
             "factor_code_hashes": sig.factor_code_hashes,
             "factor_directions": sig.directions,
-            "data_fingerprint": _data_fingerprint(used_fields),
+            "data_fingerprint": sig.provenance,
+            "lineage": sig.provenance,
+            "random_seed": 42,
             "signal_notes": sig.notes,
         },
     )
@@ -271,6 +240,15 @@ def run_backtest(
 
     try:
         for i, date in enumerate(eval_index):
+            if protocol.benchmark == 'same_cluster_equal_weight' and ledger.positions:
+                members=clusters.loc[date].where(bench_mask.loc[date]).dropna()
+                held_clusters=clusters.loc[date].reindex(list(ledger.positions))
+                if not members.empty and held_clusters.notna().all():
+                    cluster_returns=ret_wd.loc[date].reindex(members.index).groupby(members).mean()
+                    matched=cluster_returns.reindex(held_clusters.to_numpy())
+                    if matched.notna().all():bench_series.loc[date]=matched.mean()
+                    elif str(date.date()) not in benchmark_fallback_dates:benchmark_fallback_dates.append(str(date.date()))
+                elif str(date.date()) not in benchmark_fallback_dates:benchmark_fallback_dates.append(str(date.date()))
             ledger.drift(ret_wd.loc[date])
             day_fills = _delist_disposal(
                 ledger,
@@ -302,16 +280,21 @@ def run_backtest(
                 trad=trad,
                 rule_engine=rule_engine,
                 protocol=protocol,
-                min_cash_ratio=profile.position_constraint.min_cash_ratio,
+                min_cash_ratio=Decimal(str(profile.constraints.cash_reserve)),
             )
             pending = dict(result.pending_sells)
             day_fills.extend(result.fills)
             trades.extend(day_fills)
 
             if date in signal_days and i + 1 < len(eval_index):
-                scheduled[eval_index[i + 1]] = target_weights(
-                    sig.scores.loc[date], profile.position_constraint
-                )
+                candidates = sig.scores.loc[date].rename("score").rename_axis("code").reset_index()
+                candidates["cluster_id"] = candidates.code.map(payload["clusters"].loc[date])
+                candidates["industry_code"] = candidates.code.map(payload["industries"].loc[date])
+                candidates["in_universe"] = candidates.code.map(payload["mask"].loc[date])
+                weights = construct(candidates, Constraints(**profile.constraints.model_dump()),
+                                    breadth=payload["breadth"].get(date), regime=profile.risk.regime_filter.model_dump(),
+                                    star_market_enabled=config.star_market_enabled)
+                scheduled[eval_index[i + 1]] = dict(zip(weights.code, map(lambda x:Decimal(str(x)),weights.weight)))
 
             nav_now = float(ledger.nav)
             bench_r = float(bench_series.loc[date])
@@ -356,6 +339,8 @@ def run_backtest(
         initial_capital=float(config.initial_capital),
         trading_days_per_year=protocol.trading_days_per_year,
     )
+    metrics["benchmark"] = {"name":protocol.benchmark,"fallback_used":bool(benchmark_fallback_dates),"fallback_dates":benchmark_fallback_dates}
+    metrics["objective"] = assess_objective(metrics, protocol)
     store.write_metrics(metrics)
 
     chart = nav_frame.set_index("date")[["nav"]].copy()

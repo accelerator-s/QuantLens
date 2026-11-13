@@ -163,6 +163,7 @@ class _LogConsole:
 class ProductionEvolutionServices:
     def __init__(self) -> None:
         self._profiles: dict[str, Any] = {}
+        self._published_candidates: dict[str, str] = {}
 
     def _context(self, config: EvolutionConfig):
         from backtest.config import BacktestConfig, resolve_and_check
@@ -383,8 +384,8 @@ class ProductionEvolutionServices:
     def check_candidate(
         self, config: EvolutionConfig, version: FactorVersion, *, timeout_seconds: float
     ) -> None:
-        from ai.execution import run_factor, syntax_check
-        from panel import cache_status, load_panel, panel_field_names
+        from ai.execution import syntax_check
+        from panel import panel_field_names
 
         errors = syntax_check(version.code)
         if errors:
@@ -402,22 +403,10 @@ class ProductionEvolutionServices:
                 blocking=False,
                 suggested_action="下一轮只使用面板字段注册表中的依赖。",
             )
-        sample_end = min(
-            config.train_window.end,
-            (pd.Timestamp(config.train_window.start) + pd.Timedelta(days=120)).strftime("%Y-%m-%d"),
-        )
-        sample_start = (
-            pd.Timestamp(config.train_window.start) - pd.Timedelta(days=config.lookback_buffer_days)
-        ).strftime("%Y-%m-%d")
-        meta = cache_status()["default"].meta or {}
-        bounds = meta.get("build_params") or {}
-        sample_start = max(sample_start, bounds.get("start") or sample_start)
-        sample_end = min(sample_end, bounds.get("end") or sample_end)
-        panel = load_panel(version.dependencies, start=sample_start, end=sample_end)
-        value = run_factor(source=version.code, panel_payload=panel)
-        if not isinstance(value, pd.DataFrame):
-            raise ContractViolation(code='EVOLUTION_OUTPUT_INVALID', message='候选应返回日期×股票矩阵',
-                                    suggested_action='检查 compute 函数返回值')
+        from quantlens.research_candidate import publish_candidate
+        key=version.version_id+':'+version.code_hash
+        if key not in self._published_candidates:
+            self._published_candidates[key]=publish_candidate(config.base_factor,version)
 
     def evaluate(
         self,
@@ -429,45 +418,26 @@ class ProductionEvolutionServices:
         timeout_seconds: float,
         on_progress,
     ) -> WindowResult:
+        from quantlens.compute import submit
+        from backtest.report import BacktestRunStore
+        from strategy import StrategyProfileStore
+        from strategy.models import StrategyProfileDoc,FactorSpec,FactorRef,WeightMode
+        import uuid
+        protocol,base_profile=self._context(config)
+        if window is None:
+            raise ContractViolation(code='EVOLUTION_WINDOW_REQUIRED',message='评价必须指定时间窗口')
+        key=version.version_id+':'+version.code_hash
+        if key not in self._published_candidates:
+            self.check_candidate(config,version,timeout_seconds=timeout_seconds)
+        name=self._published_candidates[key]
         from backtest.config import BacktestConfig
         from backtest.engine import run_backtest
-        from backtest.signal import RuntimeFactor
-        from strategy import ResolvedStrategyProfile
-
-        protocol, base_profile = self._context(config)
-        if window is None:
-            raise ContractViolation(
-                code="EVOLUTION_WINDOW_REQUIRED",
-                message=f"评价 {window_name} 缺少显式时间窗口。",
-                blocking=True,
-            )
-        profile_payload = base_profile.model_dump(mode="json")
-        profile_payload["standardization_chain"] = _tokens_to_chain(version.standardization)
-        if version.missing_handling == "fill_zero" and not any(
-            step.get("step") == "fillna" for step in profile_payload["standardization_chain"]
-        ):
-            profile_payload["standardization_chain"].append({"step": "fillna", "method": "zero"})
-        profile = ResolvedStrategyProfile.model_validate(profile_payload)
-        bt_config = BacktestConfig(
-            profile_name=config.profile_name,
-            start=window.start,
-            end=window.end,
-            initial_capital=Decimal(str(config.initial_capital)),
-            lookback_buffer_days=config.lookback_buffer_days,
-        )
-        runtime = RuntimeFactor(
-            source=version.code,
-            dependencies=tuple(version.dependencies),
-            direction=version.direction,
-        )
-        outcome = run_backtest(
-            bt_config,
-            protocol=protocol,
-            profile=profile,
-            console=_LogConsole(on_progress),
-            runtime_factors={config.base_factor: runtime},
-        )
-        return WindowResult(window=window_name, run_id=outcome.run_id, metrics=outcome.metrics)
+        profile=base_profile.model_copy(update={'factors':FactorSpec(weighting=WeightMode.EQUAL,items=[FactorRef(name=name)])})
+        run_id='BT-'+uuid.uuid4().hex
+        on_progress('读取已发布的候选因子与统一行情，执行逐日回测')
+        run_backtest(BacktestConfig(profile_name=profile.profile_name,start=window.start,end=window.end,initial_capital=config.initial_capital),protocol=protocol,profile=profile,run_id=run_id)
+        record=BacktestRunStore.open_run(run_id)
+        return WindowResult(window=window_name,run_id=run_id,metrics=record.read_metrics())
 
     def begin_experiment(
         self, config: EvolutionConfig, version: FactorVersion, parent_experiment_id: str

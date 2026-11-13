@@ -13,7 +13,6 @@ export async function mount(root, ctx) {
   root.querySelector("[data-market-set]").addEventListener("click", () => setMarket());
   root.querySelector("[data-fee-set]").addEventListener("click", () => setFee());
   root.querySelector("[data-doctor-init]").addEventListener("click", () => doctorInit());
-  root.querySelector("[data-memory-config]").addEventListener("click", () => memoryConfigure());
   root.querySelector("[data-trash-purge]").addEventListener("click", () => trashPurge());
 
   ctx.bus.on("route", (id) => {
@@ -35,7 +34,7 @@ export async function mount(root, ctx) {
             "交易市场",
             s.active_market ? `${s.active_market} ${s.active_instrument_class}` : "（未选择）",
           ],
-          ["佣金费率", s.commission_rate || "0.0003（预置默认：万三）"],
+          ["佣金费率", s.commission_rate || "0.00008（万0.8，最低5元）"],
           ["上次登录", fmtTime(s.last_login)],
         ]),
       );
@@ -68,7 +67,6 @@ export async function mount(root, ctx) {
               format: (v, r) => `${v || "—"} ${r.instrument_class || ""}`.trim(),
             },
             { key: "source_category", label: "分类" },
-            { key: "related_issue_id", label: "关联事项" },
             { key: "updated_at", label: "更新时间", format: (v) => fmtTime(v) },
           ],
           data.items,
@@ -139,7 +137,7 @@ export async function mount(root, ctx) {
       title: "设置券商佣金费率",
       message: "输入小数形式，如万 0.8 = 0.00008。",
       submitLabel: "下一步",
-      fields: [{ key: "rate", label: "费率", required: true, placeholder: "0.0003" }],
+      fields: [{ key: "rate", label: "费率", required: true, placeholder: "0.00008" }],
     });
     if (!values) return;
     try {
@@ -171,35 +169,6 @@ export async function mount(root, ctx) {
       });
     } catch (err) {
       toastError(ctx.bus, err, "目录补齐失败");
-    }
-  }
-
-  async function memoryConfigure() {
-    const values = await formDialog({
-      title: "记忆服务配置",
-      message: "保存指定版本，不升级依赖包。",
-      submitLabel: "下一步",
-      fields: [
-        { key: "pinned_version", label: "固定版本", required: true, placeholder: "0.1.x" },
-        { key: "package_name", label: "包名", value: "mem0ai" },
-      ],
-    });
-    if (!values) return;
-    try {
-      const done = await runWithConfirm({
-        title: "配置记忆服务",
-        confirmLabel: "确认写入",
-        execute: (extra) =>
-          ctx.api.memoryConfigure({
-            pinned_version: values.pinned_version,
-            package_name: values.package_name || "mem0ai",
-            ...extra,
-          }),
-      });
-      if (!done) return;
-      ctx.bus.emit("toast", { kind: "success", title: `记忆服务版本已固定为 ${done.pinned_version}` });
-    } catch (err) {
-      toastError(ctx.bus, err, "记忆服务配置失败");
     }
   }
 

@@ -1,0 +1,48 @@
+{
+  "table": "industry_classification",
+  "schema_version": "4d3a4576c2a41bad",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "classification_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "classification_name",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "effective_date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "industry_code",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "industry_name",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "downloaded_at",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import { openStrategyChat } from "./strategy-chat.js";
 import { toastError } from "../../core/toast.js";
 import { badge, fmtTime } from "../../core/fmt.js";
 import { codeEl, el, kvEl, tableEl } from "../../core/dom.js";
-import { updateTaskLog } from "../../core/task-log.js";
+import { captureLogScroll, updateTaskLog } from "../../core/task-log.js";
 
 
 const STRATEGY_TRANSITIONS = {
@@ -33,6 +33,12 @@ function statusBadge(status) {
 }
 
 
+function ruleHeading(key, title) {
+  const heading = el("h4", "", title);
+  heading.dataset.ruleSection = key;
+  return heading;
+}
+
 function ruleSections(rule) {
   const nodes = [];
 
@@ -50,14 +56,14 @@ function ruleSections(rule) {
     ["回测锚点", rule.backtest_anchor],
     ["实盘窗口", rule.live_window],
     ["时段锚点", rule.session_anchor],
-    ["关联事项", rule.related_issue_id],
-  ].filter(([, v]) => v !== "" && v !== undefined && v !== null);
-  if (baseRows.length) nodes.push(el("h4", "", "交易规则"), kvEl(baseRows));
+  ].filter(([, v]) => v !== "" && v !== undefined && v !== null)
+    .map(([label, value]) => [label, value, {wide: ["停牌处理", "时段锚点"].includes(label)}]);
+  if (baseRows.length) nodes.push(ruleHeading("overview", "交易规则"), kvEl(baseRows));
 
   const sessions = rule.sessions || [];
   if (sessions.length) {
     nodes.push(
-      el("h4", "", "交易时段"),
+      ruleHeading("sessions", "交易时段"),
       tableEl(
         [
           { key: "name", label: "名称" },
@@ -77,7 +83,7 @@ function ruleSections(rule) {
 
   const pl = rule.price_limit;
   if (pl) {
-    nodes.push(el("h4", "", "涨跌停"));
+    nodes.push(ruleHeading("limits", "涨跌停"));
     if (pl.enabled === false) {
       nodes.push(el("p", "item-row__meta", "该市场没有涨跌停限制。"));
     } else {
@@ -110,7 +116,7 @@ function ruleSections(rule) {
   const quantityRules = rule.quantity_rules || [];
   if (quantityRules.length) {
     nodes.push(
-      el("h4", "", "板块交易单位"),
+      ruleHeading("quantity", "板块交易单位"),
       tableEl(
         [
           { key: "board", label: "板块" },
@@ -123,14 +129,14 @@ function ruleSections(rule) {
     );
   }
 
-  nodes.push(...feeTaxSection("费用", rule.fees, true));
-  nodes.push(...feeTaxSection("税费", rule.taxes, false));
+  nodes.push(...feeTaxSection("fees", "费用", rule.fees, true));
+  nodes.push(...feeTaxSection("taxes", "税费", rule.taxes, false));
 
   const deadlineSchedule = rule.disclosure_deadlines || {};
   const deadlines = deadlineSchedule.items || [];
   if (deadlines.length) {
     nodes.push(
-      el("h4", "", "定期报告披露截止日"),
+      ruleHeading("disclosures", "定期报告披露截止日"),
       tableEl(
         [
           { key: "period", label: "报告期截止" },
@@ -147,20 +153,6 @@ function ruleSections(rule) {
     if (deadlineSchedule.notes) nodes.push(el("p", "item-row__meta", deadlineSchedule.notes));
   }
 
-  if (rule.sample_tests) nodes.push(el("h4", "", "样例测试"), codeEl(rule.sample_tests));
-
-  const sources = rule.verification_sources || [];
-  if (sources.length) {
-    const ul = el("ul", "rule-sources");
-    for (const s of sources) ul.append(el("li", "", s));
-    nodes.push(el("h4", "", "验证来源"), ul);
-  }
-
-  const metaBits = [];
-  if (rule.created_at) metaBits.push(`创建于 ${fmtTime(rule.created_at)}`);
-  if (rule.updated_at) metaBits.push(`更新于 ${fmtTime(rule.updated_at)}`);
-  if (metaBits.length) nodes.push(el("p", "item-row__meta", metaBits.join(" · ")));
-
   return nodes;
 }
 
@@ -170,7 +162,7 @@ function deadlineYearLabel(offset) {
   return `${offset} 年后`;
 }
 
-function feeTaxSection(title, schedule, withLimits) {
+function feeTaxSection(key, title, schedule, withLimits) {
   const items = schedule?.items || [];
   if (!items.length) return [];
   const cols = [
@@ -190,7 +182,7 @@ function feeTaxSection(title, schedule, withLimits) {
     max: it.max_amount,
     notes: it.notes || "",
   }));
-  const nodes = [el("h4", "", title), tableEl(cols, rows)];
+  const nodes = [ruleHeading(key, title), tableEl(cols, rows)];
   if (schedule.notes) nodes.push(el("p", "item-row__meta", schedule.notes));
   return nodes;
 }
@@ -212,14 +204,12 @@ export async function mount(root, ctx) {
   };
   let currentProfile = "";
   let currentRule = "";
-  let ruleStatuses = [];
   let currentTrainingId = "";
   const trainingPolls = new Map();
 
   root
     .querySelector("[data-profile-create]")
     .addEventListener("click", () => openStrategyChat(ctx, { onYaml: saveDraft }));
-  root.querySelector("[data-rule-preset]").addEventListener("click", () => loadRulePreset());
   root.querySelector("[data-strategy-train]").addEventListener("click", () => startTraining());
 
   for (const btn of tabs) {
@@ -228,6 +218,7 @@ export async function mount(root, ctx) {
       panels.forEach((p) => {
         p.hidden = p.dataset.panel !== btn.dataset.tab;
       });
+      root.querySelector('[data-profile-create]').hidden = btn.dataset.tab !== 'profiles';
       activate(btn.dataset.tab);
     });
   }
@@ -296,14 +287,12 @@ export async function mount(root, ctx) {
         kvEl([
           ["固定影子观察期", policy.shadow_observation_days ? `${policy.shadow_observation_days} 个交易日` : "—"],
           ["最小同期观察数", policy.min_shadow_observations],
-          ["最小净收益增量", fmtPct(policy.min_challenger_net_excess_return)],
-          ["最大成本率增量", fmtPct(policy.max_cost_rate_increase)],
-          ["最大回撤恶化", fmtPct(policy.max_drawdown_worsening)],
-          ["最大换手增量", fmtNum(policy.max_turnover_increase)],
+          ["排序目标", "回测协议主目标"],
+          ["同分顺序", "最大回撤、年化换手"],
         ]),
       );
       if (!data.items?.length) {
-        wrap.append(el("p", "item-row__meta", "尚无可竞争的策略版本。"));
+        wrap.append(el("p", "item-row__meta", "尚无可比较的策略方案。"));
       }
       for (const slot of data.items || []) {
         wrap.append(el("h4", "", slot.strategy_name));
@@ -315,7 +304,7 @@ export async function mount(root, ctx) {
           tableEl(
             [
               { key: "role", label: "角色", format: (v) => badge(v) },
-              { key: "object_id", label: "策略版本" },
+              { key: "object_id", label: "策略方案" },
               { key: "change", label: "研究变更" },
               { key: "action", label: "人工审批", format: (v) => v },
             ],
@@ -426,12 +415,11 @@ export async function mount(root, ctx) {
         kvEl([
           ["研究状态", badge(data.state)],
           ["研究模型", data.program.configuration?.model_name || "历史任务未记录"],
-          ["研究数据", "系统已自动完成质量检查并固定研究口径"],
           ["训练区间", `${data.program.train_window.start} .. ${data.program.train_window.end}`],
           ["验证区间", `${data.program.validation_window.start} .. ${data.program.validation_window.end}`],
           ["锁定测试", `${data.program.locked_test_window.start} .. ${data.program.locked_test_window.end}`],
-          ["策略版本数", versions.length],
-          ["评价运行数", runs.length],
+          ["已保存方案数", versions.length],
+          ["评价次数", runs.length],
           ["当前挑战者", challenger?.object_id || "尚未产生"],
         ]),
       );
@@ -453,10 +441,10 @@ export async function mount(root, ctx) {
       }
       if (versions.length) {
         box.append(
-          el("h4", "", "已保存的策略版本"),
+          el("h4", "", "已保存的策略方案"),
           tableEl(
             [
-              { key: "id", label: "版本" },
+              { key: "id", label: "方案" },
               { key: "change", label: "单轮变更" },
               { key: "factors", label: "因子数", num: true },
               { key: "state", label: "状态", format: (v) => badge(v) },
@@ -506,7 +494,7 @@ export async function mount(root, ctx) {
           tableEl(
             [
               { key: "purpose", label: "用途" },
-              { key: "subject", label: "策略版本" },
+              { key: "subject", label: "策略方案" },
               { key: "window", label: "区间" },
               { key: "run", label: "回测运行" },
             ],
@@ -520,7 +508,9 @@ export async function mount(root, ctx) {
         );
       }
       if (currentTrainingId !== programId) return;
+      const restoreScroll = captureLogScroll(retainedLog);
       hosts.trainingDetail.replaceChildren(...[box, retainedLog].filter(Boolean));
+      restoreScroll();
     } catch (err) {
       toastError(ctx.bus, err, "策略训练详情加载失败");
     }
@@ -638,7 +628,7 @@ export async function mount(root, ctx) {
       renderState(hosts.profileList, {
         kind: "empty",
         title: "暂无策略配置",
-        detail: "点击右上角「新建策略配置」，与模型讨论后生成。",
+        detail: "点击「新建策略配置」，从因子库组合因子，并设置调仓与风控。",
       });
       hosts.profileDetail.innerHTML = "";
       return;
@@ -782,7 +772,6 @@ export async function mount(root, ctx) {
     await renderState(hosts.ruleList, { kind: "loading", title: "加载市场规则…" });
     try {
       const data = await ctx.api.marketRules();
-      ruleStatuses = data.statuses || [];
       renderRuleList(data.items);
     } catch (err) {
       await renderState(hosts.ruleList, {
@@ -796,13 +785,19 @@ export async function mount(root, ctx) {
 
   function renderRuleList(items) {
     hosts.ruleList.innerHTML = "";
+    hosts.ruleList.hidden = items.length === 1;
     if (!items.length) {
       renderState(hosts.ruleList, {
         kind: "empty",
         title: "暂无市场规则",
-        detail: "点击上方「载入预设」导入内置规则。",
+        detail: "未找到 A 股市场规则，请检查 config/market_rules/CN-A-stock.yaml 配置。",
       });
       hosts.ruleDetail.innerHTML = "";
+      return;
+    }
+    if (items.length === 1) {
+      currentRule = items[0].name;
+      renderRuleDetail(items[0]);
       return;
     }
     for (const item of items) {
@@ -832,7 +827,7 @@ export async function mount(root, ctx) {
   function renderRuleDetail(rule) {
     hosts.ruleDetail.innerHTML = "";
     const card = el("article", "card detail-card");
-    const head = el("div", "detail-card__head");
+    const head = el("div", "rule-detail__head");
     head.append(el("h3", "", rule.name));
     head.append(
       statusBadge(rule.status),
@@ -841,102 +836,42 @@ export async function mount(root, ctx) {
     );
     card.append(head);
 
-    const ops = el("div", "detail-card__head");
-    for (const target of ruleStatuses) {
-      if (target === rule.status) continue;
-      const btn = el("button", "btn btn--ghost", ACTION_LABEL[target] || target);
-      btn.type = "button";
-      btn.addEventListener("click", () => transitionRule(rule.name, target));
-      ops.append(btn);
-    }
+    const ops = el("div", "rule-detail__actions");
+    const calcHost = el("div", "rule-detail__calculation");
     const feeBtn = el("button", "btn btn--ghost", "费用计算");
     feeBtn.type = "button";
     feeBtn.addEventListener("click", () => checkFees(rule, calcHost));
-    ops.append(feeBtn);
     const limitBtn = el("button", "btn btn--ghost", "涨跌停计算");
     limitBtn.type = "button";
     limitBtn.addEventListener("click", () => checkPriceLimit(rule, calcHost));
-    ops.append(limitBtn);
-    const removeBtn = el("button", "btn btn--danger", "删除");
-    removeBtn.type = "button";
-    removeBtn.addEventListener("click", () => removeRule(rule.name));
-    ops.append(removeBtn);
-    card.append(ops);
-
-    const calcHost = el("div");
+    ops.append(feeBtn, limitBtn);
+    head.append(ops);
+    card.classList.add("rule-detail");
     card.append(calcHost);
 
-    for (const node of ruleSections(rule)) card.append(node);
-    hosts.ruleDetail.append(card);
-  }
-
-  async function loadRulePreset() {
-    try {
-      let presets = [];
-      try {
-        presets = (await ctx.api.marketsInfo()).presets || [];
-      } catch {
-        presets = [];
+    const sections = el("div", "rule-detail__sections");
+    const byKey = new Map();
+    let section;
+    for (const node of ruleSections(rule)) {
+      if (node.tagName === "H4") {
+        section = el("section", "rule-detail__section");
+        section.dataset.ruleSection = node.dataset.ruleSection;
+        byKey.set(node.dataset.ruleSection, section);
       }
-      const values = await formDialog({
-        title: "载入市场规则预设",
-        submitLabel: "查看并确认",
-        fields: [
-          presets.length
-            ? { key: "name", label: "预设名称", kind: "select", options: presets }
-            : { key: "name", label: "预设名称", required: true },
-          { key: "override", label: "覆盖同名规则", kind: "checkbox" },
-        ],
-      });
-      if (!values) return;
-      const result = await runWithConfirm({
-        execute: (extra) =>
-          ctx.api.marketRuleLoadPreset({
-            name: values.name,
-            override: values.override,
-            ...extra,
-          }),
-        title: `载入预设 ${values.name}`,
-        confirmLabel: "确认载入",
-      });
-      if (!result) return;
-      ctx.bus.emit("toast", { kind: "success", title: `已载入预设 ${values.name}` });
-      await loadRules();
-    } catch (err) {
-      toastError(ctx.bus, err, "预设载入失败");
+      section.append(node);
     }
-  }
-
-  async function transitionRule(name, target) {
-    try {
-      const result = await runWithConfirm({
-        execute: (extra) => ctx.api.marketRuleTransition(name, { target, ...extra }),
-        title: `将市场规则 ${name} ${ACTION_LABEL[target] || target}`,
-        confirmLabel: "确认",
-      });
-      if (!result) return;
-      ctx.bus.emit("toast", { kind: "success", title: `${name} 已${ACTION_LABEL[target] || target}` });
-      await loadRules();
-    } catch (err) {
-      toastError(ctx.bus, err, "规则流转失败");
+    for (const keys of [["overview"], ["sessions", "quantity"], ["limits"], ["fees", "taxes"], ["disclosures"]]) {
+      const items = keys.map(key => byKey.get(key)).filter(Boolean);
+      if (!items.length) continue;
+      if (items.length === 1) sections.append(items[0]);
+      else {
+        const group = el("div", "rule-detail__group");
+        group.append(...items);
+        sections.append(group);
+      }
     }
-  }
-
-  async function removeRule(name) {
-    try {
-      const result = await runWithConfirm({
-        execute: (extra) => ctx.api.marketRuleRemove(name, extra),
-        title: `删除市场规则 ${name}`,
-        confirmLabel: "确认删除",
-        danger: true,
-      });
-      if (!result) return;
-      currentRule = "";
-      ctx.bus.emit("toast", { kind: "success", title: `已删除市场规则 ${name}` });
-      await loadRules();
-    } catch (err) {
-      toastError(ctx.bus, err, "规则删除失败");
-    }
+    card.append(sections);
+    hosts.ruleDetail.append(card);
   }
 
   async function checkFees(rule, host) {
@@ -1003,16 +938,19 @@ export async function mount(root, ctx) {
       });
       host.innerHTML = "";
       host.append(el("h4", "", "涨跌停计算"));
-      host.append(
-        kvEl([
-          ["前收盘价", data.prev_close],
-          ["限制幅度", data.limit_pct],
-          ["涨停价", data.upper],
-          ["跌停价", data.lower],
-          ["首日规则", data.first_day_rule || "（无）"],
-          ["可用特殊条件", (data.conditions || []).join("、") || "（无）"],
-        ]),
-      );
+      const metrics = kvEl([
+        ["前收盘价", data.prev_close],
+        ["幅度", `${data.limit_pct}%`],
+        ["涨停价", data.upper],
+        ["跌停价", data.lower],
+      ]);
+      metrics.classList.add("rule-calculation__metrics");
+      const notes = kvEl([
+        ["首日规则", data.first_day_rule || "（无）"],
+        ["特殊条件", (data.conditions || []).join("、") || "（无）"],
+      ]);
+      notes.classList.add("rule-calculation__notes");
+      host.append(metrics, notes);
     } catch (err) {
       toastError(ctx.bus, err, "涨跌停计算失败");
     }

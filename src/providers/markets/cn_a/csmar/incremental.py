@@ -624,7 +624,7 @@ def _download_batch_with_retry(
                     suggested_action=(
                         "空结果不符合该表数据预期，可能为数据源缺数或查询参数异常。"
                         "已成功批次不回滚；请登录 data.csmar.com 人工核对该区间数据，"
-                        "确认后重试或创建 data_quality_conflict issue。"
+                        "确认源数据冲突后重试。"
                     ),
                 ) from e
             last_error = e
@@ -655,7 +655,7 @@ def _download_batch_with_retry(
         suggested_action=(
             "已成功批次不回滚，manifest 水位停在失败批次之前；"
             "请检查校园网连接与 CSMAR 服务状态后重新执行 data update，"
-            "将自动从失败区间继续。若持续失败请创建 bug issue。"
+            "将自动从失败区间继续。若持续失败请检查错误日志。"
         ),
     ) from last_error
 

@@ -68,7 +68,12 @@
   border: 1px solid var(--line-0);
   font-size: var(--fs-xs);
   color: var(--ink-1);
+  font-family: inherit;
+  cursor: pointer;
 }
+.topbar__health:hover { border-color: var(--accent); }
+.topbar__health[data-state="starting"] .topbar__dot { background: var(--accent); animation: service-pulse 1.4s ease-in-out infinite; }
+@keyframes service-pulse { 50% { opacity: .3; } }
 
 .topbar__dot {
   width: 6px;

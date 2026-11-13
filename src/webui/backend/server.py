@@ -31,20 +31,18 @@ def create_app() -> FastAPI:
         return await call_next(request)
     app.include_router(api_router)
     scheduler = AutomationScheduler(manager)
-    from quantlens.tracking import TrackingScheduler
-    tracking=TrackingScheduler(manager)
 
     @app.on_event("startup")
     def start_scheduler() -> None:
         if os.environ.get('QUANTLENS_RECOVERY')!='1':
+            from .services import start_background_services
+            start_background_services()
             scheduler.start()
-            tracking.start()
 
     @app.on_event("shutdown")
     def stop_scheduler() -> None:
         if os.environ.get('QUANTLENS_RECOVERY')!='1':
             scheduler.stop()
-            tracking.stop()
 
     @app.middleware("http")
     async def disable_frontend_cache(request: Request, call_next):

@@ -45,7 +45,7 @@ class IntegrityReport:
     analyst_quality: AnalystQualitySummary = field(default_factory=AnalystQualitySummary)
 
     @property
-    def has_issues(self) -> bool:
+    def has_errors(self) -> bool:
         
         return any(t.pk_duplicates > 0 or t.coverage_gaps for t in self.tables) or bool(
             self.analyst_quality.unexplained_conflicts

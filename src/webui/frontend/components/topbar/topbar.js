@@ -2,32 +2,13 @@ import { hydrateIcons, loadIcon } from "../../core/icons.js";
 import { currentTheme, onThemeChange, toggleTheme } from "../../core/theme.js";
 import { onHealth } from "../../core/health.js";
 
-const PAGE_META = {
-  dashboard: ["行情与选股", "工作台"],
-  market: ["行情与选股", "市场全景"],
-  stocks: ["行情与选股", "个股分析"],
-  screen: ["行情与选股", "条件选股"],
-  watch: ["行情与选股", "自选跟踪"],
-  models: ["量化研究", "预测模型"],
-  factors: ["量化研究", "因子库"],
-  experiments: ["量化研究", "因子迭代"],
-  backtest: ["量化研究", "策略回测"],
-  assistant: ["量化研究", "研究问答"],
-  journal: ["量化研究", "研究记录"],
-  portfolio: ["组合与运维", "组合跟踪"],
-  strategy: ["组合与运维", "策略配置"],
-  data: ["组合与运维", "数据中心"],
-  review: ["组合与运维", "审计日志"],
-  "ai-config": ["组合与运维", "接口配置"],
-  system: ["组合与运维", "系统维护"],
-  overview: ["行情与选股", "工作台总览"],
-  admin: ["组合与运维", "系统设置"],
-};
+const PAGE_META = {dashboard:['研究主线','工作台'],screen:['研究主线','条件选股'],stocks:['研究主线','个股分析'],factors:['研究主线','因子库'],backtest:['研究主线','策略回测'],portfolio:['研究主线','组合跟踪'],settings:['设置','设置']};
 
 export async function mountTopbar(slot, bus, onRefresh) {
   const html = await fetch("/components/topbar/topbar.html").then((r) => r.text());
   slot.innerHTML = html;
   await hydrateIcons(slot);
+  slot.querySelector("[data-assistant-open]").onclick = () => bus.emit("assistant:open");
 
   const groupEl = slot.querySelector("[data-page-group]");
   const titleEl = slot.querySelector("[data-page-title]");
@@ -37,6 +18,7 @@ export async function mountTopbar(slot, bus, onRefresh) {
   const themeIcon = slot.querySelector("[data-theme-icon]");
   const refreshBtn = slot.querySelector("[data-refresh]");
   const navToggleBtn = slot.querySelector("[data-nav-toggle]");
+  healthEl.addEventListener('click', () => { window.location.hash = 'settings/cluster'; });
 
   if (navToggleBtn) {
     navToggleBtn.addEventListener("click", () => {
@@ -56,6 +38,20 @@ export async function mountTopbar(slot, bus, onRefresh) {
       healthLabel.textContent = "连接中断";
       return;
     }
+    const startup = h.service_startup;
+    if (startup?.status === 'running') {
+      healthEl.dataset.state = 'starting';
+      healthLabel.textContent = '服务启动中';
+      healthEl.title = `${startup.phase || '正在启动后台服务'}，点击查看进度`;
+      return;
+    }
+    if (['failed', 'interrupted'].includes(startup?.status)) {
+      healthEl.dataset.state = 'err';
+      healthLabel.textContent = startup.status === 'failed' ? '服务启动失败' : '服务启动中断';
+      healthEl.title = `${startup.error || '点击查看详情并重试'}`;
+      return;
+    }
+    healthEl.title = '查看后台服务状态';
     const missing = h.workspace?.missing ?? 0;
     if (missing === 0 && h.workspace?.matrix_file_exists !== false && Object.values(h.packages || {}).every(Boolean)) {
       healthEl.dataset.state = "ok";

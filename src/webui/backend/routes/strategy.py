@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict
 
 from exceptions import ContractViolation
 from market_rules import RuleEngine
-from market_rules.markets import list_presets, load_preset
 from market_rules.models import MarketRuleStatus
 from market_rules.registry import MarketRuleRegistry
 from presentation import factor_display_name, strategy_display_name
@@ -161,42 +160,6 @@ def list_market_rules(status: str = "", market: str = "", instrument_class: str 
 def get_market_rule(name: str) -> dict:
     return json_safe({"rule": MarketRuleRegistry().get(name)})
 
-class LoadPresetPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    confirm: bool = False
-    name: str
-    override: bool = False
-
-@router.post("/market-rules/load-preset")
-def load_market_rule_preset(payload: LoadPresetPayload) -> dict:
-    try:
-        cfg = load_preset(payload.name)
-    except KeyError as exc:
-        raise ContractViolation(
-            code="WEBUI_PRESET_NOT_FOUND",
-            message=f"预置 {payload.name!r} 不存在。",
-            suggested_action=f"可用预置：{'、'.join(list_presets()) or '（无）'}",
-        ) from exc
-    registry = MarketRuleRegistry()
-    exists = any(r.name == payload.name for r in registry.list())
-    if not payload.confirm:
-        if exists:
-            conflict = "是（将覆盖）" if payload.override else "是（未勾选覆盖，将被拒绝）"
-        else:
-            conflict = "否"
-        return confirm_preview(
-            {
-                "操作": "从预置加载市场规则",
-                "预置": payload.name,
-                "市场": f"{cfg.market} {cfg.instrument_class}",
-                "已有同名规则": conflict,
-                "说明": "加载后为 DRAFT 状态，激活后才参与市场切换。",
-            }
-        )
-    registry.upsert(cfg, override=payload.override)
-    return json_safe({"rule": registry.get(payload.name)})
-
 @router.post("/market-rules/{name}/transition")
 def transition_market_rule(name: str, payload: TransitionPayload) -> dict:
     registry = MarketRuleRegistry()
@@ -283,4 +246,4 @@ def check_price_limit(name: str, prev_close: str, condition: str = "") -> dict:
 def list_markets() -> dict:
     rules = MarketRuleRegistry().list()
     markets = sorted({r.market for r in rules})
-    return {"markets": markets, "presets": list_presets()}
+    return {"markets": markets}

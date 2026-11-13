@@ -27,6 +27,7 @@ from .models import (
     TargetPosition,
 )
 from .store import PortfolioStore
+from .permissions import can_buy
 from .trades import Positions, holdings_to_positions, refresh_available_qty
 
 if TYPE_CHECKING:
@@ -94,7 +95,7 @@ def _calendar_for(market: str) -> TradingCalendar:
         code="portfolio.recommend_market_unsupported",
         message=f"市场 {market!r} 尚无交易日历接入，无法生成调仓建议",
         blocking=True,
-        suggested_action="请先通过 framework issue 接入该市场的 TradingCalendar",
+        suggested_action="请先接入该市场的 TradingCalendar",
     )
 
 def latest_close_row(*, as_of: str | None = None) -> tuple[str, pd.Series]:
@@ -108,9 +109,9 @@ def latest_close_row(*, as_of: str | None = None) -> tuple[str, pd.Series]:
     if end is None:
         raise PortfolioContractError(
             code="portfolio.recommend_panel_unavailable",
-            message="矩阵缓存不存在或缺少构建参数，无法确定信号日",
+            message="尚无已发布的行情，无法确定信号日",
             blocking=True,
-            suggested_action="先执行 `data sync` 或 `data rebuild-cache` 构建面板缓存",
+            suggested_action="先同步数据并发布 DWD/ADS 批次",
         )
     if cache_end is not None and end > cache_end:
         end = cache_end
@@ -123,7 +124,7 @@ def latest_close_row(*, as_of: str | None = None) -> tuple[str, pd.Series]:
             code="portfolio.recommend_panel_empty",
             message=f"面板 close 在 {start} → {end} 内没有数据",
             blocking=True,
-            suggested_action="检查缓存覆盖范围（data cache-status）与 as_of 参数",
+            suggested_action="检查已发布数据的覆盖范围与 as_of 参数",
         )
     signal_date = closes.index.max().strftime("%Y-%m-%d")
     return signal_date, closes.ffill().iloc[-1]
@@ -202,34 +203,23 @@ def _validate_pair(
             suggested_action="请选择与策略市场 / 品种一致的账户",
         )
 
-def _score_ranking(
-    profile: ResolvedStrategyProfile,
-    signal_date: str,
-    *,
-    runtime_factors: dict[str, RuntimeFactor] | None = None,
-) -> list[str]:
-    
-    import numpy as np  
-
-    from backtest.signal import compute_composite_scores  
-
-    result = compute_composite_scores(
-        profile,
-        start=signal_date,
-        end=signal_date,
-        lookback_buffer_days=_LOOKBACK_BUFFER_DAYS,
-        runtime_factors=runtime_factors,
-    )
-    valid = result.scores.iloc[-1].dropna()
-    if valid.empty:
-        raise PortfolioContractError(
-            code="portfolio.recommend_no_scores",
-            message=f"策略 {profile.profile_name} 在 {signal_date} 无任何有效得分",
-            blocking=True,
-            suggested_action="检查因子依赖字段与样本池配置（universe）",
-        )
-    order = np.lexsort((valid.index.to_numpy(), -valid.to_numpy(dtype="float64")))
-    return [str(inst) for inst in valid.index.to_numpy()[order]]
+def _target_weights(profile,signal_date,*,account,nav,runtime_factors=None):
+    from quantlens.research_candidate import prepare_profile
+    from quantlens.compute import submit
+    from quantlens.sync_ads import sync
+    from quantlens import ads
+    import uuid,json
+    if runtime_factors:profile=prepare_profile(profile,runtime_factors)
+    batch_id='holdings-'+uuid.uuid4().hex
+    source_id=profile.extra.get('source_strategy_id',profile.profile_name)
+    target_id=f'{source_id}__account_{account.account_id}'
+    permission_args=[] if account.star_market_enabled else ['--no-star-market']
+    submit('spark_portfolio','--strategy',profile.profile_name,'--profile',json.dumps(profile.model_dump(mode='json')),'--as-of',signal_date,'--batch',batch_id,
+           '--target-id',target_id,'--capital',str(nav),*permission_args)
+    sync(batch_id)
+    rows=ads.query('portfolio_target','strategy_id=? AND as_of=? AND run_id=?',
+                   [target_id,signal_date,ads.provenance('portfolio_target')['run_id']],limit=10000,order='weight DESC,code')
+    return {row['code']:Decimal(str(row['weight'])) for row in rows}
 
 # 计划构建（纯计算）
 
@@ -285,13 +275,11 @@ def build_plan(
 
     nav = investable_nav(account, positions, close_row)
     cash_available = _cash_bucket(account).available
-    constraint = profile.position_constraint
-    per_name_weight = min(
-        (Decimal(1) - constraint.min_cash_ratio) / constraint.top_n,
-        constraint.max_weight_per_name,
-    )
+
 
     caveats: list[str] = []
+    if not account.star_market_enabled:
+        caveats.append("账户未开通科创板权限，已排除科创板买入候选；已有持仓仍按可卖数量处理")
     budget = cash_available
     frozen_map: dict[str, Decimal] = {}
     price_map: dict[str, Decimal] = {}
@@ -303,22 +291,27 @@ def build_plan(
         if p["available_qty"] > 0:
             amount = p["available_qty"] * price
             budget += amount - engine.calculate_total_cost(amount, "sell").total
-    reserve = constraint.min_cash_ratio * nav
+    reserve_ratio=Decimal(str(profile.constraints.cash_reserve))
+    reserve = reserve_ratio * nav
     budget -= reserve
     if budget < 0:
         caveats.append(
-            f"可用资金低于最低现金保留（min_cash_ratio={constraint.min_cash_ratio}），"
+            f"可用资金低于最低现金保留（cash_reserve={reserve_ratio}），"
             "本期无法买入任何标的"
         )
         budget = Decimal("0")
 
     # 顺延替补选股
-    ranking = _score_ranking(profile, signal_date, runtime_factors=runtime_factors)
+    target_weights = _target_weights(profile, signal_date, account=account, nav=nav, runtime_factors=runtime_factors)
+    ranking = list(target_weights)
     selected: dict[str, int] = {}
     skipped: list[SkippedCandidate] = []
-    max_skips = constraint.top_n * _MAX_SKIP_FACTOR
+    max_skips = profile.constraints.max_positions * _MAX_SKIP_FACTOR
     for rank, instrument_id in enumerate(ranking, start=1):
-        if len(selected) >= constraint.top_n:
+        if not can_buy(instrument_id, star_market_enabled=account.star_market_enabled):
+            skipped.append(SkippedCandidate(instrument_id, rank, "账户未开通科创板权限"))
+            continue
+        if len(selected) >= profile.constraints.max_positions:
             break
         if len(skipped) >= max_skips:
             caveats.append(f"顺延替补已跳过 {len(skipped)} 名候选，停止继续替补（资金规模过小）")
@@ -329,7 +322,7 @@ def build_plan(
             continue
         price_map[instrument_id] = price
         min_unit, increment = engine.resolve_min_unit(board_of(instrument_id))
-        alloc = per_name_weight * nav
+        alloc = target_weights[instrument_id] * nav
         shares = _lot_round(int(alloc / price), min_unit, increment)
         min_amount = (Decimal(min_unit) * price).quantize(Decimal("0.01"))
         if shares <= 0:
@@ -428,7 +421,7 @@ def build_plan(
             instrument_id=instrument_id,
             side=Side.LONG,
             qty=Decimal(target),
-            weight=per_name_weight,
+            weight=Decimal(target)*price_map[instrument_id]/nav if nav else Decimal(0),
         )
         for instrument_id, target in sorted(selected.items())
         if target > 0

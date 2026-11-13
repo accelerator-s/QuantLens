@@ -30,7 +30,7 @@ class FactorPlugin:
                 code="FACTOR_PLUGIN_EXISTS",
                 message=f"因子源码已存在：{path}",
                 blocking=True,
-                suggested_action="加 --override 强制覆盖（建议先开 factor issue 走变更评审）。",
+                suggested_action="加 --override 强制覆盖（先记录因子改动并创建新版本）。",
             )
         path.write_text(source, encoding="utf-8")
         return path

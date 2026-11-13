@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import os
 from importlib import metadata
+from uuid import uuid4
 
 from fastapi import APIRouter
 
@@ -13,6 +14,8 @@ from version import __version__
 from ..serialize import json_safe
 
 router = APIRouter(tags=["status"])
+
+_SERVER_INSTANCE = uuid4().hex
 
 _REQUIRED_PACKAGES = ("rich", "pyyaml", "pydantic", "fastapi", "uvicorn", "pyspark", "duckdb", "pandas", "pyarrow", "numpy", "httpx")
 
@@ -37,9 +40,12 @@ def get_status() -> dict:
 
     matrix_file = ws.config / "ai_capability_matrix.yaml"
     session = load_session()
+    from ..services import startup_status
     return {
         "version": __version__,
+        "server": {"pid": os.getpid(), "instance_id": _SERVER_INSTANCE},
         "recovery":os.environ.get("QUANTLENS_RECOVERY")=="1",
+        "service_startup": startup_status(),
         "python": sys.version.split()[0],
         "workspace": {
             "root": str(ws.root),

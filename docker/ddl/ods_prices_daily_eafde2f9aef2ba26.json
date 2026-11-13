@@ -1,0 +1,54 @@
+{
+  "table": "prices_daily",
+  "schema_version": "eafde2f9aef2ba26",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "open",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "high",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "low",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "close",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "volume",
+      "arrow_type": "int64",
+      "hive_type": "bigint",
+      "nullable": true
+    },
+    {
+      "name": "amount",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    }
+  ]
+}

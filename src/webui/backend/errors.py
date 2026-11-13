@@ -6,8 +6,6 @@ from fastapi.exceptions import RequestValidationError
 
 from exceptions import (
     ContractViolation,
-    IssueNotFoundError,
-    IssueStateError,
     ModelRouteError,
     QuantTrainingError,
 )
@@ -19,10 +17,6 @@ _CODE_SUFFIX_STATUS = {
 
 def _status_for(exc: QuantTrainingError) -> int:
     
-    if isinstance(exc, IssueNotFoundError):
-        return 404
-    if isinstance(exc, IssueStateError):
-        return 409
     if isinstance(exc, ContractViolation):
         return 422
     if isinstance(exc, ModelRouteError):
@@ -52,16 +46,16 @@ def install_error_handlers(app: FastAPI) -> None:
             'date_parsing':'日期格式不正确','extra_forbidden':'不支持此字段','literal_error':'不支持此选项',
             'string_too_short':'内容过短','string_too_long':'内容过长','greater_than':'须大于 {gt}',
             'greater_than_equal':'不得小于 {ge}','less_than':'须小于 {lt}','less_than_equal':'不得大于 {le}'}
-        issues=[]
+        problems=[]
         for error in exc.errors():
             field=labels.get(str(error['loc'][-1]),'输入项')
             message=messages.get(error['type'],'内容不符合要求').format(**error.get('ctx',{}))
             if error['type']=='value_error':
                 reason=str(error.get('ctx',{}).get('error',''))
                 if any('\u4e00'<=c<='\u9fff' for c in reason):message=reason
-            issues.append({'field':field,'message':message})
-        detail={'code':'QL_INVALID_INPUT','message':'；'.join(f"{e['field']}：{e['message']}" for e in issues),
-                'suggested_action':'请修改后重试','fields':issues}
+            problems.append({'field':field,'message':message})
+        detail={'code':'QL_INVALID_INPUT','message':'；'.join(f"{e['field']}：{e['message']}" for e in problems),
+                'suggested_action':'请修改后重试','fields':problems}
 
         return JSONResponse(status_code=422,content={'detail':detail})
 

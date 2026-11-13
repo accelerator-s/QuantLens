@@ -1,0 +1,7 @@
+FROM quantlens/base:locked
+ARG SPARK_VERSION=4.0.1
+ARG HIVE_VERSION=3.1.3
+RUN curl -fSL --retry 3 https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz | tar --no-same-owner -xz -C /opt && mv /opt/spark-${SPARK_VERSION}-bin-hadoop3 /opt/spark && \
+    curl -fSL --retry 3 https://archive.apache.org/dist/hive/hive-${HIVE_VERSION}/apache-hive-${HIVE_VERSION}-bin.tar.gz | tar --no-same-owner --exclude="*/jdbc/*" -xz -C /opt && mv /opt/apache-hive-${HIVE_VERSION}-bin /opt/hive
+ENV JAVA_HOME=/usr/lib/jvm/java-17 SPARK_HOME=/opt/spark SPARK_CONF_DIR=/etc/spark/conf HADOOP_CONF_DIR=/etc/hadoop/conf PYTHONPATH=/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.9-src.zip:/workspace/src:/workspace PATH=/opt/spark/bin:/opt/python/bin:$PATH
+CMD ["sleep", "infinity"]

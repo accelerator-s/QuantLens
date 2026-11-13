@@ -71,7 +71,7 @@ class MemoryAdapter:
                 available_version=installed,
                 notes=(
                     "本地已安装版本与 pinned_version 不一致；"
-                    "请先创建 memory issue (subaction=external_upgrade) 评审兼容性，"
+                    "请先核对版本兼容性，"
                     "再决定是否更新 pin。"
                 ),
             )

@@ -1,0 +1,96 @@
+{
+  "table": "fs_income",
+  "schema_version": "a66ba12c4c5492d2",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "report_period",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "statement_type",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "total_revenue",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "revenue",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "total_operating_cost",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "operating_cost",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "operating_profit",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "profit_before_tax",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "net_profit",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "net_profit_parent",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "downloaded_at",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "ann_date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "effective_date",
+      "arrow_type": "string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "ann_date_imputed",
+      "arrow_type": "string",
+      "hive_type": "string",
+      "nullable": true
+    }
+  ]
+}

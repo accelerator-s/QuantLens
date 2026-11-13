@@ -17,7 +17,6 @@ def generate_proposal_id() -> str:
 class ProposalSource(StrEnum):
 
     API_MODEL = "api_model"
-    EXTERNAL_IDE_AI = "external_ide_ai"
     HUMAN = "human"
 
 class ProposalStatus(StrEnum):
@@ -61,7 +60,6 @@ class Proposal(BaseModel):
 
     model_name: str = ""
 
-    related_issue_id: str = ""
     status: ProposalStatus = ProposalStatus.PENDING
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)

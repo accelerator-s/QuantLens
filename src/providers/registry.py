@@ -36,7 +36,6 @@ class ProviderMetadata(BaseModel):
     instrument_class: str = ""
     status: ProviderStatus = ProviderStatus.DRAFT
     manifest_version: str = "v1"
-    related_issue_id: str = ""
     notes: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)

@@ -24,13 +24,12 @@ export function initPortfolioWrite(root, ctx, helpers) {
     try {
       const values = await formDialog({
         title: "创建账户",
-        message: "创建人民币 A 股账户。",
         submitLabel: "查看并确认",
         fields: [
-          { key: "account_id", label: "账户编号", required: true },
-          { key: "alias", label: "别名", required: true },
+          { key: "alias", label: "账户名称", required: true },
           { key: "broker", label: "券商" },
           { key: "notes", label: "备注" },
+          { key: "star_market_enabled", label: "科创板权限", kind: "checkbox", value: false },
         ],
       });
       if (!values) return;
@@ -40,11 +39,32 @@ export function initPortfolioWrite(root, ctx, helpers) {
         confirmLabel: "确认创建",
       });
       if (!result) return;
-      ctx.bus.emit("toast", { kind: "success", title: `已创建账户 ${values.account_id}` });
+      ctx.bus.emit("toast", { kind: "success", title: `已创建账户 ${values.alias}` });
       await reloadAccounts();
     } catch (err) {
       toastError(ctx.bus, err, "账户创建失败");
     }
+  }
+
+  async function editAccount(current) {
+    try {
+      const values = await formDialog({
+        title: "修改账户",
+        submitLabel: "查看并确认",
+        fields: [
+          { key: "alias", label: "账户名称", required: true, value: current.alias },
+          { key: "broker", label: "券商", value: current.broker },
+          { key: "notes", label: "备注", value: current.notes },
+          { key: "star_market_enabled", label: "科创板权限", kind: "checkbox", value: current.star_market_enabled },
+        ],
+      });
+      if (!values) return;
+      const result = await runWithConfirm({
+        execute: (extra) => ctx.api.accountSettings(current.account_id, { ...values, ...extra }),
+        title: "修改账户", confirmLabel: "保存",
+      });
+      if (result) { await reloadAccounts(); await reload("plans"); }
+    } catch (err) { toastError(ctx.bus, err, "账户修改失败"); }
   }
 
   async function archiveAccount(accountId) {
@@ -343,8 +363,8 @@ export function initPortfolioWrite(root, ctx, helpers) {
         return;
       }
       const values = await formDialog({
-        title: `生成调仓建议（${accountId}）`,
-        message: "按最新因子信号生成计划，同策略旧计划标记为过期，并生成模型解读。",
+        title: `生成调仓建议（${acc?.alias || accountId}）`,
+        message: `按该账户的持仓、可用资金和权限生成计划。科创板权限：${acc?.star_market_enabled ? "已开通" : "未开通，排除科创板买入"}。同策略旧计划将失效，并生成模型解读。`,
         submitLabel: "生成",
         fields: [
           {
@@ -393,7 +413,7 @@ export function initPortfolioWrite(root, ctx, helpers) {
   async function planCompare(planId) {
     try {
       const values = await formDialog({
-        title: `资金口径对比 ${planId}`,
+        title: `资金规模对比 ${planId}`,
         message: "用参考资金和账户资金分别回测，比较执行差异，不预测收益。",
         submitLabel: "开始对比",
         fields: [
@@ -443,5 +463,5 @@ export function initPortfolioWrite(root, ctx, helpers) {
     }
   }
 
-  return { archiveAccount, reinitAccount, planTransition, cashSet, planReview, planCompare };
+  return { editAccount, archiveAccount, reinitAccount, planTransition, cashSet, planReview, planCompare };
 }

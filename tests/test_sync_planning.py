@@ -204,51 +204,19 @@ class StagedMerge(unittest.TestCase):
                 self.assertEqual(inc._merge_to_staged(fresh, 'prices_daily'), (0, 0))
 
 
-class DerivedReuse(unittest.TestCase):
-    def test_empty_check_watermark_keeps_cache_fresh(self):
-        from panel import cache
-        with tempfile.TemporaryDirectory() as temp:
-            staged = Path(temp)
-            (staged/'prices_daily.parquet').touch()
-            previous = {'rows':1, 'size_bytes':10, 'mtime_ns':100, 'manifest_last_date':'2026-11-10'}
-            current = {**previous, 'manifest_last_date':'2026-11-12'}
-            meta = {'schema_version':cache.SCHEMA_VERSION, 'sources':{'prices_daily':previous}}
-            with patch.object(cache, 'read_meta', return_value=meta), \
-                 patch.object(cache, '_source_fingerprint', return_value=current), \
-                 patch.object(cache, 'workspace', return_value=SimpleNamespace(staged_for=lambda *a: staged)):
-                self.assertEqual(cache.status('default').state, 'fresh')
-                current['mtime_ns'] = 101
-                self.assertEqual(cache.status('default').state, 'stale')
+class WarehouseSync(unittest.TestCase):
 
-    def test_sync_reuses_aggregates_and_fresh_variants(self):
+    def test_sync_submits_data_pipeline_without_research(self):
         from quantlens import sync
         console = Console(file=io.StringIO())
         dp = SimpleNamespace(name='test', update_all=lambda **kw: SimpleNamespace(outcomes=[]))
-        with patch.object(sync, 'aggregate_source_ready', return_value=True), \
-             patch.object(sync, 'aggregate_needs_rebuild', return_value=False), \
-             patch.object(sync, 'build_aggregate_table') as aggregate, \
-             patch.object(sync.cache, 'status', return_value=SimpleNamespace(state='fresh')), \
-             patch.object(sync.cache, 'rebuild') as rebuild, \
-             patch.object(sync.data, 'coverage', return_value={'end':'2026-11-10'}), \
+        with patch('quantlens.spark_daily.run',return_value={'run_id':'batch-test'}) as pipeline, \
+             patch('quantlens.compute.ensure_cluster'), \
              patch.object(sync.store, 'add'):
-            result = sync.run_sync(dp, console=console)
-            aggregate.assert_not_called()
-            rebuild.assert_not_called()
-            self.assertIn(('计算缓存', 'reused'), result.steps)
+            result=sync.run_sync(dp,console=console)
+            pipeline.assert_called_once_with(console.print, mode='data')
+            self.assertIn(('数据清洗与发布','done'),result.steps)
 
-    def test_aggregate_is_rebuilt_after_source_correction(self):
-        from quantlens import sync
-        import os
-        with tempfile.TemporaryDirectory() as temp:
-            staged = Path(temp)
-            for name in ('analyst_forecast', 'consensus_daily'):
-                path = staged/f'{name}.parquet'
-                path.touch()
-                os.utime(path, ns=(100, 100))
-            with patch.object(sync, 'workspace', return_value=SimpleNamespace(staged_for=lambda *a: staged)):
-                self.assertFalse(sync.aggregate_needs_rebuild('consensus_daily'))
-                os.utime(staged/'analyst_forecast.parquet', ns=(200, 200))
-                self.assertTrue(sync.aggregate_needs_rebuild('consensus_daily'))
 
 
 if __name__ == '__main__':

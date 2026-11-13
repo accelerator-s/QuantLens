@@ -16,7 +16,6 @@ from .execution import run_factor, syntax_check
 from .schemas import (
     SCHEMA_REGISTRY,
     FactorCandidate,
-    IssueTriage,
     MemoryCandidate,
     ProviderMapping,
     StrategyCritique,
@@ -30,7 +29,6 @@ __all__ = [
     "AIRouter",
     "CapabilityMatrix",
     "FactorCandidate",
-    "IssueTriage",
     "MemoryCandidate",
     "ModelKind",
     "ModelRegistry",

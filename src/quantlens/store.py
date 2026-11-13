@@ -1,6 +1,5 @@
 import hashlib
 import json
-import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -57,7 +56,7 @@ def get(record_id):
         raise ContractViolation(code='QL_RECORD_NOT_FOUND', message='记录不存在', suggested_action='刷新列表后重试')
     item = dict(row)
     if hashlib.sha256(item['body'].encode()).hexdigest() != item['sha256']:
-        raise ContractViolation(code='QL_HASH_MISMATCH', message='历史记录校验失败', suggested_action='恢复已核验的备份')
+        raise ContractViolation(code='QL_HASH_MISMATCH', message='历史记录校验失败', suggested_action='核对事务审计与数据快照记录')
     item['body'] = json.loads(item['body'])
     return item
 
@@ -65,11 +64,6 @@ def records(kind, limit=100):
     with connect() as db:
         rows = db.execute('SELECT id FROM records WHERE kind=? ORDER BY created_at DESC LIMIT ?', [kind, limit]).fetchall()
     return [get(row['id']) for row in rows]
-
-def run_path(run_id):
-    if not re.fullmatch(r'QL-[a-f0-9]{16}', run_id):
-        raise ContractViolation(code='QL_RUN_ID_INVALID', message='实验编号无效', suggested_action='从实验列表选择')
-    return workspace().runs / 'spark' / run_id
 
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)

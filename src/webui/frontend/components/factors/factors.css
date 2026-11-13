@@ -3,11 +3,6 @@
   max-width: 1640px;
 }
 
-/* 详情卡片内的键值项按内容高度排列，不被相邻长文本拉伸成大片空白 */
-.factors .detail-card .kv {
-  align-items: start;
-}
-
 .factors__filter {
   min-width: 170px;
 }
@@ -65,3 +60,7 @@
   background: var(--accent-soft);
   line-height: 1.55;
 }
+
+.factors__eval-runs .table { min-width: 740px; }
+.factors__eval-runs .table :is(th, td) { white-space: nowrap; overflow-wrap: normal; }
+.factors__eval-id { display: block; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

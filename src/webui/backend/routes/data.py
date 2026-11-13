@@ -58,4 +58,4 @@ def get_task(task_id: str) -> dict:
 @router.get("/data/sync/active")
 def get_active_data_sync() -> dict:
     
-    return {"task": manager.latest(resource="data", running_only=True)}
+    return {"task": manager.latest(category="data_sync", running_only=True)}

@@ -2,13 +2,12 @@ import { renderState } from "../state-card/state-card.js";
 import { runWithConfirm } from "../confirm-dialog/confirm-dialog.js";
 import { hydrateIcons } from "../../core/icons.js";
 import { toastError } from "../../core/toast.js";
-import { badge, fmtTime } from "../../core/fmt.js";
+import { badge } from "../../core/fmt.js";
 import { codeEl, el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
 import { createSelect } from "../../core/select.js";
-import { updateTaskLog } from "../../core/task-log.js";
+import { captureLogScroll, updateTaskLog } from "../../core/task-log.js";
 
 const PROVIDER_STATUS_LABEL = { draft: "草稿", active: "启用中", disabled: "已停用" };
-const PROVIDER_STATUS_TONE = { draft: "muted", active: "safe", disabled: "warn" };
 const CACHE_STATE_LABEL = { fresh: "已最新", stale: "已过期", missing: "未构建" };
 const TASK_STATUS_LABEL = { running: "执行中", completed: "已完成", failed: "失败" };
 const BATCH_FREQ_LABEL = {
@@ -20,43 +19,13 @@ const BATCH_FREQ_LABEL = {
   year: "按年度",
   snapshot: "全量快照",
 };
-const AUTH_METHOD_LABEL = {
-  campus_network_auto: "校园网自动登录",
-  account_password: "账号密码",
-  token: "访问令牌",
-  api_key: "接口密钥",
-  none: "无需鉴权",
-};
-const SOURCE_CATEGORY_LABEL = {
-  history_authoritative: "历史权威数据",
-  daily_increment: "日增量数据",
-  realtime: "实时数据",
-  snapshot: "快照数据",
-};
-const INSTRUMENT_CLASS_LABEL = {
-  stock: "股票",
-  etf: "ETF",
-  fund: "基金",
-  bond: "债券",
-  future: "期货",
-  index: "指数",
-};
-
-
-function mapList(value, labels) {
-  const items = Array.isArray(value) ? value : String(value ?? "").split(",");
-  return items
-    .map((v) => String(v).trim())
-    .filter(Boolean)
-    .map((v) => labels[v] || v)
-    .join("、");
+function isDataSyncTask(task) {
+  return task?.category === "data_sync" || String(task?.name || "").startsWith("data-sync:");
 }
-
 
 export async function mount(root, ctx) {
   await hydrateIcons(root);
 
-  const providersHost = root.querySelector("[data-providers]");
   const tablesHost = root.querySelector("[data-tables]");
   const checkHost = root.querySelector("[data-update-check]");
   const taskHost = root.querySelector("[data-ops-task]");
@@ -80,17 +49,14 @@ export async function mount(root, ctx) {
     await resumeActiveTask();
     await Promise.all([
       runUpdateCheck(),
-      (async () => {
-        await loadProviders();
-        await loadTables(tableProviderSelect.value);
-      })(),
+      loadProviderTables(),
     ]);
   }
 
   async function resumeActiveTask() {
     try {
       const data = await ctx.api.activeDataSync();
-      if (data.task) {
+      if (isDataSyncTask(data.task)) {
         renderTask(taskHost, data.task);
         pollTask(data.task.task_id, { resumed: true });
       }
@@ -116,7 +82,14 @@ export async function mount(root, ctx) {
 
   function renderUpdateCheck(data) {
     checkHost.innerHTML = "";
-    if(data.last_check?.reason)checkHost.append(el("p","item-row__meta",`上次验收：${data.last_check.reason}`));
+    if (data.last_check?.reason) {
+      const previous = data.last_check;
+      const reason = previous.state === "blocked" && /打包.*0%/.test(previous.reason)
+        ? "打包进度停在 0%，检查已取消。"
+        : previous.reason;
+      checkHost.append(el("p", "item-row__meta data__last-check", `上次检查：${reason}`));
+    }
+    if (data.active_sync && !isDataSyncTask(data.active_sync)) return;
     if (data.active_sync) {
       const p = data.active_sync.progress || {};
       checkHost.append(
@@ -132,22 +105,10 @@ export async function mount(root, ctx) {
       checkHost.append(el("p", "item-row__meta", data.note));
       return;
     }
-    if (data.schedules?.length) {
-      const details = el('details', 'card');
-      details.append(el('summary', '', '各类数据的更新计划'));
-      details.append(tableEl([
-        {key: 'table', label: '本地表'},
-        {key: 'label', label: '检查周期'},
-        {key: 'last_checked', label: '最近检查', format: v => v || '待检查'},
-        {key: 'next_check', label: '下次检查', format: v => v || '按交易日补齐'},
-        {key: 'overlap_days', label: '回查范围', format: v => v ? `最近 ${v} 天` : '仅缺失日期'},
-      ], data.schedules));
-      checkHost.append(details);
-    }
     const staleCache = (data.cache || []).filter((c) => c.state !== "fresh");
     if (!data.needs_update) {
       if (!staleCache.length) {
-        checkHost.append(el("p", "data__fresh", `${data.provider} 当前无需下载，计算缓存可复用。`));
+        checkHost.append(el("p", "data__fresh", `${data.provider} 暂无待更新数据。`));
       } else {
         const names = staleCache
           .map((c) => `${c.variant}（${CACHE_STATE_LABEL[c.state] || c.state}）`)
@@ -168,6 +129,10 @@ export async function mount(root, ctx) {
     head.append(el("h3", "", "检测到数据更新"));
     head.append(badge("待同步", "warn"));
     card.append(head);
+    if (data.publication_pending) {
+      card.append(kvEl([["已下载至", data.downloaded_date || "—"], ["已发布至", data.published_date || "尚未发布"]]));
+      card.append(el("p", "item-row__meta", "已有数据待发布，点击「检查更新并同步」完成更新。"));
+    }
     if (data.first_download) {
       card.append(el("p", "item-row__meta", "尚无历史数据，同步将执行全量下载。"));
     } else if (data.market_needs_update) {
@@ -219,9 +184,6 @@ export async function mount(root, ctx) {
       warn.style.color = "var(--danger, #c0392b)";
       card.append(warn);
     }
-    card.append(
-      el("p", "item-row__meta", "同步只下载到期表与缺失日期，数据发生变化后更新相关汇总表和计算缓存，后台执行。"),
-    );
     checkHost.append(card);
   }
 
@@ -230,7 +192,6 @@ export async function mount(root, ctx) {
       const result = await runWithConfirm({
         execute: (extra) => ctx.api.dataSync({ ...extra }),
         title: "检查更新并同步",
-        message: "按各表周期补齐数据，按需更新聚合表与计算缓存，确认后转入后台执行。",
         confirmLabel: "确认同步",
       });
       if (!result || !result.task_id) return;
@@ -250,6 +211,7 @@ export async function mount(root, ctx) {
       try {
         const task = await ctx.api.task(taskId);
         consecutiveFailures = 0;
+        if (!isDataSyncTask(task)) { taskHost.replaceChildren(); syncBtn.disabled = false; return; }
         renderTask(taskHost, task);
         if (task.status === "running") {
           pollTimer = setTimeout(tick, 2000);
@@ -280,6 +242,7 @@ export async function mount(root, ctx) {
 
   function renderTask(host, task) {
     const previousLog = host.querySelector("[data-task-log]");
+    const restoreScroll = captureLogScroll(previousLog);
     const card = el("article", "card detail-card");
     const head = el("div", "detail-card__head");
     head.append(el("h3", "", "同步进度"));
@@ -354,13 +317,12 @@ export async function mount(root, ctx) {
     });
     if (taskLog) card.append(taskLog);
     host.replaceChildren(card);
+    restoreScroll();
   }
 
-  async function loadProviders() {
-    await renderState(providersHost, { kind: "loading", title: "加载数据源…" });
+  async function loadProviderTables() {
     try {
       const data = await ctx.api.providers();
-      providersHost.innerHTML = "";
       const actives = data.items.filter((p) => p.status === "active");
       tableProviderSelect.setOptions(
         data.items.map((p) => ({
@@ -369,43 +331,13 @@ export async function mount(root, ctx) {
         })),
         actives[0]?.name || data.items[0]?.name || "",
       );
-      if (!data.items.length) {
-        renderState(providersHost, {
-          kind: "empty",
-          title: "暂无注册数据源",
-          detail: "暂无数据源配置。",
-        });
-        return;
-      }
-      for (const p of data.items) {
-        const card = el("article", "card detail-card");
-        const head = el("div", "detail-card__head");
-        head.append(el("h3", "", p.name));
-        head.append(
-          badge(PROVIDER_STATUS_LABEL[p.status] || p.status, PROVIDER_STATUS_TONE[p.status] || "muted"),
-          badge(p.market || "?", "accent"),
-        );
-        card.append(head);
-        card.append(
-          kvEl([
-            ["鉴权方式", AUTH_METHOD_LABEL[p.auth_method] || p.auth_method],
-            ["更新频率", p.update_frequency],
-            ["来源类别", mapList(p.source_category, SOURCE_CATEGORY_LABEL)],
-            ["标的类别", mapList(p.instrument_class, INSTRUMENT_CLASS_LABEL)],
-            ["目标表数", (p.target_tables || []).length],
-            ["关联事项", p.related_issue_id],
-            ["更新时间", fmtTime(p.updated_at)],
-          ]),
-        );
-        if (p.notes) card.append(el("p", "item-row__meta", p.notes));
-        providersHost.append(card);
-      }
+      await loadTables(tableProviderSelect.value);
     } catch (err) {
-      await renderState(providersHost, {
+      await renderState(tablesHost, {
         kind: "error",
-        title: "数据源加载失败",
+        title: "数据表加载失败",
         detail: err.message,
-        retry: () => loadProviders(),
+        retry: () => loadProviderTables(),
       });
     }
   }

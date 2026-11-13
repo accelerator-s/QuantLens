@@ -4,5 +4,25 @@ inheritance_parent: a_share_research_base
 status: draft
 factors:
   weighting: equal
-  items: [{name: growth_revenue_yoy, weight: null, direction_override: ''}]
-extra: {purpose: factor_research_only, internal_only: true}
+  items:
+  - name: growth_revenue_yoy
+    direction_override: ''
+    weight_override: null
+extra:
+  purpose: factor_research_only
+  internal_only: true
+constraints:
+  max_weight: 0.1
+  max_cluster_weight: 0.35
+  max_industry_weight: 0.3
+  cash_reserve: 0.1
+  max_positions: 30
+risk:
+  regime_filter:
+    enabled: true
+    breadth_lookback: 60
+    breadth_low: 0.4
+    breadth_crisis: 0.3
+    exposure_low: 0.5
+    exposure_crisis: 0.25
+benchmark: same_cluster_equal_weight

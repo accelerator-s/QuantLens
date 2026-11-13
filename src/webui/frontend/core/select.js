@@ -89,17 +89,21 @@ export function createSelect(root, { emptyLabel = "（无可选项）", onChange
       event.preventDefault();
       choose(options[activeIndex]);
     } else if (event.key === "Escape") {
+      if (root.classList.contains("is-open")) event.stopPropagation();
       close();
     }
   });
-  document.addEventListener("click", (event) => {
+  function outsideClick(event) {
     if (!root.contains(event.target)) close();
-  });
+  }
+  document.addEventListener("click", outsideClick);
 
   return {
     get value() {
       return selected;
     },
     setOptions,
+    close,
+    destroy() { document.removeEventListener("click", outsideClick); close(); },
   };
 }

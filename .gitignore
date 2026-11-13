@@ -16,22 +16,19 @@ node_modules/
 
 # Root workspace data; same-named source modules must remain visible
 /data/
+/data/chat_history/
 /runs/
 /experience/
 /portfolio/
 /memory/
-/issues/
 /proposals/
 /trash/
 /.spark/
-/.snapshots/
 
 # Machine-specific configuration and credentials
 /config/ai_models.yaml
 /config/workspace_session.yaml
 /config/automation.yaml
-/config/compute.json
-/config/tracking.json
 /QuantLens.desktop
 .env
 .env.*

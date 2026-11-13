@@ -1,102 +1,74 @@
 from __future__ import annotations
 
+import json
 import pandas as pd
-from fastapi import APIRouter
-
-from backtest.report import BacktestRunStore
+from fastapi import APIRouter, HTTPException, Query
 from presentation import ARCHIVED_STRATEGIES, factor_display_name, strategy_display_name
-
+from quantlens import ads
 from ..serialize import df_records, downsample_indices, json_safe
 
-router = APIRouter(tags=["backtest"])
-
+router = APIRouter(tags=['backtest'])
 NAV_MAX_POINTS = 1500
 
-@router.get("/backtest/runs")
-def list_runs(profile: str = "") -> dict:
-    rows = BacktestRunStore.list_runs(profile or None)
+
+def _record(row):
+    config=json.loads(row['config'])
+    profile=row['strategy_id']
+    factors=((config.get('profile') or {}).get('factors') or {}).get('items') or []
+    return {'run_id':row['backtest_run'],'profile':profile,'profile_display_name':strategy_display_name(profile),
+            'archived':profile in ARCHIVED_STRATEGIES,'factor_display_names':{item['name']:factor_display_name(item['name']) for item in factors},
+            'status':json.loads(row['status']),'config':config,'metrics':json.loads(row['metrics'])}
+
+
+@router.get('/backtest/runs')
+def list_runs(profile: str = '') -> dict:
+    rows=ads.query('backtest_summary','strategy_id=?' if profile else '',[profile] if profile else [],limit=10000,order='backtest_run DESC')
+    items=[]
     for row in rows:
-        row["profile_display_name"] = strategy_display_name(row["profile"])
-        row["archived"] = row["profile"] in ARCHIVED_STRATEGIES
-        config = BacktestRunStore.open_run(row["run_id"]).read_config()
-        factors = ((config.get("profile") or {}).get("factors") or {}).get("items") or []
-        row["factor_display_names"] = [
-            factor_display_name(item.get("name", "")) for item in factors if item.get("name")
-        ]
-    return json_safe({"items": rows})
+        record=_record(row);config=record['config'];settings=config.get('config') or {}
+        items.append({key:record[key] for key in ['run_id','profile','profile_display_name','archived']} |
+                     {'state':record['status'].get('state'),'start':settings.get('start'),'end':settings.get('end'),
+                      'account_id':settings.get('account_id'),'account_name':settings.get('account_name'),
+                      'star_market_enabled':settings.get('star_market_enabled',True),
+                      'protocol_locked':config.get('protocol_locked'),'factor_display_names':list(record['factor_display_names'].values())})
+    return json_safe({'items':items,**ads.provenance('backtest_summary')})
 
-@router.get("/backtest/runs/{run_id}")
+
+@router.get('/backtest/runs/{run_id}')
 def get_run(run_id: str) -> dict:
-    store = BacktestRunStore.open_run(run_id)
-    profile = store.run_dir.parent.name
-    config = store.read_config()
-    factors = ((config.get("profile") or {}).get("factors") or {}).get("items") or []
-    return json_safe(
-        {
-            "run_id": store.run_id,
-            "profile": profile,
-            "profile_display_name": strategy_display_name(profile),
-            "archived": profile in ARCHIVED_STRATEGIES,
-            "factor_display_names": {
-                item.get("name", ""): factor_display_name(item.get("name", ""))
-                for item in factors
-                if item.get("name")
-            },
-            "status": store.read_status(),
-            "config": config,
-            "metrics": store.read_metrics(),
-        }
-    )
+    rows=ads.query('backtest_summary','backtest_run=?',[run_id],limit=1)
+    if not rows:raise HTTPException(404,'回测结果尚未发布')
+    return json_safe({**_record(rows[0]),**ads.provenance('backtest_summary')})
 
-@router.get("/backtest/runs/{run_id}/nav")
+
+@router.get('/backtest/runs/{run_id}/nav')
 def get_nav(run_id: str) -> dict:
-    store = BacktestRunStore.open_run(run_id)
-    nav = store.read_daily("nav").copy()
-    nav["date"] = nav["date"].astype(str)
+    nav=pd.DataFrame(ads.query('backtest_nav','backtest_run=?',[run_id],limit=10000,order='date'))
+    if nav.empty:return {'total_rows':0,'items':[],'monthly_returns':[],**ads.provenance('backtest_nav')}
+    nav['date']=nav['date'].astype(str)
+    nav_values=nav['nav'].astype(float)
+    nav['drawdown']=nav_values/nav_values.cummax()-1
+    if 'benchmark_return' in nav:
+        nav['benchmark_nav']=(1+nav['benchmark_return'].astype(float).fillna(0)).cumprod()
+    monthly=[]
+    if 'daily_return' in nav:
+        grouped=(1+nav['daily_return'].astype(float).fillna(0)).groupby(nav['date'].str[:7]).prod()
+        monthly=[{'month':month,'value':float(value)-1} for month,value in grouped.items()]
+    picked=downsample_indices(len(nav),NAV_MAX_POINTS,keep=[int(nav.drawdown.idxmin())])
+    return {'total_rows':len(nav),'items':df_records(nav.iloc[picked]),'monthly_returns':monthly,**ads.provenance('backtest_nav')}
 
-    nav_values = nav["nav"].astype(float)
-    running_peak = nav_values.cummax()
-    nav["drawdown"] = nav_values / running_peak - 1.0
-    if "benchmark_return" in nav.columns:
-        nav["benchmark_nav"] = (1.0 + nav["benchmark_return"].astype(float).fillna(0.0)).cumprod()
 
-    monthly: list[dict] = []
-    if "daily_return" in nav.columns:
-        df = nav[["date", "daily_return"]].copy()
-        df["month"] = df["date"].str[:7]
-        grouped = (1.0 + df["daily_return"].astype(float).fillna(0.0)).groupby(df["month"]).prod()
-        monthly = [{"month": m, "value": float(v) - 1.0} for m, v in grouped.items()]
+@router.get('/backtest/runs/{run_id}/trades')
+def get_trades(run_id: str, limit: int = Query(200,ge=1,le=10000), offset: int = Query(0,ge=0)) -> dict:
+    return {'total_rows':ads.count('backtest_trades','backtest_run=?',[run_id]),
+            'items':ads.query('backtest_trades','backtest_run=?',[run_id],limit=limit,offset=offset,order='date,instrument,side'),**ads.provenance('backtest_trades')}
 
-    trough_idx = int(nav["drawdown"].idxmin()) if len(nav) else 0
-    picked = downsample_indices(len(nav), NAV_MAX_POINTS, keep=[trough_idx])
-    sampled = nav.iloc[picked]
-    return {
-        "total_rows": len(nav),
-        "items": df_records(sampled),
-        "monthly_returns": monthly,
-    }
 
-@router.get("/backtest/runs/{run_id}/trades")
-def get_trades(run_id: str, limit: int = 200, offset: int = 0) -> dict:
-    store = BacktestRunStore.open_run(run_id)
-    trades = store.read_daily("trades")
-    return {
-        "total_rows": len(trades),
-        "items": df_records(trades, limit=limit, offset=offset),
-    }
-
-@router.get("/backtest/runs/{run_id}/positions")
-def get_positions(run_id: str, date: str = "", limit: int = 500) -> dict:
-    store = BacktestRunStore.open_run(run_id)
-    positions = store.read_daily("positions")
-    dates = sorted(pd.unique(positions["date"].astype(str)).tolist())
-    target = date or (dates[-1] if dates else "")
-    day = positions[positions["date"].astype(str) == target] if target else positions.iloc[0:0]
-    if "weight" in day.columns:
-        day = day.sort_values("weight", ascending=False)
-    return {
-        "dates": dates,
-        "date": target,
-        "total_rows": len(day),
-        "items": df_records(day, limit=limit),
-    }
+@router.get('/backtest/runs/{run_id}/positions')
+def get_positions(run_id: str, date: str = '', limit: int = Query(500,ge=1,le=10000)) -> dict:
+    # Trading dates come from the small NAV extraction; positions remain paged.
+    dates=[row['date'] for row in ads.query('backtest_nav','backtest_run=?',[run_id],limit=10000,order='date')]
+    target=date or (dates[-1] if dates else '')
+    where='backtest_run=? AND date=?';params=[run_id,target]
+    return {'dates':dates,'date':target,'total_rows':ads.count('backtest_positions',where,params),
+            'items':ads.query('backtest_positions',where,params,limit=limit,order='weight DESC,instrument'),**ads.provenance('backtest_positions')}

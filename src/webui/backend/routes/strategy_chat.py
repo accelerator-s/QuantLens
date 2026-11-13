@@ -11,7 +11,7 @@ from strategy.discuss import _SCHEMA_GUIDE, _SYSTEM_PROMPT, build_static_context
 from strategy.models import StrategyProfileDoc, StrategyStatus
 from strategy.store import StrategyProfileStore, _format_validation_error
 
-from ..ai_chat import chat_once
+from ..ai_chat import chat_reply
 
 router = APIRouter(tags=["strategy-chat"])
 
@@ -98,8 +98,7 @@ def strategy_chat(payload: ChatPayload) -> dict:
         if msg.role not in ("user", "assistant"):
             continue
         messages.append({"role": msg.role, "content": msg.content})
-    reply = chat_once(ai_router, model, messages)
-    return {"reply": reply, "model": model.name}
+    return {**chat_reply(ai_router, model, messages), "model": model.name}
 
 def _build_summary(messages: list[ChatMessage]) -> str:
     lines: list[str] = []

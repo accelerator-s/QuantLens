@@ -1,0 +1,36 @@
+CREATE EXTERNAL TABLE IF NOT EXISTS ods.analyst_forecast (
+  `instrument_id` string,
+  `source_record_key` string,
+  `report_date` string,
+  `forecast_period` string,
+  `report_id` string,
+  `publish_date` string,
+  `analyst_id` string,
+  `analyst_name` string,
+  `institution_id` string,
+  `institution_name` string,
+  `forecast_eps` double,
+  `forecast_pe` double,
+  `forecast_net_profit` double,
+  `forecast_ebit` double,
+  `forecast_ebitda` double,
+  `forecast_revenue` double,
+  `forecast_cfps` double,
+  `forecast_bps` double,
+  `forecast_roa` double,
+  `forecast_roe` double,
+  `forecast_pb` double,
+  `forecast_total_asset_turnover` double,
+  `forecast_net_profit_parent` double,
+  `forecast_total_profit` double,
+  `forecast_operating_profit` double,
+  `forecast_total_assets` double,
+  `forecast_total_liabilities` double,
+  `forecast_year` string,
+  `analyst_key` string,
+  `downloaded_at` string,
+  `publish_date_source` string
+)
+PARTITIONED BY (year int) STORED AS PARQUET
+LOCATION '/quantlens/ods/analyst_forecast'
+TBLPROPERTIES ('parquet.compression'='snappy');

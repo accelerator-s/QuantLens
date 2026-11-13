@@ -131,6 +131,9 @@ class DataSnapshot(ImmutableRecord):
     manifest_refs: list[str] = Field(min_length=1)
     dataset_fingerprints: dict[str, str] = Field(min_length=1)
     pit_cutoffs: dict[str, datetime] = Field(default_factory=dict)
+    source_uris: dict[str, str] = Field(default_factory=dict)
+    partitions: list[str] = Field(default_factory=list)
+    row_counts: dict[str, int] = Field(default_factory=dict)
     universe_ref: str
     market_rule_ref: str
     quality_status: QualityStatus

@@ -87,13 +87,17 @@ class DeliveryChecks(unittest.TestCase):
         with self.assertRaises(FactorExecutionError):run_factor(source='def compute(p):\n raise ValueError("失败")',panel_payload={})
         with self.assertRaises(ContractViolation):run_factor(source='def compute(p):\n return 1',panel_payload={})
 
-    def test_shadow_is_not_recent_replay(self):
-        from quantlens.model_ops import forecast_mode
-        tz=ZoneInfo('Asia/Shanghai')
-        self.assertEqual(forecast_mode(date(2026,11,4),datetime(2026,11,4,18,tzinfo=tz)),'shadow')
-        self.assertEqual(forecast_mode(date(2026,11,4),datetime(2026,11,5,9,tzinfo=tz)),'shadow')
-        self.assertEqual(forecast_mode(date(2026,11,4),datetime(2026,11,5,14,tzinfo=tz)),'historical')
-        self.assertEqual(forecast_mode(date(2026,11,4),datetime(2026,11,4,14,tzinfo=tz)),'historical')
+    def test_commission_rate_and_five_yuan_minimum(self):
+        from decimal import Decimal
+        from market_rules import MarketRuleRegistry,RuleEngine
+        from market_rules.markets.cn_a.presets import build_cn_a_stock
+        for rule in [MarketRuleRegistry().get('CN-A-stock'),build_cn_a_stock()]:
+            engine=RuleEngine(rule)
+            for amount,commission in [('1000','5'),('100000','8')]:
+                fees=engine.calculate_fees(Decimal(amount),'buy')
+                self.assertEqual(next(item.amount for item in fees.items if item.name=='佣金'),Decimal(commission))
+            self.assertEqual(engine.calculate_total_cost(Decimal('100000'),'sell').total,Decimal('59'))
+
 
     def test_evidence_is_immutable(self):
         from quantlens import store
@@ -103,12 +107,10 @@ class DeliveryChecks(unittest.TestCase):
         self.assertEqual(store.get(record['id'])['body'],{'value':1})
 
     def test_rolling_windows_are_disjoint(self):
-        from quantlens.rolling import windows,RollingConfig
-        folds=windows(RollingConfig(first_test_year=2023,folds=3,train_years=3))
-        self.assertEqual(str(folds[0].start),'2019-01-01')
-        for a,b in zip(folds,folds[1:]):
-            self.assertLess(a.train_end,a.valid_end)
-            self.assertEqual(a.end,b.valid_end)
+        from quantlens.spark_weight_fit import training_bounds
+        for year in [2023,2024,2025]:
+            start,end,test_start,test_end=training_bounds(year,3)
+            self.assertLess(start,end);self.assertLess(end,test_start);self.assertLess(test_start,test_end)
 
     def test_mutations_reject_foreign_origin(self):
         response=self.client.post('/api/accounts',json={},headers={'Origin':'https://example.org'})
@@ -131,29 +133,6 @@ class DeliveryChecks(unittest.TestCase):
         from portfolio import AccountRegistry
         self.assertEqual(str(AccountRegistry().get('qa').cash[0].total),'98995')
 
-    def test_backups_are_disabled_without_creating_files_or_tasks(self):
-        from quantlens.maintenance import backup, restore
-        from snapshots import SnapshotStore
-        from paths import workspace
-        from exceptions import ContractViolation, SnapshotError
-        from webui.backend.tasks import manager
-        for full in (False, True):
-            response = self.client.post('/api/lens/backups', json={'full': full})
-            self.assertEqual(response.status_code, 422)
-            self.assertEqual(response.json()['detail']['code'], 'QL_BACKUP_DISABLED')
-            with self.assertRaises(ContractViolation):
-                backup(None, full=full)
-        with self.assertRaises(ContractViolation):
-            restore('removed', 'test')
-        response = self.client.post('/api/lens/backups/removed/restore', json={'actor': 'test'})
-        self.assertEqual(response.json()['detail']['code'], 'QL_BACKUP_DISABLED')
-        self.assertFalse((self.root / 'runs/recovery').exists())
-        with self.assertRaises(SnapshotError):
-            SnapshotStore(workspace()).create('test', ['config/market_rules/CN-A-stock.yaml'])
-        self.assertFalse((self.root / 'runs/backups').exists())
-        self.assertEqual(list((self.root / '.snapshots').iterdir()), [])
-        self.assertEqual(manager._tasks, {})
-        self.assertEqual(self.client.get('/api/lens/backups').json(), {'items': [], 'recoveries': []})
 
     def test_interrupted_trade_recovers(self):
         import json
@@ -178,29 +157,10 @@ class DeliveryChecks(unittest.TestCase):
         self.assertEqual(response.status_code,422)
 
     def test_validation_uses_error_contract(self):
-        response=self.client.post('/api/lens/rolling',json={'folds':1})
+        response=self.client.post('/api/backtests',json={'strategy_id':'x'})
         self.assertEqual(response.status_code,422)
         self.assertEqual(response.json()['detail']['code'],'QL_INVALID_INPUT')
 
-    def test_saved_forecast_has_reproducible_factor_values(self):
-        import pandas as pd
-        from quantlens import store
-        from quantlens.model_ops import explain
-        model=store.uid('QL');path=store.run_path(model)
-        store.write_json(path/'metrics.json',{'importance':[{'feature':'momentum_5','label':'5日动量','importance':.7},
-            {'feature':'bias_5','label':'5日均线偏离','importance':.3}]})
-        store.write_json(path/'calibration.json',{'absolute_error_q90':.1})
-        artifact=self.root/'runs/forecasts/sample';artifact.mkdir(parents=True)
-        pd.DataFrame({'instrument_id':['000001','000002','000003'],'prediction':[.01,.02,.03],
-            'momentum_5':[1.,2.,3.],'bias_5':[None,2.,3.]}).to_parquet(artifact/'part.parquet',index=False)
-        record=store.add('forecast',{'run_id':model,'as_of':'2024-01-02','artifact':'runs/forecasts/sample'})
-        result=explain(record['id'],'000001')
-        self.assertEqual(result['prediction'],.01)
-        self.assertAlmostEqual(result['lower'],-.09)
-        self.assertAlmostEqual(result['upper'],.11)
-        self.assertEqual(result['features'][0]['percentile'],0)
-        self.assertIsNone(result['features'][1]['percentile'])
-        self.assertEqual(result['features'][0]['importance'],.7)
 
     def test_trading_day_uses_beijing_time(self):
         import pandas as pd
@@ -210,15 +170,6 @@ class DeliveryChecks(unittest.TestCase):
         available=CnAStockAdapter().compute_available_qty(total_qty=Decimal(100),recent_trades=recent,as_of=date(2024,1,2))
         self.assertEqual(available,0)
 
-    def test_frozen_feature_source_detects_changes(self):
-        from quantlens.provenance import capture,feature_builder
-        from quantlens import store
-        from exceptions import ContractViolation
-        root=store.run_path(store.uid('QL'));root.mkdir(parents=True)
-        capture(root)
-        (root/'source/spark_features.py').write_text('def build():return None')
-        with self.assertRaises(ContractViolation) as error:feature_builder(root)
-        self.assertEqual(error.exception.code,'QL_SOURCE_CHANGED')
 
     def test_stalled_download_is_reported_without_resubmission(self):
         import io

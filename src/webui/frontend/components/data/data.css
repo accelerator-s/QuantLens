@@ -23,17 +23,6 @@
   margin: 0;
 }
 
-.data__providers {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: var(--space-3);
-}
-
-.data__providers .detail-card {
-  container-type: inline-size;
-  min-width: 0;
-}
-
 .data__fresh {
   margin: 2px 0 0;
   padding: 10px 14px;
@@ -44,6 +33,8 @@
   font-size: var(--fs-sm);
   font-weight: 600;
 }
+
+.data__last-check { position: relative; top: -2px; }
 
 .sync-progress {
   margin-top: 4px;

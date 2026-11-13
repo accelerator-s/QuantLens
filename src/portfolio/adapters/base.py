@@ -92,10 +92,9 @@ def get_adapter(market: str, instrument_class: str) -> InstrumentAdapter:
             context={"market": market, "instrument_class": instrument_class},
             blocking=True,
             suggested_action=(
-                "请创建 framework 或 market_rule 类 issue，敲定该 "
+                "请先实现该 "
                 "(market, instrument_class) 的 InstrumentAdapter 实现后再操作"
             ),
-            can_open_issue=True,
         )
     module_path, class_name = entry
     module = importlib.import_module(module_path)

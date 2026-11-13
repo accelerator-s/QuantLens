@@ -1,14 +1,14 @@
+import { modelForm } from "./model-form.js";
 import { labelText } from "../../core/labels.js";
 import { renderState } from "../state-card/state-card.js";
 import { runWithConfirm } from "../confirm-dialog/confirm-dialog.js";
 import { formDialog } from "../confirm-dialog/form-dialog.js";
 import { hydrateIcons } from "../../core/icons.js";
 import { toastError } from "../../core/toast.js";
-import { badge, fmtTime } from "../../core/fmt.js";
+import { badge } from "../../core/fmt.js";
 import { el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
 import { createSelect } from "../../core/select.js";
 
-const MODEL_KINDS = ["api_model", "external_ide_ai"];
 const CAPABILITY_LABELS = {
   reasoning_high: "深度推理",
   coding_high: "代码生成",
@@ -28,7 +28,6 @@ export async function mount(root, ctx) {
 
   root.querySelector("[data-model-add]").addEventListener("click", () => openModelForm());
 
-  const discussHost = root.querySelector("[data-discuss]");
   const modelsHost = root.querySelector("[data-models]");
   const matrixHost = root.querySelector("[data-matrix]");
   const routeHost = root.querySelector("[data-route]");
@@ -70,85 +69,69 @@ export async function mount(root, ctx) {
     await renderState(modelsHost, { kind: "loading", title: "加载模型列表…" });
     try {
       const data = await ctx.api.aiModels();
-      discussHost.innerHTML = "";
-      discussHost.append(
-        kvEl([["默认对话模型", data.discuss_model || "（未设置）"]]),
-      );
       modelsHost.innerHTML = "";
       if (!data.items.length) {
         renderState(modelsHost, {
           kind: "empty",
           title: "暂无添加模型",
-          detail: "点击“添加模型”，连接兼容 OpenAI 接口的模型服务。",
         });
         return;
       }
-      modelsHost.append(
-        tableEl(
-          [
-            { key: "name", label: "名称" },
-            { key: "kind", label: "类型", format: (v) => badge(v, "muted") },
-            { key: "provider_endpoint", label: "服务地址" },
-            { key: "api_model_id", label: "接口模型" },
-            { key: "capability_tags", label: "能力标签", format: (v) => tagBadges(v) },
-            {
-              key: "enabled",
-              label: "启用",
-              format: (v) => badge(v ? "已启用" : "已停用", v ? "safe" : "muted"),
-            },
-            {
-              key: "configured",
-              label: "密钥",
-              format: (v, row) => {
-                const span = el("span", "tag-badges");
-                span.append(badge(v ? "已配置" : "未配置", v ? "safe" : "warn"));
-                span.append(el("code", "ai-config__env", row.env_var));
-                return span;
-              },
-            },
-            { key: "updated_at", label: "更新时间", format: (v) => fmtTime(v) },
-            {
-              key: "name",
-              label: "操作",
-              format: (name, row) => {
-                const wrap = el("span", "tag-badges");
-                const toggle = el("button", "btn btn--ghost", row.enabled ? "停用" : "启用");
-                toggle.type = "button";
-                toggle.addEventListener("click", () => setEnabled(name, !row.enabled));
-                wrap.append(toggle);
-                const edit = el("button", "btn btn--ghost", "编辑");
-                edit.type = "button";
-                edit.addEventListener("click", () => openModelForm(row));
-                wrap.append(edit);
-                if (row.kind === "api_model") {
-                  const test = el("button", "btn btn--ghost", "测试");
-                  test.type = "button";
-                  test.addEventListener("click", () => testModel(name, test));
-                  wrap.append(test);
-                }
-                if (row.configured) {
-                  const delKey = el("button", "btn btn--ghost", "删除密钥");
-                  delKey.type = "button";
-                  delKey.addEventListener("click", () => deleteKey(name));
-                  wrap.append(delKey);
-                }
-                if (name !== data.discuss_model) {
-                  const discuss = el("button", "btn btn--ghost", "设为对话模型");
-                  discuss.type = "button";
-                  discuss.addEventListener("click", () => setDiscuss(name));
-                  wrap.append(discuss);
-                }
-                const remove = el("button", "btn btn--danger", "删除");
-                remove.type = "button";
-                remove.addEventListener("click", () => removeModel(name, row.configured));
-                wrap.append(remove);
-                return wrap;
-              },
-            },
-          ],
-          data.items,
-        ),
-      );
+      function clipped(value, className = '') {
+        const text = value || '—';
+        const span = el('span', `ai-config__cell-text ${className}`, text);
+        span.title = text;
+        return span;
+      }
+      const modelTable = tableEl([
+        {key: 'name', label: '名称', format: value => clipped(value, 'ai-config__model-name')},
+        {key: 'api_type', label: '接口', format: value => badge(value === 'anthropic' ? 'Anthropic' : 'OpenAI', 'muted')},
+        {key: 'api_model_id', label: '模型', format: (value, row) => {
+          const span = clipped(value);
+          span.title = [value, row.provider_endpoint].filter(Boolean).join('\n');
+          return span;
+        }},
+        {key: 'capability_tags', label: '能力', format: value => tagBadges(value, 1)},
+        {key: 'enabled', label: '状态', format: (value, row) => {
+          const toggle = el('button', 'ai-config__model-status');
+          toggle.type = 'button';
+          toggle.setAttribute('role', 'switch');
+          toggle.setAttribute('aria-checked', String(value));
+          toggle.setAttribute('aria-label', `${value ? '停用' : '启用'} ${row.name}`);
+          toggle.title = `${value ? '点击停用' : '点击启用'}${row.configured ? '' : ' · 未配置密钥'}`;
+          toggle.append(badge(value ? '已启用' : '已停用', value ? 'safe' : 'muted'));
+          if (!row.configured) toggle.append(badge('缺密钥', 'warn'));
+          toggle.addEventListener('click', async () => {
+            if (toggle.disabled) return;
+            toggle.disabled = true;
+            try { await setEnabled(row.name, !value); }
+            finally { toggle.disabled = false; }
+          });
+          return toggle;
+        }},
+        {key: 'name', label: '操作', format: (name, row) => {
+          const actions = el('span', 'ai-config__model-actions');
+          const edit = el('button', 'btn btn--ghost btn--sm', '编辑');
+          edit.type = 'button';
+          edit.addEventListener('click', () => openModelForm(row));
+          actions.append(edit);
+          if (row.kind === 'api_model') {
+            const test = el('button', 'btn btn--ghost btn--sm ai-config__model-test', '测试');
+            test.type = 'button';
+            test.title = '测试连通性';
+            test.setAttribute('aria-label', `测试 ${name} 的连通性`);
+            test.addEventListener('click', () => testModel(name, test));
+            actions.append(test);
+          }
+          const remove = el('button', 'btn btn--ghost btn--sm ai-config__model-remove', '删除');
+          remove.type = 'button';
+          remove.addEventListener('click', () => removeModel(name, row.configured));
+          actions.append(remove);
+          return actions;
+        }},
+      ], data.items);
+      modelTable.classList.add('ai-config__models-table');
+      modelsHost.append(modelTable);
     } catch (err) {
       await renderState(modelsHost, {
         kind: "error",
@@ -164,13 +147,10 @@ export async function mount(root, ctx) {
     try {
       const data = await ctx.api.aiMatrix();
       matrixHost.innerHTML = "";
-      const head = el("div", "toolbar");
-      head.append(badge(`版本 ${data.version}`, "accent"));
       matrixTags = data.tags || [];
       const tags = el("span", "tag-badges");
       for (const t of data.tags || []) tags.append(badge(t, "muted"));
-      head.append(tags);
-      matrixHost.append(head);
+      if (matrixTags.length) matrixHost.append(tags);
       matrixHost.append(
         tableEl(
           [
@@ -259,16 +239,6 @@ export async function mount(root, ctx) {
     }
   }
 
-  async function setDiscuss(name) {
-    try {
-      await ctx.api.aiSetDiscussModel(name);
-      ctx.bus.emit("toast", { kind: "success", title: `默认对话模型已设为 ${name}` });
-      await loadModels();
-    } catch (err) {
-      toastError(ctx.bus, err, "对话模型设置失败");
-    }
-  }
-
   async function removeModel(name, hasKey) {
     try {
       let keepKey = false;
@@ -296,119 +266,47 @@ export async function mount(root, ctx) {
   }
 
   async function testModel(name, btn) {
+    if (btn.disabled) return;
     btn.disabled = true;
+    btn.textContent = "测试中…";
     try {
       const data = await ctx.api.aiTestModel(name);
-      ctx.bus.emit("toast", { kind: "success", title: `${name} 连通性正常`, detail: data.reply });
+      ctx.bus.emit("toast", { kind: "success", title: `连接成功 · ${data.latency_ms} ms`, detail: name });
     } catch (err) {
       toastError(ctx.bus, err, `${name} 连通性测试失败`);
     } finally {
       btn.disabled = false;
+      btn.textContent = "测试";
     }
-  }
-
-  async function deleteKey(name) {
-    try {
-      const result = await runWithConfirm({
-        execute: (extra) => ctx.api.aiDeleteModelKey(name, extra),
-        title: `删除 ${name} 的本地 接口密钥`,
-        confirmLabel: "确认删除",
-        danger: true,
-      });
-      if (!result) return;
-      ctx.bus.emit("toast", { kind: "success", title: `已删除 ${name} 的本地密钥` });
-      await loadModels();
-    } catch (err) {
-      toastError(ctx.bus, err, "密钥删除失败");
-    }
-  }
-
-  function splitTags(text) {
-    return text
-      .split(/[,，]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
   }
 
   async function openModelForm(existing = null) {
     if (!matrixTags.length) {
       try {
-        const matrix = await ctx.api.aiMatrix();
-        matrixTags = matrix.tags || [];
+        matrixTags = (await ctx.api.aiMatrix()).tags || [];
       } catch (err) {
         toastError(ctx.bus, err, "能力标签加载失败");
         return;
       }
     }
-    const isEdit = Boolean(existing);
-    const fields = [];
-    if (!isEdit) {
-      fields.push({ key: "name", label: "名称", required: true, placeholder: "用于区分不同模型连接" });
-    }
-    fields.push(
-      {
-        key: "kind",
-        label: "类型",
-        kind: "select",
-        options: MODEL_KINDS.map(value=>({value,label:labelText(value)})),
-        value: existing?.kind || "api_model",
+    modelForm({
+      existing,
+      tags: matrixTags.map(value => ({value, label: CAPABILITY_LABELS[value] || labelText(value)})),
+      api: ctx.api,
+      onTestSuccess(data) {
+        ctx.bus.emit("toast", {kind: "success", title: `连接成功 · ${data.latency_ms} ms`});
       },
-      {
-        key: "provider_endpoint",
-        label: "服务地址",
-        value: existing?.provider_endpoint || "",
-        placeholder: "兼容接口的服务地址，如 https://…/v1",
+      onTestFailure(error) {
+        toastError(ctx.bus, error, "连接失败");
       },
-      { key: "api_model_id", label: "服务端模型名称", value: existing?.api_model_id || "" },
-      {
-        key: "capability_tags",
-        label: "能力标签",
-        kind: "multiselect",
-        value: existing?.capability_tags || [],
-        requiredWhen: (values) => values.kind === "api_model",
-        placeholder: "选择模型具备的能力（可多选）",
-        hint: "选项来自任务配置；接口模型至少选择一项。",
-        options: matrixTags.map((tag) => ({
-          value: tag,
-          label: CAPABILITY_LABELS[tag] || "其他能力",
-        })),
+      async onSave(payload) {
+        const data = existing
+          ? await ctx.api.aiUpdateModel(existing.name, payload)
+          : await ctx.api.aiAddModel(payload);
+        ctx.bus.emit("toast", {kind: "success", title: `${existing ? "已更新" : "已添加"} ${data.model.name}`});
+        await loadModels();
       },
-      {
-        key: "api_key",
-        label: isEdit ? "接口密钥（留空则不修改）" : "接口密钥（可留空）",
-        kind: "password",
-      },
-      { key: "notes", label: "备注", value: existing?.notes || "" },
-    );
-    const values = await formDialog({
-      title: isEdit ? `编辑模型 ${existing.name}` : "添加模型",
-      submitLabel: isEdit ? "保存" : "添加",
-      fields,
     });
-    if (!values) return;
-    const payload = {
-      name: isEdit ? existing.name : values.name,
-      kind: values.kind,
-      provider_endpoint: values.provider_endpoint,
-      api_model_id: values.api_model_id,
-      capability_tags: values.capability_tags,
-      notes: values.notes,
-      enabled: isEdit ? existing.enabled : true,
-      api_key: values.api_key || "",
-    };
-    try {
-      const data = isEdit
-        ? await ctx.api.aiUpdateModel(existing.name, payload)
-        : await ctx.api.aiAddModel(payload);
-      ctx.bus.emit("toast", {
-        kind: "success",
-        title: `${isEdit ? "已更新" : "已添加"} ${data.model.name}`,
-        detail: data.key_saved ? "接口密钥 已保存到本地凭据。" : "",
-      });
-      await loadModels();
-    } catch (err) {
-      toastError(ctx.bus, err, isEdit ? "模型更新失败" : "模型添加失败");
-    }
   }
 
   async function editMatrixTask(task) {
@@ -420,7 +318,7 @@ export async function mount(root, ctx) {
         fields: [
           {key:'required',label:'必需能力',kind:'multiselect',value:task.required_tags||[],options:matrixTags.map(value=>({value,label:labelText(value)}))},
           {key:'optional',label:'可选能力',kind:'multiselect',value:task.optional_tags||[],options:matrixTags.map(value=>({value,label:labelText(value)}))},
-          {key:'executors',label:'执行方式',kind:'multiselect',required:true,value:task.permitted_executors||[],options:['api_model','external_ide_ai','human','mixed'].map(value=>({value,label:labelText(value)}))},
+          {key:'executors',label:'执行方式',kind:'multiselect',required:true,value:task.permitted_executors||[],options:['api_model','human','mixed'].map(value=>({value,label:labelText(value)}))},
         ],
       });
       if (!values) return;

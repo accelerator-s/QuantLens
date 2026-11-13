@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -17,13 +18,13 @@ def registry_path() -> Path:
 
 class ModelKind(StrEnum):
     API_MODEL = "api_model"
-    EXTERNAL_IDE_AI = "external_ide_ai"
 
 class AIModel(BaseModel):
     name: str
 
     kind: ModelKind
     provider_endpoint: str = ""
+    api_type: Literal["openai", "anthropic"] = "openai"
 
     api_model_id: str = ""
 

@@ -32,7 +32,7 @@ export function createMultiSelect(
       node.setAttribute("aria-selected", String(checked));
       node.classList.toggle("is-active", index === activeIndex);
       const mark = node.querySelector("[data-multi-mark]");
-      if (mark) mark.textContent = checked ? "✓" : "";
+      if (mark) mark.classList.toggle("is-checked", checked);
     });
   }
 
@@ -85,7 +85,7 @@ export function createMultiSelect(
       option.dataset.value = item.value;
       option.setAttribute("role", "option");
       const mark = document.createElement("span");
-      mark.className = "multi-select__mark";
+      mark.className = "multi-select__mark checkmark";
       mark.dataset.multiMark = "";
       mark.setAttribute("aria-hidden", "true");
       const label = document.createElement("span");

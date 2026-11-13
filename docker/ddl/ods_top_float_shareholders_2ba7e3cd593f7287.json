@@ -1,0 +1,84 @@
+{
+  "table": "top_float_shareholders",
+  "schema_version": "2ba7e3cd593f7287",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "report_period",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "shareholder_name",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "rank",
+      "arrow_type": "int64",
+      "hive_type": "bigint",
+      "nullable": true
+    },
+    {
+      "name": "shares_held",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "share_nature",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "pct_of_total",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "pct_of_float",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "pct_of_float_a",
+      "arrow_type": "double",
+      "hive_type": "double",
+      "nullable": true
+    },
+    {
+      "name": "downloaded_at",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "ann_date",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "holder_type",
+      "arrow_type": "string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "holder_type_rule",
+      "arrow_type": "string",
+      "hive_type": "string",
+      "nullable": true
+    }
+  ]
+}

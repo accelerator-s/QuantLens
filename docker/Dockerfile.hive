@@ -1,0 +1,12 @@
+FROM quantlens/hadoop:locked
+ARG HIVE_VERSION=3.1.3
+ARG HBASE_VERSION=2.2.7
+RUN curl -fSL --retry 3 https://archive.apache.org/dist/hive/hive-${HIVE_VERSION}/apache-hive-${HIVE_VERSION}-bin.tar.gz | tar --no-same-owner --exclude="*/jdbc/*" -xz -C /opt && mv /opt/apache-hive-${HIVE_VERSION}-bin /opt/hive && \
+    curl -fSL --retry 3 https://archive.apache.org/dist/hbase/${HBASE_VERSION}/hbase-${HBASE_VERSION}-bin.tar.gz | tar --no-same-owner -xz -C /opt && mv /opt/hbase-${HBASE_VERSION} /opt/hbase && \
+    curl -fSL --retry 3 https://jdbc.postgresql.org/download/postgresql-42.7.7.jar -o /opt/hive/lib/postgresql.jar && \
+    rm -f /opt/hive/lib/guava-*.jar && cp /opt/hadoop/share/hadoop/common/lib/guava-*.jar /opt/hive/lib/
+ENV HIVE_HOME=/opt/hive HIVE_CONF_DIR=/etc/hive/conf HBASE_HOME=/opt/hbase HIVE_AUX_JARS_PATH=/opt/hbase/lib PATH=/opt/hive/bin:$PATH HADOOP_HEAPSIZE=1024
+CMD ["bash", "/opt/quantlens/init/hive.sh"]
+RUN curl -fSL --retry 3 https://repo.maven.apache.org/maven2/org/apache/htrace/htrace-core4/4.1.0-incubating/htrace-core4-4.1.0-incubating.jar -o /opt/hive/lib/htrace-core4.jar
+
+RUN rm -f /opt/hbase/lib/hadoop-*.jar

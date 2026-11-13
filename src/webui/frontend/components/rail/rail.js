@@ -1,5 +1,4 @@
 import { hydrateIcons } from "../../core/icons.js";
-import { onHealth } from "../../core/health.js";
 
 export async function mountRail(slot, bus, navigate) {
   const html = await fetch("/components/rail/rail.html").then((r) => r.text());
@@ -25,10 +24,4 @@ export async function mountRail(slot, bus, navigate) {
     });
   });
 
-  const verEl = slot.querySelector("[data-version]");
-  onHealth((h) => {
-    if (h?.version && verEl) {
-      verEl.textContent = `版本 ${h.version}`;
-    }
-  });
 }

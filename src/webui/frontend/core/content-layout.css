@@ -40,18 +40,34 @@
 .item-list .item-row { height: 100%; }
 .item-list .item-row__title { overflow-wrap: anywhere; }
 
-.kv { grid-template-columns: repeat(auto-fit, minmax(min(100%, 156px), 1fr)); }
+.kv:not(:has(> dt)), .ql-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.kv > :is(.kv__row, .kv__item) { flex: 1 1 156px; }
+.kv > .kv__row--wide { flex-basis: 100%; }
+.ql-stats > .ql-stat { flex: 1 1 148px; }
 .ql-grid, .admin__grid, .data__providers {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: stretch;
   gap: var(--space-3);
 }
 .ql-grid > *, .admin__grid > *, .data__providers > * { flex: 1 1 340px; min-width: 0; max-width: 100%; }
-.ql-stats { grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr)); }
 .ql-form { grid-template-columns: repeat(auto-fit, minmax(min(100%, 156px), 1fr)); }
 .ql-form > *, .ql-form :is(input, select, textarea) { min-width: 0; max-width: 100%; }
-.metric-groups { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.ql-card > .toolbar { margin-bottom: 0; }
+.section-panel:is([data-pane="tasks"], [data-pane="cluster"]):not([hidden]) { display: grid; gap: var(--space-3); }
+.ql-page[data-pane="dashboard"] > .ql-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  width: 100%;
+}
+.assistant-drawer__close { margin-bottom: var(--space-3); }
+.ql-assistant-form { grid-template-columns: minmax(0, 1fr); }
+.metric-groups { display: flex; flex-wrap: wrap; align-items: stretch; }
+.metric-groups > .metric-group { flex: 1 1 260px; min-width: 0; }
 
 .table-wrap, .ql-table-wrap {
   max-height: min(56vh, 560px);
@@ -65,6 +81,8 @@
   background: var(--bg-0);
 }
 .table td, .ql-table td { overflow-wrap: anywhere; }
+.table td:is(.is-num, .num), .ql-table td:is(.is-num, .num),
+.table td .badge, .ql-table td .badge { white-space: nowrap; overflow-wrap: normal; }
 .ql-table { white-space: normal; }
 .table td button, .ql-table td button { white-space: nowrap; }
 
@@ -103,10 +121,14 @@
 }
 .ql-page pre { margin: 0; font-size: var(--fs-xs); }
 
+@media (max-width: 1200px) {
+  .ql-page[data-pane="dashboard"] > .ql-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
 @media (max-width: 600px) {
+  .ql-page[data-pane="dashboard"] > .ql-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split > .item-list, .strategy .item-list { max-height: 240px; }
   .ql-form { grid-template-columns: minmax(0, 1fr); }
-  .ql-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .toolbar > *, .detail-card__head > * { min-width: 0; max-width: 100%; }
 }
 

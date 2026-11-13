@@ -6,13 +6,34 @@ status: draft
 factors:
   weighting: equal
   items:
-  - {name: value_defensive_quality_v2, weight: null, direction_override: ''}
+  - name: value_defensive_quality_v2
+    direction_override: ''
+    weight_override: null
 standardization_chain:
-- {step: winsorize, lower_pct: '0.01', upper_pct: '0.99'}
-- {step: industry_neutral, industry_source: P0221}
-- {step: size_neutral, size_field: log_mktcap}
-- {step: zscore}
+- step: winsorize
+  lower_pct: '0.01'
+  upper_pct: '0.99'
+- step: industry_neutral
+  industry_source: P0221
+- step: size_neutral
+  size_field: log_mktcap
+- step: zscore
 extra:
   internal_only: false
   purpose: 当前保留的单因子候选策略，用于影子验证，不代表已经获得实盘权限
   evidence: 价值、资产效率和低波动的组合在训练期与验证期均保持正向，但仍需近期衰减监控和人工晋升
+constraints:
+  max_weight: 0.1
+  max_cluster_weight: 0.35
+  max_industry_weight: 0.3
+  cash_reserve: 0.1
+  max_positions: 30
+risk:
+  regime_filter:
+    enabled: true
+    breadth_lookback: 60
+    breadth_low: 0.4
+    breadth_crisis: 0.3
+    exposure_low: 0.5
+    exposure_crisis: 0.25
+benchmark: same_cluster_equal_weight

@@ -48,20 +48,18 @@ function withQuery(path, params = {}) {
 }
 
 export const api = {
+  chatHistoryTitle: (payload) => request("POST", "/api/chat-history/title", payload),
+  chatHistory: (scope) => request("GET", withQuery("/api/chat-history", { scope })),
+  chatHistorySave: (id, payload) => request("PUT", `/api/chat-history/${id}`, payload),
+  chatHistoryDelete: (id) => request("DELETE", `/api/chat-history/${id}`),
   
   status: () => request("GET", "/api/status"),
   session: () => request("GET", "/api/session"),
   saveSession: (payload) => request("PUT", "/api/session", payload),
 
   
-  issues: (params) => request("GET", withQuery("/api/issues", params)),
-  issue: (id) => request("GET", `/api/issues/${id}`),
-  issueTemplates: () => request("GET", "/api/issues/templates"),
-  createIssue: (payload) => request("POST", "/api/issues", payload),
-  issueTransition: (id, payload) => request("POST", `/api/issues/${id}/transition`, payload),
 
   
-  snapshots: () => request("GET", "/api/snapshots"),
 
   
   aiModels: () => request("GET", "/api/ai/models"),
@@ -73,6 +71,8 @@ export const api = {
   aiDeleteModelKey: (name, payload) =>
     request("POST", `/api/ai/models/${name}/key/delete`, payload),
   aiTestModel: (name) => request("POST", `/api/ai/models/${name}/test`),
+  aiConnectionModels: (payload) => request("POST", "/api/ai/connection/models", payload),
+  aiTestConnection: (payload) => request("POST", "/api/ai/connection/test", payload),
   aiMatrix: () => request("GET", "/api/ai/matrix"),
   factorEvolutionModelRecommendations: () =>
     request("GET", "/api/ai/recommendations/factor-evolution"),
@@ -83,8 +83,6 @@ export const api = {
   aiDiscussModel: () => request("GET", "/api/ai/discuss-model"),
   aiSetDiscussModel: (name) => request("POST", "/api/ai/discuss-model", { name }),
   aiRoutePreview: (task) => request("GET", withQuery("/api/ai/route-preview", { task })),
-  aiChat: (payload) => request("POST", "/api/ai/chat", payload),
-  aiChatFinalize: (payload) => request("POST", "/api/ai/chat/finalize", payload),
 
   
   providers: () => request("GET", "/api/providers"),
@@ -150,16 +148,10 @@ export const api = {
   approvePromotion: (id, payload) => request("POST", `/api/operations/champion-decisions/${id}/approve`, payload),
   marketRules: () => request("GET", "/api/market-rules"),
   marketRule: (id) => request("GET", `/api/market-rules/${id}`),
-  marketRuleLoadPreset: (payload) => request("POST", "/api/market-rules/load-preset", payload),
-  marketRuleTransition: (name, payload) =>
-    request("POST", `/api/market-rules/${name}/transition`, payload),
-  marketRuleRemove: (name, payload) =>
-    request("POST", `/api/market-rules/${name}/remove`, payload),
   marketRuleCheckFees: (name, params) =>
     request("GET", withQuery(`/api/market-rules/${name}/check-fees`, params)),
   marketRuleCheckPriceLimit: (name, params) =>
     request("GET", withQuery(`/api/market-rules/${name}/check-price-limit`, params)),
-  marketsInfo: () => request("GET", "/api/markets"),
 
   
   backtestRuns: (params) => request("GET", withQuery("/api/backtest/runs", params)),
@@ -185,6 +177,8 @@ export const api = {
   
   accounts: () => request("GET", "/api/accounts"),
   accountCreate: (payload) => request("POST", "/api/accounts", payload),
+  accountSettings: (id, payload) => request("POST", `/api/accounts/${id}/settings`, payload),
+  backtestStart: (payload) => request("POST", "/api/backtests", payload),
   accountArchive: (id, payload) => request("POST", `/api/accounts/${id}/archive`, payload),
   accountCashSet: (id, payload) => request("POST", `/api/accounts/${id}/cash`, payload),
   holdings: (account) => request("GET", `/api/portfolio/${account}/holdings`),
@@ -216,21 +210,12 @@ export const api = {
   proposal: (id) => request("GET", `/api/proposals/${id}`),
   proposalTransition: (id, payload) =>
     request("POST", `/api/proposals/${id}/transition`, payload),
-  memoryStatus: () => request("GET", "/api/memory/status"),
-  memoryCandidates: () => request("GET", "/api/memory/candidates"),
-  memoryCandidate: (id) => request("GET", `/api/memory/candidates/${id}`),
-  memoryAdd: (payload) => request("POST", "/api/memory/candidates", payload),
-  memoryCommit: (id, payload) =>
-    request("POST", `/api/memory/candidates/${id}/commit`, payload),
-  memoryDiscard: (id, payload) =>
-    request("POST", `/api/memory/candidates/${id}/discard`, payload),
   trashList: (params) => request("GET", withQuery("/api/trash", params)),
   trashCategories: () => request("GET", "/api/trash/categories"),
   trashRestore: (id, payload) => request("POST", `/api/trash/${id}/restore`, payload),
   trashPurge: (id, payload) => request("POST", `/api/trash/${id}/purge`, payload),
 
   
-  memoryConfigure: (payload) => request("POST", "/api/memory/configure", payload),
   trashPurgeOlderThan: (payload) => request("POST", "/api/trash/purge-older-than", payload),
   doctorInit: (payload) => request("POST", "/api/doctor/init", payload),
   sessionMarket: (payload) => request("POST", "/api/session/market", payload),

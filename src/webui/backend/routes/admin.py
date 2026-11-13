@@ -44,7 +44,7 @@ def configure_memory(payload: MemoryConfigurePayload) -> dict:
                 "操作": "配置记忆服务 固定版本",
                 "package": f"{current.package_name} → {payload.package_name}",
                 "pinned_version": f"{current.pinned_version or '（未配置）'} → {pinned}",
-                "说明": "仅写入配置，不会自动升级依赖包。",
+                "说明": "仅写入配置，不会自动调整依赖包。",
             }
         )
     adapter = MemoryAdapter(pinned_version=pinned, package_name=payload.package_name)
@@ -145,7 +145,7 @@ def set_session_market(payload: MarketPayload) -> dict:
             preview["首跑初始化"] = (
                 f"确认后将自动加载并激活 {len(presets)} 个预置市场规则。"
                 if presets
-                else "无可用预置，需先通过 issue 添加市场规则。"
+                else "无可用预置，需先添加市场规则。"
             )
         result = confirm_preview(preview)
         result["options"] = options
@@ -156,7 +156,7 @@ def set_session_market(payload: MarketPayload) -> dict:
             raise ContractViolation(
                 code="WEBUI_MARKET_NO_PRESET",
                 message="没有活跃的市场规则，也没有可用预置。",
-                suggested_action="先通过 issue 添加市场规则。",
+                suggested_action="先添加市场规则。",
             )
         for preset_name in presets:
             cfg = load_preset(preset_name)
@@ -240,7 +240,7 @@ def set_session_fee(payload: FeePayload) -> dict:
         return confirm_preview(
             {
                 "操作": "设置券商佣金费率",
-                "当前费率": session.commission_rate or "0.0003（预置默认：万三）",
+                "当前费率": session.commission_rate or "0.00008（万0.8，最低5元）",
                 "新费率": rate,
             }
         )

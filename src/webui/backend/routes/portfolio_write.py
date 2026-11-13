@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from exceptions import ContractViolation, PortfolioContractError
 from portfolio import Account, AccountRegistry, Cash, Plan, PortfolioStore, Snapshot
@@ -82,17 +82,18 @@ def _parse_yaml(text: str, label: str):
 # 账户
 
 class AccountCreatePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     confirm: bool = False
-    account_id: str
-    alias: str
+    account_id: str = ""
+    alias: str = Field(min_length=1)
     market: str = ""
     instrument_class: str = ""
     reporting_currency: str = "CNY"
     broker: str = ""
     cash_currency: str = ""
     notes: str = ""
+    star_market_enabled: bool = False
 
 @router.post("/accounts")
 def create_account(payload: AccountCreatePayload) -> dict:
@@ -118,12 +119,13 @@ def create_account(payload: AccountCreatePayload) -> dict:
         zero = Decimal("0")
         try:
             account = Account(
-                account_id=payload.account_id,
+                account_id=payload.account_id or f"acc-{secrets.token_hex(10)}",
                 alias=payload.alias,
                 market=market,
                 instrument_class=instrument_class,
                 reporting_currency=payload.reporting_currency.upper(),
                 broker=payload.broker,
+                star_market_enabled=payload.star_market_enabled,
                 cash=[
                     Cash(currency=currency, total=zero, available=zero, withdrawable=zero, frozen=zero)
                 ],
@@ -142,15 +144,60 @@ def create_account(payload: AccountCreatePayload) -> dict:
             return confirm_preview(
                 {
                     "操作": "创建账户",
-                    "账户编号 / 别名": f"{payload.account_id} / {payload.alias}",
+                    "账户名称": account.alias,
+                    "科创板权限": "已开通" if account.star_market_enabled else "未开通（不推荐买入科创板股票）",
                     "市场 / 品种": f"{market} / {instrument_class}",
                     "报告币种": payload.reporting_currency.upper(),
                     "初始现金": f"{currency} 0",
                     "券商": payload.broker or "（未填）",
+                    "备注": payload.notes,
                 }
             )
         AccountRegistry().create(account)
-        return json_safe({"account": AccountRegistry().get(payload.account_id)})
+        return json_safe({"account": AccountRegistry().get(account.account_id)})
+
+
+class AccountSettingsPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    confirm: bool = False
+    alias: str = Field(min_length=1)
+    broker: str = ""
+    notes: str = ""
+    star_market_enabled: bool = False
+
+
+@router.post("/accounts/{account_id}/settings")
+def update_account_settings(account_id: str, payload: AccountSettingsPayload) -> dict:
+    from portfolio.transaction import lock
+    with lock:
+        registry = AccountRegistry()
+        account = registry.get(account_id)
+        if not payload.confirm:
+            return confirm_preview({"操作": "修改账户", "账户名称": payload.alias,
+                                    "券商": payload.broker or "（未填）",
+                                    "备注": payload.notes,
+                                    "科创板权限": "已开通" if payload.star_market_enabled else "未开通"})
+        if account.star_market_enabled != payload.star_market_enabled:
+            from lifecycle.models import ObjectType
+            from lifecycle.states import ActorType
+            from lifecycle.store import LifecycleStore
+            lifecycle = LifecycleStore()
+            for row in lifecycle.list_objects(ObjectType.PORTFOLIO_PLAN, limit=5000):
+                if row["state"] in {"proposed", "confirmed", "active", "partially_executed"}:
+                    plan = lifecycle.get(ObjectType.PORTFOLIO_PLAN, row["object_id"])
+                    if account_id in plan.account_ids:
+                        lifecycle.transition(ObjectType.PORTFOLIO_PLAN, row["object_id"], "expired",
+                                             actor_type=ActorType.SYSTEM, actor_ref="account_settings",
+                                             reason="账户交易权限已变更，请重新生成计划")
+            store = PortfolioStore()
+            for _path, raw in store.list_active_plans(primary_account=account_id):
+                if raw.get("state") == PlanState.ACTIVE.value:
+                    store.transition_plan(str(raw["plan_id"]), primary_account=account_id,
+                                          new_state=PlanState.STALE_FOR_EXECUTION, confirm=True)
+        account = account.model_copy(update=payload.model_dump(exclude={"confirm"}))
+        registry.update(account)
+        return json_safe({"account": account})
 
 @router.post("/accounts/{account_id}/archive")
 def archive_account(account_id: str, payload: ConfirmPayload) -> dict:

@@ -6,6 +6,7 @@ from . import (
     admin,
     ai_config,
     backtest,
+    chat_history,
     data,
     data_ops,
     experiments,
@@ -13,7 +14,6 @@ from . import (
     factor_eval,
     factor_evolution,
     factors,
-    issues,
     lifecycle,
     operations,
     portfolio,
@@ -28,7 +28,7 @@ from . import (
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(status.router)
-api_router.include_router(issues.router)
+api_router.include_router(chat_history.router)
 api_router.include_router(ai_config.router)
 api_router.include_router(factors.router)
 api_router.include_router(factor_chat.router)

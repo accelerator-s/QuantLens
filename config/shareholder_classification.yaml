@@ -1,113 +1,101 @@
-#
-# 维护说明（改动前必读）：
-#
-#    银行）把更具体的放在前面。
-
 version: 1
-
 types:
-  - id: social_security
-    name: 社保基金
-  - id: pension
-    name: 养老金/年金
-  - id: state_fund
-    name: 国家队（证金/汇金/梧桐树）
-  - id: hk_connect
-    name: 陆股通（北向名义持有人）
-  - id: hk_clearing_agent
-    name: 香港中央结算代理人（H 股名义账户）
-  - id: mutual_fund
-    name: 公募基金
-  - id: qfii
-    name: QFII/主权基金
-  - id: insurance
-    name: 保险
-  - id: trust
-    name: 信托
-  - id: broker
-    name: 券商
-  - id: bank
-    name: 银行
-
+- id: social_security
+  name: 社保基金
+- id: pension
+  name: 养老金/年金
+- id: state_fund
+  name: 国家队（证金/汇金/梧桐树）
+- id: hk_connect
+  name: 陆股通（北向名义持有人）
+- id: hk_clearing_agent
+  name: 香港中央结算代理人（H 股名义账户）
+- id: mutual_fund
+  name: 公募基金
+- id: qfii
+  name: QFII/主权基金
+- id: insurance
+  name: 保险
+- id: trust
+  name: 信托
+- id: broker
+  name: 券商
+- id: bank
+  name: 银行
 rules:
-  - id: sscf_portfolio
-    type: social_security
-    pattern: '全国社保基金[一二三四五六七八九零〇0-9]+组合'
-    note: 全国社保基金组合户（如"全国社保基金一零四组合"）
-  - id: sscf_council
-    type: social_security
-    pattern: '^全国社会保障基金理事会'
-    note: 社保理事会直接持有（含转持户）
-  - id: pension_basic
-    type: pension
-    pattern: '基本养老保险基金[一二三四五六七八九零〇0-9]*组合'
-    note: 基本养老保险基金组合户
-  - id: pension_enterprise
-    type: pension
-    pattern: '(?:企业年金|职业年金)'
-    note: 企业/职业年金计划（含保险公司受托管理的年金账户）
-
-  - id: state_csf
-    type: state_fund
-    pattern: '^中国证券金融股份有限公司$'
-    note: 证金公司
-  - id: state_huijin_invest
-    type: state_fund
-    pattern: '^中央汇金投资有限责任公司$'
-    note: 中央汇金投资
-  - id: state_huijin_am
-    type: state_fund
-    pattern: '^中央汇金资产管理有限责任公司$'
-    note: 中央汇金资管
-  - id: state_wutongshu
-    type: state_fund
-    pattern: '^梧桐树投资平台有限责任公司$'
-    note: 外管局梧桐树平台（子平台凤山/坤藤等未列入，确认后再补）
-
-  - id: hkscc_agent
-    type: hk_clearing_agent
-    pattern: '^香港中央结算（代理人）有限公司$'
-    note: H 股名义账户（全角括号写法；若源表出现半角括号写法再补规则）
-  - id: hkscc_nominee
-    type: hk_connect
-    pattern: '^香港中央结算有限公司$'
-    note: 陆股通北向名义持有人（代持全体北向资金，非单一机构）
-
-  - id: fund_suffix
-    type: mutual_fund
-    pattern: '^(?!.*私募).*证券投资基金$'
-    note: 公募基金账户（含 ETF/LOF；明示“私募”的名称不匹配，保留 unknown）
-
-  - id: qfii_adia
-    type: qfii
-    pattern: '^阿布达比投资局$'
-    note: 阿布扎比主权基金（CSMAR 常用译名"阿布达比"）
-  - id: qfii_kia
-    type: qfii
-    pattern: '^科威特政府投资局$'
-    note: 科威特主权基金
-  - id: qfii_norges
-    type: qfii
-    pattern: '^挪威中央银行$'
-    note: 挪威央行（主权基金 NBIM 名义户）
-  - id: qfii_gic
-    type: qfii
-    pattern: '^新加坡政府投资有限公司$'
-    note: 新加坡 GIC
-
-  - id: insurance_company
-    type: insurance
-    pattern: '保险(?:股份有限公司|有限责任公司|股份公司)'
-    note: 保险公司及其产品账户（"…保险…公司－产品名"式样）；年金账户已被前面规则截走
-  - id: trust_company
-    type: trust
-    pattern: '信托(?:股份有限公司|有限责任公司|有限公司|投资公司)'
-    note: 信托公司及信托计划账户
-  - id: broker_proper
-    type: broker
-    pattern: '证券(?:股份有限公司|有限责任公司|有限公司)$'
-    note: 券商自营户（纯公司名结尾）；券商资管计划式样多变，确认后再补规则
-  - id: bank_proper
-    type: bank
-    pattern: '银行(?:股份有限公司|有限责任公司)$'
-    note: 银行自持户（纯公司名结尾）；基金托管户已被 fund_suffix 截走
+- id: sscf_portfolio
+  type: social_security
+  pattern: 全国社保基金[一二三四五六七八九零〇0-9]+组合
+  note: 全国社保基金组合户（如"全国社保基金一零四组合"）
+- id: sscf_council
+  type: social_security
+  pattern: ^全国社会保障基金理事会
+  note: 社保理事会直接持有（含转持户）
+- id: pension_basic
+  type: pension
+  pattern: 基本养老保险基金[一二三四五六七八九零〇0-9]*组合
+  note: 基本养老保险基金组合户
+- id: pension_enterprise
+  type: pension
+  pattern: (?:企业年金|职业年金)
+  note: 企业/职业年金计划（含保险公司受托管理的年金账户）
+- id: state_csf
+  type: state_fund
+  pattern: ^中国证券金融股份有限公司$
+  note: 证金公司
+- id: state_huijin_invest
+  type: state_fund
+  pattern: ^中央汇金投资有限责任公司$
+  note: 中央汇金投资
+- id: state_huijin_am
+  type: state_fund
+  pattern: ^中央汇金资产管理有限责任公司$
+  note: 中央汇金资管
+- id: state_wutongshu
+  type: state_fund
+  pattern: ^梧桐树投资平台有限责任公司$
+  note: 外管局梧桐树平台（子平台凤山/坤藤等未列入，确认后再补）
+- id: hkscc_agent
+  type: hk_clearing_agent
+  pattern: ^香港中央结算（代理人）有限公司$
+  note: H 股名义账户（全角括号写法；若源表出现半角括号写法再补规则）
+- id: hkscc_nominee
+  type: hk_connect
+  pattern: ^香港中央结算有限公司$
+  note: 陆股通北向名义持有人（代持全体北向资金，非单一机构）
+- id: fund_suffix
+  type: mutual_fund
+  pattern: ^(?!.*私募).*证券投资基金$
+  note: 公募基金账户（含 ETF/LOF；明示“私募”的名称不匹配，保留 unknown）
+- id: qfii_adia
+  type: qfii
+  pattern: ^阿布达比投资局$
+  note: 阿布扎比主权基金（CSMAR 常用译名"阿布达比"）
+- id: qfii_kia
+  type: qfii
+  pattern: ^科威特政府投资局$
+  note: 科威特主权基金
+- id: qfii_norges
+  type: qfii
+  pattern: ^挪威中央银行$
+  note: 挪威央行（主权基金 NBIM 名义户）
+- id: qfii_gic
+  type: qfii
+  pattern: ^新加坡政府投资有限公司$
+  note: 新加坡 GIC
+- id: insurance_company
+  type: insurance
+  pattern: 保险(?:股份有限公司|有限责任公司|股份公司)
+  note: 保险公司及其产品账户（"…保险…公司－产品名"式样）；年金账户已被前面规则截走
+- id: trust_company
+  type: trust
+  pattern: 信托(?:股份有限公司|有限责任公司|有限公司|投资公司)
+  note: 信托公司及信托计划账户
+- id: broker_proper
+  type: broker
+  pattern: 证券(?:股份有限公司|有限责任公司|有限公司)$
+  note: 券商自营户（纯公司名结尾）；券商资管计划式样多变，确认后再补规则
+- id: bank_proper
+  type: bank
+  pattern: 银行(?:股份有限公司|有限责任公司)$
+  note: 银行自持户（纯公司名结尾）；基金托管户已被 fund_suffix 截走

@@ -22,8 +22,8 @@ export function renderStrategyConfig(data) {
   const root = el('div', 'strategy-summary');
   const grid = el('div', 'strategy-summary__grid');
   const universe = config.universe || {};
-  const position = config.position_constraint || {};
-  const risk = config.risk_control || {};
+  const position = {top_n:config.constraints?.max_positions,max_weight_per_name:config.constraints?.max_weight,min_cash_ratio:config.constraints?.cash_reserve};
+  const risk = {max_single_name_pct:config.constraints?.max_weight,max_industry_pct:config.constraints?.max_industry_weight};
   const fees = config.fees_slippage || {};
   const execution = config.execution_assumption || {};
   const instruments = (config.instruments || []).map(labelText).join('、');
@@ -59,10 +59,10 @@ export function renderStrategyConfig(data) {
 
   const research = el('div', 'strategy-summary__grid');
   const factors = config.factors?.items || [];
-  const weighting = {equal:'等权', manual:'手动权重'}[config.factors?.weighting] || config.factors?.weighting;
+  const weighting = {equal:'等权',ic:'IC 权重',icir:'ICIR 权重',model_linear:'线性回归权重',model_logistic:'逻辑回归权重'}[config.factors?.weighting] || config.factors?.weighting;
   const factorSection = section(`因子组合${weighting ? ` · ${weighting}` : ''}`);
   const columns = [{key:'name', label:'因子', format: name => data.factor_display_names?.[name] || name}];
-  if (factors.some(item => present(item.weight))) columns.push({key:'weight', label:'权重', format:percent});
+  if (factors.some(item => present(item.weight_override))) columns.push({key:'weight_override', label:'权重', format:percent});
   if (factors.some(item => present(item.direction_override))) columns.push({
     key:'direction_override', label:'方向', format: value => ({positive:'正向', negative:'负向'}[value] || value),
   });
@@ -85,7 +85,7 @@ export function renderStrategyConfig(data) {
     process.append(list);
     research.append(process);
   }
-  root.append(research);
+  root.prepend(research);
 
   const explanation = config.extra || doc.extra || {};
   const notes = [
@@ -104,7 +104,6 @@ export function renderStrategyConfig(data) {
     ['配置标识', doc.profile_name],
     ['继承自', data.inheritance_display_name || doc.inheritance_parent],
     ['来源链', config.source_chain?.join(' → ')],
-    ['关联事项', doc.related_issue_id],
     ['创建时间', doc.created_at ? fmtTime(doc.created_at) : ''],
     ['更新时间', doc.updated_at ? fmtTime(doc.updated_at) : ''],
   ].filter(([,value]) => present(value))));

@@ -24,6 +24,14 @@ def _hash(payload: Any) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+def rank_candidates(candidates, protocol):
+    from backtest.engine import assess_objective
+    eligible=[]
+    for candidate in candidates:
+        objective=assess_objective(candidate['metrics'],protocol)
+        if objective['eligible']:eligible.append({**candidate,'objective':objective})
+    return sorted(eligible,key=lambda item:(-item['objective']['value'],abs(item['metrics']['risk']['max_drawdown']),item['metrics']['trading']['annualized_turnover_oneside'],item.get('strategy_id','')))
+
 class ChampionService:
     def __init__(self, store: LifecycleStore | None = None) -> None:
         self.store = store or LifecycleStore()
@@ -117,35 +125,22 @@ class ChampionService:
         comparisons = [self._shadow_delta(left, right) for left, right in selected]
         net_delta = mean(item["net_return_delta"] for item in comparisons)
         cost_delta = mean(item["cost_rate_delta"] for item in comparisons)
-        if (
-            net_delta < policy.min_challenger_net_excess_return
-            or cost_delta > policy.max_cost_rate_increase
-            or mean(item["drawdown_worsening"] for item in comparisons)
-            > policy.max_drawdown_worsening
-            or mean(item["turnover_delta"] for item in comparisons)
-            > policy.max_turnover_increase
-        ):
-            drawdown_delta = mean(
-                item["drawdown_worsening"] for item in comparisons
-            )
-            turnover_delta = mean(item["turnover_delta"] for item in comparisons)
-            raise LifecycleError(
-                code="CHAMPION_DECISION_THRESHOLD_NOT_MET",
-                message=(
-                    f"挑战者同期净收益增量 {net_delta:.4%}、成本率增量 {cost_delta:.4%}，"
-                    f"回撤恶化 {drawdown_delta:.4%}、换手增量 {turnover_delta:.4f}，"
-                    "未满足治理阈值。"
-                ),
-                context={
-                    "net_return_delta": net_delta,
-                    "cost_rate_delta": cost_delta,
-                    "drawdown_worsening": drawdown_delta,
-                    "turnover_delta": turnover_delta,
-                    "policy": policy.model_dump(mode="json"),
-                },
-                blocking=True,
-                suggested_action="保留 challenger 继续观察，或由新研究版本解决收益/成本问题；不得降低阈值后偷看同一结果。",
-            )
+        from backtest.protocol import verify_protocol_or_raise
+        protocol=verify_protocol_or_raise()
+        def objective_metrics(runs):
+            metrics=[self._run_metrics(run) for run in runs]
+            days=policy.shadow_observation_days
+            annual=mean((1+float(item['net_return']))**(244/days)-1 for item in metrics)
+            return {'returns':{'annualized_return':annual,'total_return':mean(float(item['net_return']) for item in metrics)},
+                    'risk':{'max_drawdown':max(abs(float(item['max_drawdown'])) for item in metrics),'sharpe':mean(float(item['sharpe']) for item in metrics)},
+                    'trading':{'annualized_turnover_oneside':mean(float(item['turnover']) for item in metrics)*244/days}}
+        candidates=[{'strategy_id':champion.strategy_version_id,'metrics':objective_metrics([left for left,_ in selected])},
+                    {'strategy_id':challenger_id,'metrics':objective_metrics([right for _,right in selected])}]
+        ranked=rank_candidates(candidates,protocol)
+        if not ranked or ranked[0]['strategy_id']!=challenger_id:
+            raise LifecycleError(code='CHAMPION_OBJECTIVE_NOT_MET',message='挑战者未满足协议约束，或主目标及同分排序未胜出。',
+                                 blocking=True,suggested_action='保留研究结果，继续收集同快照同期样本外证据。')
+        winner=ranked[0]['objective']
         evidence = [locked[-1].evaluation_run_id]
         drawdown_delta = mean(item["drawdown_worsening"] for item in comparisons)
         turnover_delta = mean(item["turnover_delta"] for item in comparisons)
@@ -168,7 +163,7 @@ class ChampionService:
                 f"挑战者锁定测试完成；{len(selected)} 期同期影子平均净收益增量 "
                 f"{net_delta:.4%}，平均成本率增量 {cost_delta:.4%}，"
                 f"回撤恶化 {drawdown_delta:.4%}，换手增量 {turnover_delta:.4f}，"
-                "通过治理阈值。"
+                f"按协议 {winner['primary']} 排序并通过回撤、换手约束。"
             ),
             risk_delta={
                 "shadow_observations": len(selected),
@@ -176,10 +171,10 @@ class ChampionService:
                 "mean_cost_rate_delta": cost_delta,
                 "mean_drawdown_worsening": drawdown_delta,
                 "mean_turnover_delta": turnover_delta,
-                "min_required_net_return_delta": policy.min_challenger_net_excess_return,
-                "max_allowed_cost_rate_increase": policy.max_cost_rate_increase,
-                "max_allowed_drawdown_worsening": policy.max_drawdown_worsening,
-                "max_allowed_turnover_increase": policy.max_turnover_increase,
+                "objective": winner['primary'],
+                "objective_value": winner['value'],
+                "max_drawdown_constraint": protocol.objective.constraints.max_drawdown,
+                "max_turnover_constraint": protocol.objective.constraints.max_turnover,
             },
             rollback_strategy_version_id=champion.strategy_version_id,
             proposed_by="champion_service",
@@ -404,6 +399,7 @@ class ChampionService:
             "holding_days",
             "max_drawdown",
             "turnover",
+            "sharpe",
         }
         if not isinstance(metrics, dict) or not required.issubset(metrics):
             raise LifecycleError(

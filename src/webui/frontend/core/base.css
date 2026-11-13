@@ -1,5 +1,5 @@
 /* ==========================================================================
-   量镜 · 全局基础与工作台组件样式 (core/base.css)
+   投研工坊 · 全局基础与工作台组件样式 (core/base.css)
    ========================================================================== */
 
 *,
@@ -238,6 +238,8 @@ textarea {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: var(--accent);
+  padding-top: 4.5px;
+  padding-bottom: 5.5px;
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -274,6 +276,11 @@ textarea {
   font-size: var(--fs-xs);
 }
 
+.btn--primary.btn--sm {
+  padding-top: 2.5px;
+  padding-bottom: 3.5px;
+}
+
 .btn svg {
   width: 14px;
   height: 14px;
@@ -283,6 +290,60 @@ textarea {
 /* --------------------------------------------------------------------------
    输入表单控件 (Inputs, Selects, Fields)
    -------------------------------------------------------------------------- */
+:root { --checkmark-image: url("/resources/icons/check.svg"); }
+
+.checkmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.checkmark::before,
+input[type="checkbox"]::before {
+  content: "";
+  display: block;
+  width: 1em;
+  height: 1em;
+  background: currentColor;
+  -webkit-mask: var(--checkmark-image) center / contain no-repeat;
+  mask: var(--checkmark-image) center / contain no-repeat;
+}
+.multi-select__mark { width: 14px; height: 14px; }
+.multi-select__mark:not(.is-checked)::before { visibility: hidden; }
+
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-1);
+  border-radius: 3px;
+  background: var(--bg-1);
+  color: var(--accent-ink);
+  vertical-align: middle;
+  cursor: pointer;
+}
+input[type="checkbox"]::before { width: 100%; height: 100%; visibility: hidden; }
+input[type="checkbox"]:is(:checked, :indeterminate) {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type="checkbox"]:is(:checked, :indeterminate)::before { visibility: visible; }
+input[type="checkbox"]:indeterminate::before {
+  width: 60%;
+  height: 2px;
+  -webkit-mask: none;
+  mask: none;
+}
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
+
 .input,
 .select,
 .textarea {
@@ -820,15 +881,33 @@ textarea {
   padding: 10px 12px;
   box-shadow: var(--shadow-md);
   font-size: var(--fs-sm);
+  animation: toast-in 180ms ease-out both;
+}
+
+.toast.is-leaving { animation: toast-out 180ms ease-in both; pointer-events: none; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(4px); }
 }
 
 .toast--error {
+  background: linear-gradient(var(--danger-soft), var(--danger-soft)), var(--bg-1);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line-1));
   border-left-color: var(--danger);
 }
 
 .toast--success {
+  background: linear-gradient(var(--safe-soft), var(--safe-soft)), var(--bg-1);
+  border-color: color-mix(in srgb, var(--safe) 35%, var(--line-1));
   border-left-color: var(--safe);
 }
+
+.toast--error .toast__title { color: var(--danger); }
+.toast--success .toast__title { color: var(--safe); }
 
 .toast__title {
   font-weight: 600;

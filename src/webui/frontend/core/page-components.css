@@ -1,5 +1,5 @@
 /* ==========================================================================
-   量镜 · 页面通用组件样式契约 (core/page-components.css)
+   投研工坊 · 页面通用组件样式契约 (core/page-components.css)
    风格：高密度量化数据工作台 (Data-Dense Quantitative Workbench)
    ========================================================================== */
 
@@ -230,6 +230,27 @@
 }
 
 /* 自定义单选与多选下拉框 */
+.confirm__field:has(> .select) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.confirm__field > .select {
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.confirm__field:has(> .select) > .item-row__meta {
+  flex-basis: 100%;
+}
+
+.toolbar:has(> :is(label, .item-row__meta) + .select) {
+  column-gap: 16px;
+}
+
 .select {
   position: relative;
   display: inline-block;

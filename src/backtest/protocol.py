@@ -23,11 +23,23 @@ class ProtocolLock(BaseModel):
     locked_by: str = ""
     notes: str = ""
 
+class ObjectiveConstraints(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_drawdown: float = Field(default=.20, ge=0, le=1)
+    max_turnover: float = Field(default=6.0, ge=0)
+
+class Objective(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    primary: Literal["calmar", "sharpe", "total_return"] = "calmar"
+    constraints: ObjectiveConstraints = Field(default_factory=ObjectiveConstraints)
+
 class BacktestProtocol(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = 1
+    schema_version: Literal[1, 2] = 2
+    objective: Objective = Field(default_factory=Objective)
+    benchmark_fallback: Literal["universe_equal_weight"] = "universe_equal_weight"
 
     # -- 执行时序 --
     execution_delay_days: Literal[1] = 1
@@ -67,7 +79,7 @@ class BacktestProtocol(BaseModel):
     delist_recovery_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
 
     # -- 基准 --
-    benchmark: Literal["universe_equal_weight"] = "universe_equal_weight"
+    benchmark: Literal["universe_equal_weight", "same_cluster_equal_weight"] = "same_cluster_equal_weight"
 
     # -- 环境引用 --
     market_rule_name: str = "CN-A-stock"
@@ -79,6 +91,9 @@ class BacktestProtocol(BaseModel):
         
         payload = self.model_dump(mode="json")
         payload.pop("lock", None)
+        if self.schema_version == 1:
+            payload.pop("objective", None)
+            payload.pop("benchmark_fallback", None)
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
@@ -145,7 +160,7 @@ def lock_protocol(*, locked_by: str = "human", notes: str = "") -> BacktestProto
             blocking=True,
             suggested_action=(
                 "口径变更属于考试规则变更：先人工评审差异，确认后手动删除 lock 块"
-                "并重新 lock（变更须留痕，建议记录到 issue 或提交说明）。"
+                "并重新 lock（变更须留痕，请记录到提交说明）。"
             ),
             related_files=[str(protocol_path())],
         )

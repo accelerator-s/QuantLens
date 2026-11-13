@@ -1,5 +1,18 @@
 import { codeEl, el } from "./dom.js";
 
+export function captureLogScroll(log) {
+  const nodes = new Set(log?.querySelectorAll('pre') || []);
+  for (let node = log; node; node = node.parentElement) nodes.add(node);
+  const positions = [...nodes].map(node => [node, node.scrollTop, node.scrollLeft]);
+  return () => {
+    for (const [node, top, left] of positions) {
+      if (node.isConnected) {
+        node.scrollTop = top;
+        node.scrollLeft = left;
+      }
+    }
+  };
+}
 
 export function updateTaskLog(
   existing,
@@ -21,6 +34,10 @@ export function updateTaskLog(
   details.querySelector("summary").textContent = `运行日志（最近 ${visible.length} 行）`;
   const content = visible.join("\n");
   const code = details.querySelector(".codeblock");
-  if (code.textContent !== content) code.textContent = content;
+  if (code.textContent !== content) {
+    const restoreScroll = captureLogScroll(details);
+    code.textContent = content;
+    restoreScroll();
+  }
   return details;
 }

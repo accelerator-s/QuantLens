@@ -10,7 +10,7 @@ export function initToast(bus) {
   bus.on("toast", show);
 }
 
-export function show({ kind = "info", title = "", detail = "", timeout = 5200 } = {}) {
+export function show({ kind = "info", title = "", detail = "", timeout = 3000 } = {}) {
   if (!host) return;
   const el = document.createElement("div");
   el.className = `toast${kind === "error" ? " toast--error" : kind === "success" ? " toast--success" : ""}`;
@@ -27,12 +27,15 @@ export function show({ kind = "info", title = "", detail = "", timeout = 5200 } 
     el.append(d);
   }
   host.append(el);
-  setTimeout(() => el.remove(), timeout);
+  setTimeout(() => {
+    el.classList.add("is-leaving");
+    setTimeout(() => el.remove(), 180);
+  }, timeout);
 }
 
 
 export function toastError(bus, error, title = "操作失败") {
   const parts = [error?.message || String(error)];
   if (error?.suggestedAction) parts.push(`建议：${error.suggestedAction}`);
-  bus.emit("toast", { kind: "error", title, detail: parts.join(" "), timeout: 7000 });
+  bus.emit("toast", { kind: "error", title, detail: parts.join(" "), timeout: 4500 });
 }

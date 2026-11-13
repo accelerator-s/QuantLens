@@ -217,6 +217,5 @@ class MarketRuleConfig(BaseModel):
 
     # 元数据
     status: MarketRuleStatus = MarketRuleStatus.DRAFT
-    related_issue_id: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None

@@ -48,7 +48,7 @@ def build_tradability(
     market_panel: dict[str, pd.DataFrame],
     rule_engine: RuleEngine,
     *,
-    is_trading_full: pd.DataFrame,
+    delisting_dates: pd.Series,
 ) -> Tradability:
     
     close = market_panel["close"]
@@ -60,13 +60,7 @@ def build_tradability(
 
     is_st = trading_status.isin(list(_ST_STATUS_CODES)).astype(bool)
 
-    full = is_trading_full.astype(bool)
-    dates = full.index.to_numpy()
-    arr = full.to_numpy()
-    last_idx = np.where(arr.any(axis=0), arr.shape[0] - 1 - np.argmax(arr[::-1], axis=0), -1)
-    last_trading_date = pd.Series(
-        [dates[i] if i >= 0 else pd.NaT for i in last_idx], index=full.columns
-    )
+    last_trading_date=pd.to_datetime(delisting_dates.reindex(close.columns))
 
     delisted = pd.DataFrame(
         close.index.to_numpy()[:, None] > last_trading_date.to_numpy()[None, :],

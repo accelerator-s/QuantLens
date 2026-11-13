@@ -4,6 +4,17 @@
 let current = undefined;
 const listeners = new Set();
 
+export function createRestartDetector() {
+  let instance, detected = false;
+  return status => {
+    const next = status?.server?.instance_id;
+    if (!next || detected) return false;
+    if (instance && instance !== next) { detected = true; return true; }
+    instance = next;
+    return false;
+  };
+}
+
 export function initHealth(bus) {
   bus.on("health", (data) => {
     current = data;

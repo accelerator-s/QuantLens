@@ -35,7 +35,10 @@ class Frequency(StrEnum):
 class WeightMode(StrEnum):
 
     EQUAL = "equal"
-    MANUAL = "manual"
+    IC = "ic"
+    ICIR = "icir"
+    MODEL_LINEAR = "model_linear"
+    MODEL_LOGISTIC = "model_logistic"
 
 class FillnaMethod(StrEnum):
 
@@ -58,7 +61,7 @@ class FactorRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    weight: Decimal | None = None
+    weight_override: Decimal | None = None
 
     direction_override: str = ""
 
@@ -82,17 +85,6 @@ class FactorSpec(BaseModel):
         names = [f.name for f in self.items]
         if len(names) != len(set(names)):
             raise ValueError("因子清单存在重复因子名。")
-        if self.weighting == WeightMode.EQUAL:
-            withw = [f.name for f in self.items if f.weight is not None]
-            if withw:
-                raise ValueError(f"等权模式下不允许为因子单独指定权重：{', '.join(withw)}")
-        else:
-            missing = [f.name for f in self.items if f.weight is None]
-            if missing:
-                raise ValueError(f"手动权重模式下以下因子缺少权重：{', '.join(missing)}")
-            nonpos = [f.name for f in self.items if f.weight is not None and f.weight <= 0]
-            if nonpos:
-                raise ValueError(f"因子权重必须大于 0：{', '.join(nonpos)}")
         return self
 
 class WinsorizeStep(BaseModel):
@@ -258,6 +250,27 @@ FIELD_LABELS: dict[str, str] = {
     "inheritance_parent": "继承父级",
 }
 
+class PortfolioConstraints(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_weight: float = Field(default=.10, gt=0, le=1)
+    max_cluster_weight: float = Field(default=.35, gt=0, le=1)
+    max_industry_weight: float = Field(default=.30, gt=0, le=1)
+    cash_reserve: float = Field(default=.10, ge=0, lt=1)
+    max_positions: int = Field(default=30, ge=1)
+
+class RegimeFilter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    breadth_lookback: int = Field(default=60, ge=1)
+    breadth_low: float = Field(default=.40, ge=0, le=1)
+    breadth_crisis: float = Field(default=.30, ge=0, le=1)
+    exposure_low: float = Field(default=.50, ge=0, le=1)
+    exposure_crisis: float = Field(default=.25, ge=0, le=1)
+
+class PortfolioRisk(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    regime_filter: RegimeFilter = Field(default_factory=RegimeFilter)
+
 class StrategyProfileDoc(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
@@ -270,7 +283,6 @@ class StrategyProfileDoc(BaseModel):
 
     inheritance_parent: str = ""
     status: StrategyStatus = StrategyStatus.DRAFT
-    related_issue_id: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -292,6 +304,9 @@ class StrategyProfileDoc(BaseModel):
     risk_control: RiskControl | None = None
     price_deviation_threshold: Decimal | None = Field(default=None, ge=0)
 
+    constraints: PortfolioConstraints = Field(default_factory=PortfolioConstraints)
+    risk: PortfolioRisk = Field(default_factory=PortfolioRisk)
+    benchmark: str = "same_cluster_equal_weight"
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("profile_name")
@@ -337,6 +352,9 @@ class ResolvedStrategyProfile(BaseModel):
     fees_slippage: FeesSlippage
     risk_control: RiskControl
     price_deviation_threshold: Decimal = Field(ge=0)
+    constraints: PortfolioConstraints = Field(default_factory=PortfolioConstraints)
+    risk: PortfolioRisk = Field(default_factory=PortfolioRisk)
+    benchmark: str = "same_cluster_equal_weight"
     extra: dict[str, Any] = Field(default_factory=dict)
 
 # 继承解析与状态机
@@ -446,6 +464,7 @@ def resolve_profile(
         status=doc.status,
         source_chain=[d.profile_name for d in chain],
         extra=extra,
+        constraints=doc.constraints, risk=doc.risk, benchmark=doc.benchmark,
         **merged,
     )
 

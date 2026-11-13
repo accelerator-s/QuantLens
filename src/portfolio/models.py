@@ -79,6 +79,7 @@ class Account(_StrictModel):
     instrument_class: Literal["stock"]
     reporting_currency: str
     broker: str = ""
+    star_market_enabled: bool = False
     cash: list[Cash] = Field(default_factory=list)
     created_at: datetime
     reinit_count: int = 0

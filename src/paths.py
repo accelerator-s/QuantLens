@@ -45,10 +45,6 @@ class Workspace:
         return self.data / "staged"
 
     @property
-    def data_matrix_cache(self) -> Path:
-        return self.data / "matrix_cache"
-
-    @property
     def data_manifests(self) -> Path:
         return self.data / "manifests"
 
@@ -56,18 +52,6 @@ class Workspace:
     @property
     def proposals(self) -> Path:
         return self.root / "proposals"
-
-    @property
-    def issues(self) -> Path:
-        return self.root / "issues"
-
-    @property
-    def issues_open(self) -> Path:
-        return self.issues / "open"
-
-    @property
-    def issues_solved(self) -> Path:
-        return self.issues / "solved"
 
     @property
     def trash(self) -> Path:
@@ -79,12 +63,16 @@ class Workspace:
         return self.root / "memory"
 
     @property
+    def chat_history(self) -> Path:
+        return self.data / "chat_history"
+
+    @property
     def runs(self) -> Path:
         return self.root / "runs"
 
     @property
     def runs_backtest(self) -> Path:
-        return self.runs / "backtest"
+        return Path(os.environ["QUANTLENS_BACKTEST_ROOT"]) if os.environ.get("QUANTLENS_BACKTEST_ROOT") else self.data / "backtest_runs"
 
     @property
     def experience(self) -> Path:
@@ -119,10 +107,6 @@ class Workspace:
     @property
     def strategies(self) -> Path:
         return self.config / "strategies"
-
-    @property
-    def snapshots(self) -> Path:
-        return self.root / ".snapshots"
 
     @property
     def portfolio_root(self) -> Path:
@@ -168,22 +152,16 @@ class Workspace:
         
         return self.data_manifests / market_slug(market) / instrument_class / provider
 
-    def matrix_cache_for(self, market: str, instrument_class: str) -> Path:
-        
-        return self.data_matrix_cache / market_slug(market) / instrument_class
-
     def all_dirs(self) -> list[Path]:
         
         return [
             self.data_raw,
             self.data_staged,
-            self.data_matrix_cache,
             self.data_manifests,
             self.proposals,
-            self.issues_open,
-            self.issues_solved,
             self.trash,
             self.memory,
+            self.chat_history,
             self.memory / "candidates",
             self.memory / "long_term",
             self.runs,
@@ -194,7 +172,6 @@ class Workspace:
             self.strategies,
             self.root / "factors",
             self.root / "skills",
-            self.snapshots,
             self.portfolio_root,
         ]
 

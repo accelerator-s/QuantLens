@@ -3,7 +3,7 @@ from __future__ import annotations
 import yaml
 from fastapi import APIRouter
 
-from portfolio.accounts import AccountRegistry
+from portfolio.accounts import AccountRegistry, DEFAULT_ACCOUNT_ID
 from portfolio.store import PortfolioStore
 
 from ..serialize import df_records, json_safe
@@ -20,10 +20,14 @@ def list_accounts(market: str = "", instrument_class: str = "") -> dict:
         market=market or None,
         instrument_class=instrument_class or None,
     )
-    return json_safe({"items": items})
+    return json_safe({"items": items, "default_account_id": DEFAULT_ACCOUNT_ID})
 
 @router.get("/portfolio/{account_id}/holdings")
 def get_holdings(account_id: str) -> dict:
+    from strategy import StrategyProfileStore
+    if any(profile.profile_name==account_id for profile in StrategyProfileStore().list()):
+        from quantlens.holdings import target_holdings
+        return target_holdings(account_id)
     account = _account(account_id)
     df = PortfolioStore().read_holdings(
         account_id,

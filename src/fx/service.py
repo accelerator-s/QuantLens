@@ -12,7 +12,7 @@ def _unavailable(base: str, quote: str) -> FxRateUnavailableError:
         context={"base": base, "quote": quote},
         blocking=True,
         suggested_action=(
-            "请新建 framework issue 启用 FX 模块并绑定数据源；在数据源接入前，仅允许单币种账户"
+            "请先启用 FX 模块并绑定数据源；在数据源接入前，仅允许单币种账户"
         ),
     )
 

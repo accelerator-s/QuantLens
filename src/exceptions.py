@@ -12,7 +12,6 @@ class QuantTrainingError(Exception):
     impact: str = ""
     blocking: bool = False
     suggested_action: str = ""
-    can_open_issue: bool = False
     related_files: list[str] = field(default_factory=list)
     related_batches: list[str] = field(default_factory=list)
     related_subjects: dict[str, str] = field(default_factory=dict)
@@ -28,22 +27,12 @@ class QuantTrainingError(Exception):
             "impact": self.impact,
             "blocking": self.blocking,
             "suggested_action": self.suggested_action,
-            "can_open_issue": self.can_open_issue,
             "related_files": self.related_files,
             "related_batches": self.related_batches,
             "related_subjects": self.related_subjects,
         }
 
 class WorkspaceError(QuantTrainingError):
-    pass
-
-class IssueError(QuantTrainingError):
-    pass
-
-class IssueNotFoundError(IssueError):
-    pass
-
-class IssueStateError(IssueError):
     pass
 
 class WizardError(QuantTrainingError):
@@ -62,9 +51,6 @@ class PanelCacheError(QuantTrainingError):
     pass
 
 class SolveError(QuantTrainingError):
-    pass
-
-class SnapshotError(QuantTrainingError):
     pass
 
 class StrategyProfileError(QuantTrainingError):

@@ -11,6 +11,12 @@ factors:
   dependencies:
   - consensus_fy1_mean
   - consensus_fy1_coverage
+  eligibility:
+    consensus_fy1_coverage: 2.0
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters:
@@ -28,12 +34,11 @@ factors:
   - turnover
   - decay
   status: draft
-  version: v1
+  version: v2
   code_hash: e7130e2de65029be
   plugin_path: factors/analyst_fy1_revision.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
 - name: earnings_announcement_drift
@@ -46,6 +51,11 @@ factors:
   timescale: daily
   dependencies:
   - net_profit_ttm_parent
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters:
@@ -66,7 +76,6 @@ factors:
   plugin_path: factors/earnings_announcement_drift.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
 - name: growth_revenue_yoy
@@ -79,6 +88,11 @@ factors:
   timescale: daily
   dependencies:
   - revenue
+  eligibility: {}
+  min_history: 252
+  window_days: 60
+  scope: stock
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters:
@@ -99,7 +113,6 @@ factors:
   plugin_path: factors/growth_revenue_yoy.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
 - name: industry_momentum_60
@@ -113,6 +126,11 @@ factors:
   dependencies:
   - adj_close_wd
   - industry_code
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: cross_section
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters:
@@ -133,7 +151,6 @@ factors:
   plugin_path: factors/industry_momentum_60.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
 - name: institutional_holding_change
@@ -146,6 +163,11 @@ factors:
   timescale: daily
   dependencies:
   - inst_longline_chg
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters: {}
@@ -166,7 +188,6 @@ factors:
   plugin_path: factors/institutional_holding_change.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
 - name: lower_shadow_volskew_30d
@@ -187,8 +208,13 @@ factors:
   - adj_close_wd
   - is_trading
   - listed_days
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: cross_section
+  engine: pandas
   output_frequency: daily
-  direction: undecided
+  direction: positive
   parameters:
     lookback_days: 30
     pool_days: 20
@@ -213,9 +239,52 @@ factors:
   plugin_path: factors/lower_shadow_volskew_30d.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-11-12T06:19:38.855456Z'
   updated_at: '2026-11-12T06:19:38.873433Z'
+- name: model_gbt
+  display_name: GBT 非线性合成
+  assumption: 已注册因子暴露之间可能存在非线性交互；通过滚动样本外结果判断增量。
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - analyst_fy1_revision
+  - earnings_announcement_drift
+  - growth_revenue_yoy
+  - industry_momentum_60
+  - institutional_holding_change
+  - quality_cashflow_assets
+  - quality_gross_margin
+  - reversal_5
+  - value_defensive_quality_v2
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: cross_section
+  engine: spark
+  output_frequency: daily
+  direction: positive
+  parameters:
+    seed: 42
+    train_years: 3
+    implementation: xgboost_hist_v1
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: '样本外同窗口评估未胜过 ICIR/线性加权；保留研究结论。{''icir'': 0.6641553237878655, ''model_linear'':
+    -0.09285398373013928, ''model_gbt'': -1.1454497393811287}'
+  evaluation_metrics: []
+  status: retired
+  version: v7
+  code_hash: ''
+  plugin_path: src/quantlens/spark_engine.py
+  last_evaluated_at: null
+  decay_history: []
+  created_at: '2026-11-13T03:41:05.620932Z'
+  updated_at: '2026-11-13T06:40:26.365081Z'
 - name: quality_cashflow_assets
   display_name: 经营现金流质量
   assumption: 经营现金流相对资产更高的公司利润质量和财务韧性可能更强
@@ -227,6 +296,11 @@ factors:
   dependencies:
   - cfo_net
   - total_assets
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters: {}
@@ -246,7 +320,6 @@ factors:
   plugin_path: factors/quality_cashflow_assets.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
 - name: quality_gross_margin
@@ -259,6 +332,11 @@ factors:
   timescale: daily
   dependencies:
   - gross_margin_ttm
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters: {}
@@ -278,7 +356,6 @@ factors:
   plugin_path: factors/quality_gross_margin.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
 - name: reversal_5
@@ -291,6 +368,11 @@ factors:
   timescale: daily
   dependencies:
   - adj_close_wd
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters:
@@ -311,7 +393,6 @@ factors:
   plugin_path: factors/reversal_5.py
   last_evaluated_at: null
   decay_history: []
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
 - name: value_defensive_quality_v2
@@ -327,6 +408,11 @@ factors:
   - total_assets
   - mktcap_total
   - ret_wd
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: cross_section
+  engine: pandas
   output_frequency: daily
   direction: positive
   parameters:
@@ -390,6 +476,35 @@ factors:
         icir_annualized: 1.542368
         win_rate: 0.627451
         n_valid_days: 969
-  related_issue_id: ''
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T07:58:02.228400Z'
+- name: volatility_60
+  display_name: 60日收益波动
+  assumption: 较低的历史收益波动代表防御性风险暴露。
+  applicable_markets: []
+  applicable_instruments: []
+  timescale: daily
+  dependencies:
+  - ret_wd
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
+  output_frequency: daily
+  direction: negative
+  parameters: {}
+  standardization: []
+  missing_handling: drop
+  ai_generated: false
+  production_permission: false
+  risk_notes: ''
+  evaluation_metrics: []
+  status: draft
+  version: v1
+  code_hash: ab63e14f09b34e79
+  plugin_path: factors/volatility_60.py
+  last_evaluated_at: null
+  decay_history: []
+  created_at: '2026-11-13T03:41:05.620948Z'
+  updated_at: '2026-11-13T03:41:05.620949Z'

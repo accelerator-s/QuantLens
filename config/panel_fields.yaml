@@ -1,0 +1,156 @@
+fields:
+  adj_close_wd:
+    table: dwd.prices_clean
+    column: adj_close
+  open:
+    table: dwd.prices_clean
+    column: open
+  high:
+    table: dwd.prices_clean
+    column: high
+  low:
+    table: dwd.prices_clean
+    column: low
+  close:
+    table: dwd.prices_clean
+    column: close
+  volume:
+    table: dwd.prices_clean
+    column: volume
+  amount:
+    table: dwd.prices_clean
+    column: amount
+  is_trading:
+    table: dwd.prices_clean
+    column: is_trading
+  listed_days:
+    table: dwd.prices_clean
+    column: listed_days
+  ret_wd:
+    table: dwd.prices_clean
+    column: ret_wd
+  mktcap_total:
+    table: dwd.prices_clean
+    column: total_mv
+  mktcap_float:
+    table: dwd.prices_clean
+    column: circ_mv
+  industry_code:
+    table: dwd.industry_pit
+    column: industry_code
+    classification_id: P0221
+  industry_name:
+    table: dwd.industry_pit
+    column: industry_name
+    classification_id: P0221
+  net_profit_ttm_parent:
+    table: dwd.fundamentals_pit
+    item: net_profit_ttm_parent
+  gross_margin_ttm:
+    table: dwd.fundamentals_pit
+    item: gross_margin_ttm
+  roe_ttm:
+    table: dwd.fundamentals_pit
+    item: roe_ttm
+  total_assets:
+    table: dwd.fundamentals_pit
+    item: total_assets
+  total_liabilities:
+    table: dwd.fundamentals_pit
+    item: total_liabilities
+  revenue:
+    table: dwd.fundamentals_pit
+    item: revenue
+  cfo_net:
+    table: dwd.fundamentals_pit
+    item: cfo_net
+  inst_longline_chg:
+    table: dwd.fundamentals_pit
+    item: inst_longline_chg
+  consensus_fy1_mean:
+    table: dwd.analyst_pit
+    item: consensus_fy1_mean
+  consensus_fy1_coverage:
+    table: dwd.analyst_pit
+    item: consensus_fy1_coverage
+  ret_nd:
+    table: dwd.prices_clean
+    column: ret_nd
+  adj_close_nd:
+    table: dwd.prices_clean
+    column: adj_close_nd
+  trading_status:
+    table: dwd.prices_clean
+    column: trading_status
+  cash:
+    table: dwd.fundamentals_pit
+    item: cash
+  accounts_receivable:
+    table: dwd.fundamentals_pit
+    item: accounts_receivable
+  inventory:
+    table: dwd.fundamentals_pit
+    item: inventory
+  current_assets:
+    table: dwd.fundamentals_pit
+    item: current_assets
+  fixed_assets:
+    table: dwd.fundamentals_pit
+    item: fixed_assets
+  short_term_debt:
+    table: dwd.fundamentals_pit
+    item: short_term_debt
+  current_liabilities:
+    table: dwd.fundamentals_pit
+    item: current_liabilities
+  long_term_debt:
+    table: dwd.fundamentals_pit
+    item: long_term_debt
+  equity_parent:
+    table: dwd.fundamentals_pit
+    item: equity_parent
+  total_equity:
+    table: dwd.fundamentals_pit
+    item: total_equity
+  total_revenue:
+    table: dwd.fundamentals_pit
+    item: total_revenue
+  total_operating_cost:
+    table: dwd.fundamentals_pit
+    item: total_operating_cost
+  operating_cost:
+    table: dwd.fundamentals_pit
+    item: operating_cost
+  operating_profit:
+    table: dwd.fundamentals_pit
+    item: operating_profit
+  profit_before_tax:
+    table: dwd.fundamentals_pit
+    item: profit_before_tax
+  net_profit:
+    table: dwd.fundamentals_pit
+    item: net_profit
+  net_profit_parent:
+    table: dwd.fundamentals_pit
+    item: net_profit_parent
+  cfi_net:
+    table: dwd.fundamentals_pit
+    item: cfi_net
+  capex_cash:
+    table: dwd.fundamentals_pit
+    item: capex_cash
+  cff_net:
+    table: dwd.fundamentals_pit
+    item: cff_net
+  cash_net_increase:
+    table: dwd.fundamentals_pit
+    item: cash_net_increase
+  consensus_fy1_median:
+    table: dwd.analyst_pit
+    item: consensus_fy1_median
+  consensus_fy1_year:
+    table: dwd.analyst_pit
+    item: consensus_fy1_year
+  inst_longline_ratio:
+    table: dwd.fundamentals_pit
+    item: inst_longline_ratio

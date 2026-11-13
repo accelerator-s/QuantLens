@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -14,12 +15,34 @@ from exceptions import (
 from paths import Workspace, workspace
 from trash import TrashStore
 
-from .models import Account
+from .models import Account, Cash
+
+DEFAULT_ACCOUNT_ID = "research-default"
+DEFAULT_ACCOUNT_ALIAS = "通用研究（包含科创板）"
 
 class AccountRegistry:
 
     def __init__(self, ws: Workspace | None = None) -> None:
         self.ws = ws or workspace()
+
+    def ensure_default(self) -> Account:
+        from .transaction import lock
+        with lock:
+            if DEFAULT_ACCOUNT_ID in self._read_index():
+                return self.get(DEFAULT_ACCOUNT_ID)
+            path = self.ws.portfolio_account('CN-A', 'stock', DEFAULT_ACCOUNT_ID) / 'account.yaml'
+            if path.exists():
+                # Preserve account balances if only the index write was interrupted.
+                account = Account.model_validate(yaml.safe_load(path.read_text(encoding='utf-8')))
+            else:
+                capital = Decimal('1000000')
+                account = Account(account_id=DEFAULT_ACCOUNT_ID, alias=DEFAULT_ACCOUNT_ALIAS,
+                                  market='CN-A', instrument_class='stock', reporting_currency='CNY',
+                                  star_market_enabled=True, created_at=datetime.now(UTC),
+                                  cash=[Cash(currency='CNY', total=capital, available=capital,
+                                             withdrawable=capital)], notes='研究模拟账户。')
+            self.create(account)
+            return account
 
     # 索引
 
@@ -73,7 +96,7 @@ class AccountRegistry:
         
         index = self._read_index()
         out: list[Account] = []
-        for account_id, entry in sorted(index.items()):
+        for account_id, entry in sorted(index.items(), key=lambda item: (item[0] != DEFAULT_ACCOUNT_ID, item[0])):
             if market is not None and entry.get("market") != market:
                 continue
             if instrument_class is not None and entry.get("instrument_class") != instrument_class:

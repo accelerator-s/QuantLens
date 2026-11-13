@@ -6,7 +6,7 @@ import { createSelect } from "../../core/select.js";
 import { toastError } from "../../core/toast.js";
 import { badge, fmtNum, fmtPct, fmtTime, signClass } from "../../core/fmt.js";
 import { codeEl, el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
-import { updateTaskLog } from "../../core/task-log.js";
+import { captureLogScroll, updateTaskLog } from "../../core/task-log.js";
 
 const IMPROVED_FILTER = [
   { value: "", label: "全部实验" },
@@ -23,7 +23,7 @@ const STATUS_LABEL = {
 
 const EVENT_LABEL = {
   result: "回测结果",
-  comparison: "父版本对比",
+  comparison: "前次实验对比",
   ai_analysis: "模型复盘",
   conclusion: "结论",
   abort: "中止",
@@ -155,7 +155,7 @@ export async function mount(root, ctx) {
   function renderEvolutions(items) {
     evolutionList.innerHTML = "";
     if (!items.length) {
-      evolutionList.append(el("p", "item-row__meta", "尚未启动实验。点击右上角「新建实验」开始。"));
+      evolutionList.append(el("p", "item-row__meta", "暂无实验"));
       evolutionDetail.innerHTML = "";
       return;
     }
@@ -171,7 +171,7 @@ export async function mount(root, ctx) {
         { key: "state", label: "状态", format: (value, row) => stateText(value, row.decision) },
         { key: "iteration", label: "轮次", num: true },
         { key: "progress", label: "进度", format: (value) => fmtPct(value) },
-        { key: "best_version_id", label: "最佳版本" },
+        { key: "best_version_id", label: "最佳方案" },
       ],
       items,
       { onRowClick: (item) => selectEvolution(item.research_id) },
@@ -255,7 +255,7 @@ export async function mount(root, ctx) {
             ["轮次", `${status.iteration}（成功 ${status.successful_rounds} / 失败 ${status.failed_rounds}）`],
             ["连续无改善", status.no_improvement_count > 0 ? `${status.no_improvement_count} 轮` : null],
             ["运行时间", `${fmtNum(status.elapsed_seconds)} 秒`],
-            ["最佳版本", status.best_version_id || null],
+            ["最佳方案", status.best_version_id || null],
             ["泛化结论", finalClassification ? CLASSIFICATION_LABEL[finalClassification] || finalClassification : null],
             ["训练收益中位数", pctNode(generalization.train_median_excess_return)],
             ["验证收益中位数", pctNode(generalization.validation_median_excess_return)],
@@ -270,7 +270,6 @@ export async function mount(root, ctx) {
       if (folds.length) {
         box.append(
           el("h4", "evolution-progress__title", "滚动验证"),
-          el("p", "evolution-progress__hint", "每个窗口用较早区间训练、较晚区间验证，检验因子在样本外是否仍然有效。"),
           tableEl(
             [
               { key: "fold_id", label: "窗口" },
@@ -357,10 +356,10 @@ export async function mount(root, ctx) {
       const lifecycleVersions = data.factor_versions || [];
       if (lifecycleVersions.length) {
         box.append(
-          el("h4", "evolution-progress__title", "因子版本与使用权限"),
+          el("h4", "evolution-progress__title", "因子方案与使用权限"),
           tableEl(
             [
-              { key: "object_id", label: "版本" },
+              { key: "object_id", label: "方案" },
               { key: "state", label: "状态", format: (value) => badge(value) },
               { key: "change", label: "变更" },
               { key: "action", label: "人工审批", format: (value) => value },
@@ -374,7 +373,9 @@ export async function mount(root, ctx) {
         );
       }
       if (sessionFilter?.researchId !== researchId) return;
+      const restoreScroll = captureLogScroll(retainedLog);
       evolutionDetail.replaceChildren(...[box, retainedLog].filter(Boolean));
+      restoreScroll();
       if (schedule && status.state === "running" && !polledResearchIds.has(researchId)) {
         if (detailPoll) clearTimeout(detailPoll);
         detailPoll = setTimeout(() => showEvolution(researchId), 2000);
@@ -399,7 +400,7 @@ export async function mount(root, ctx) {
             reason: p.note || "",
           }),
           title: "批准因子使用权限",
-          message: `FactorVersion ${item.object_id} 将获准正式使用，不会自动切换策略。`,
+          message: `因子方案 ${item.object_id} 将获准正式使用，不会自动切换策略。`,
           requireDecidedBy: true,
           notePlaceholder: "记录锁定测试、稳定性和风险审阅结论",
           confirmLabel: "批准因子",
@@ -677,7 +678,7 @@ export async function mount(root, ctx) {
           portfolio_policy: "组合政策",
         }[record.subject_type] || "实验主体", record.subject_display_name || record.subject_name],
         ["研究编号", expId],
-        ["父实验", record.parent_exp_id],
+        ["前次实验", record.parent_exp_id],
         ["采用策略", record.profile_display_name || record.profile_name],
         ["变更摘要", record.change_summary],
         ["变更原因", record.change_reason],
@@ -693,7 +694,7 @@ export async function mount(root, ctx) {
     
     detailHost.append(chainCard(record));
 
-    // ---- 父版本对比卡
+    // ---- 前次实验对比卡
     detailHost.append(compareCard(compare?.comparison, record.parent_exp_id));
 
     // ---- 事件流时间线
@@ -717,7 +718,7 @@ export async function mount(root, ctx) {
   function chainCard(record) {
     const card = el("article", "card detail-card");
     const head = el("div", "detail-card__head");
-    head.append(el("h4", "", "版本链"));
+    head.append(el("h4", "", "实验关系"));
     card.append(head);
 
     const byId = new Map((chainItems || []).map((i) => [i.exp_id, i]));
@@ -738,7 +739,7 @@ export async function mount(root, ctx) {
 
     if (chain.length <= 1 && !children.length) {
       card.append(
-        el("p", "item-row__meta", "暂无后续版本。生成新候选后会自动关联。"),
+        el("p", "item-row__meta", "暂无后续实验。生成新候选后会自动关联。"),
       );
       return card;
     }
@@ -753,7 +754,7 @@ export async function mount(root, ctx) {
   function chainRow(node, idx, isCurrent, isChild) {
     const row = el("div", "chain-row");
     if (isCurrent) row.classList.add("is-current");
-    const step = isChild ? "后续版本" : idx === 0 ? "基线" : `第 ${idx} 版`;
+    const step = isChild ? "后续实验" : idx === 0 ? "基线" : `第 ${idx} 轮`;
     row.append(el("span", "chain-row__step", step));
     const idBtn = el("button", "chain-row__id", node.display_name || node.exp_id);
     idBtn.type = "button";
@@ -829,11 +830,11 @@ export async function mount(root, ctx) {
   function compareCard(comparison, parentExpId) {
     const card = el("article", "card detail-card");
     const head = el("div", "detail-card__head");
-    head.append(el("h4", "", "父版本对比"));
+    head.append(el("h4", "", "前次实验对比"));
     if (comparison) head.append(improvedBadge(comparison.improved));
     card.append(head);
     if (!parentExpId) {
-      card.append(el("p", "item-row__meta", "基线实验，无父版本可对比。"));
+      card.append(el("p", "item-row__meta", "基线实验，无前次实验可对比。"));
       return card;
     }
     if (!comparison) {
@@ -847,10 +848,10 @@ export async function mount(root, ctx) {
     const metricName = METRIC_LABEL[comparison.primary_metric] || comparison.primary_metric;
     card.append(
       kvEl([
-        ["父实验", comparison.parent_exp_id],
-        ["父版本回测", runLink(comparison.parent_run_id)],
+        ["前次实验", comparison.parent_exp_id],
+        ["前次回测", runLink(comparison.parent_run_id)],
         [`本次${metricName}`, pctNode(comparison.primary_current)],
-        [`父版本${metricName}`, pctNode(comparison.primary_parent)],
+        [`前次实验${metricName}`, pctNode(comparison.primary_parent)],
       ]),
     );
     const rows = Object.entries(comparison.deltas || {}).map(([key, value]) => ({ key, value }));
@@ -861,7 +862,7 @@ export async function mount(root, ctx) {
             { key: "key", label: "指标", format: (v) => METRIC_LABEL[v] || v },
             {
               key: "value",
-              label: "与父版本相比",
+              label: "与前次实验相比",
               num: true,
               format: (v, row) => {
                 if (v == null) return "—";
@@ -875,7 +876,7 @@ export async function mount(root, ctx) {
       );
     }
     card.append(
-      el("p", "item-row__meta", `本次${metricName}高于父版本即视为改善，反之为未改善。`),
+      el("p", "item-row__meta", `本次${metricName}高于前次实验即视为改善，反之为未改善。`),
     );
     return card;
   }
@@ -962,9 +963,9 @@ export async function mount(root, ctx) {
     const metricName = METRIC_LABEL[payload.primary_metric] || payload.primary_metric || "主指标";
     wrap.append(
       kvEl([
-        ["父实验", payload.parent_exp_id],
+        ["前次实验", payload.parent_exp_id],
         [`本次${metricName}`, pctNode(payload.primary_current ?? payload.current)],
-        [`父版本${metricName}`, pctNode(payload.primary_parent)],
+        [`前次实验${metricName}`, pctNode(payload.primary_parent)],
         ["判定", payload.improved == null ? "无法判定" : payload.improved ? "改善" : "未改善"],
       ]),
     );

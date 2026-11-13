@@ -12,12 +12,12 @@ _SCHEMA_GUIDE = """\
 - timescale / data_frequency / rebalance_frequency:
   daily|weekly|monthly|quarterly|event_driven
 - universe: {min_listed_days: int>=0, exclude_suspended: bool, exclude_st: bool, notes: str}
-- factors: {weighting: equal|manual, items: [{name, weight(manual 时必填,>0),
+- factors: {weighting: equal|ic|icir|model_linear|model_logistic, items: [{name, weight_override(可选),
   direction_override}]}（因子必须已在因子注册表注册）
-- standardization_chain: 步骤列表，step 取值与参数：
-  winsorize{lower_pct,upper_pct} / zscore{} / rank{method: average|min|max|dense} /
-  industry_neutral{industry_source} / size_neutral{size_field} /
-  fillna{method: drop|zero|cross_median|industry_median}
+- standardization_chain: []（标准化定义在因子注册表，由 DWS 统一计算）
+- constraints: {max_weight:0.10,max_cluster_weight:0.35,max_industry_weight:0.30,cash_reserve:0.10,max_positions:30}
+- risk: {regime_filter:{enabled:true,breadth_lookback:60,breadth_low:0.40,breadth_crisis:0.30,exposure_low:0.50,exposure_crisis:0.25}}
+- benchmark: same_cluster_equal_weight
 - trading_rules: {market_rule: 市场规则注册表中的规则名}
 - execution_assumption: {price_anchor, fill_assumption, notes}
 - holding_period: int>0（交易日）
@@ -33,7 +33,7 @@ _SYSTEM_PROMPT = """\
 你是 QuantLens的策略配置讨论助手。用户想通过多轮讨论敲定一份
 日频及以上尺度的策略配置（strategy profile），定位是持仓决策辅助，非自动交易。
 你的任务：
-1. 结合下方只读上下文，通过追问澄清 universe、因子组合、标准化链、调仓与
+1. 结合下方只读上下文，通过追问澄清 universe、因子组合、权重方法、调仓与
    风控等设定；每轮聚焦一个问题或一个建议，用中文，简洁专业；
 2. 只引用"已注册因子"清单中的因子；用户想用未注册因子时，提醒需先通过
    因子库注册，配置激活时会拒绝未注册因子；

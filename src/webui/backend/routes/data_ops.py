@@ -59,10 +59,27 @@ def _cache_states() -> list[dict]:
     from panel.api import cache_status
     return [{"variant":v,"state":str(st.state)} for v,st in cache_status().items()]
 
+def _publication_state(downloaded_date) -> dict:
+    from quantlens import ads
+    from paths import workspace
+    import json
+
+    published = ads.manifest()
+    overview = published.get("tables", {}).get("overview", published)
+    published_date = overview.get("data_as_of")
+    pending = bool(downloaded_date and (not published_date or str(downloaded_date) > str(published_date)))
+    ingest = workspace().data / "ingest_manifest.json"
+    if ingest.exists():
+        snapshot = json.loads(ingest.read_text()).get("data_snapshot")
+        if snapshot and snapshot != overview.get("data_snapshot"):
+            pending = True
+    return {"publication_pending": pending, "published_date": published_date, "downloaded_date": downloaded_date}
+
+
 @router.get("/data/update-check")
 def data_update_check() -> dict:
     
-    active_sync = manager.latest(resource="data", running_only=True)
+    active_sync = manager.latest(category="data_sync", running_only=True)
     active_summary = (
         {
             "task_id": active_sync["task_id"],
@@ -104,12 +121,14 @@ def data_update_check() -> dict:
     from quantlens import store
     checks=store.records('data_update_check',1)
     last_check=checks[0]['body'] if checks else None
+    publication = _publication_state(status.last_date)
     pending_windows = [(table, window) for table, window in plan.windows if window is not None]
     audit_due = [table for table, window in pending_windows if window.mode == "audit"]
     return json_safe(
         {
             "provider": dp.name,
-            "needs_update": status.needs_update or bool(pending_windows),
+            "needs_update": status.needs_update or bool(pending_windows) or publication["publication_pending"],
+            **publication,
             "market_needs_update": status.needs_update,
             "last_check":last_check,
             "first_download": any(window.mode == "initial" for _, window in pending_windows),
@@ -169,10 +188,11 @@ def data_sync(payload: SyncPayload) -> dict:
                         "uncovered_before": window.uncovered_before,
                     }
                 )
+        pending = [window for window in windows if window["batches"]]
         preview = {
-            "操作": "按计划补齐数据，按需更新聚合表与计算缓存",
+            "操作": f"同步 {len(pending)} 张表，清洗并发布数据" if pending else "清洗并发布已有数据",
             "数据源": dp.name,
-            "待更新表": "、".join(w["table"] for w in windows if w["batches"]) or "（本次无需下载）",
+            "待更新表": "、".join(w["table"] for w in pending) or "（本次无需下载）",
             "推迟审计": "、".join(plan.deferred_audits) or "（无）",
             "跳过未核验": "、".join(plan.skipped_unverified) or "（无）",
         }
@@ -204,5 +224,5 @@ def data_sync(payload: SyncPayload) -> dict:
             "steps": [{"name": n, "state": s} for n, s in report.steps],
         }
 
-    task_id = manager.start(f"data-sync:{dp.name}", run, resource="data")
+    task_id = manager.start(f"data-sync:{dp.name}", run, resource="data", category="data_sync")
     return {"task_id": task_id}

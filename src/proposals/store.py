@@ -28,14 +28,11 @@ class ProposalStore:
         source: ProposalSource,
         payload: dict[str, object],
         model_name: str = "",
-        related_issue_id: str = "",
     ) -> tuple[Proposal, Path]:
 
         payload = {**payload}
         payload.setdefault("task", role)
         payload.setdefault("model_name", model_name)
-        if related_issue_id:
-            payload.setdefault("related_issue_id", related_issue_id)
         if payload.get("task") != role:
             raise QuantTrainingError(
                 code="PROPOSAL_ROLE_MISMATCH",
@@ -48,7 +45,6 @@ class ProposalStore:
             source=source,
             role=role,
             model_name=model_name,
-            related_issue_id=related_issue_id,
             payload=validated.model_dump(mode="json"),
         )
         path = self._path_for(proposal)

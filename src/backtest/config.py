@@ -19,6 +19,9 @@ class BacktestConfig(BaseModel):
     start: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     end: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     initial_capital: Decimal = Field(default=Decimal("1000000"), gt=0)
+    account_id: str | None = None
+    account_name: str | None = None
+    star_market_enabled: bool = True
 
     lookback_buffer_days: int = Field(default=180, ge=0)
 

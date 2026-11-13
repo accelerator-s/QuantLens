@@ -1,0 +1,18 @@
+{
+  "table": "instruments",
+  "schema_version": "9ad5be5d4659fbef",
+  "fields": [
+    {
+      "name": "instrument_id",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    },
+    {
+      "name": "source",
+      "arrow_type": "large_string",
+      "hive_type": "string",
+      "nullable": true
+    }
+  ]
+}

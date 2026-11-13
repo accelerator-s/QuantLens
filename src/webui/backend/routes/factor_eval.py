@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 from fastapi import APIRouter
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from ai.schemas import validate_ai_output
@@ -13,7 +10,7 @@ from factors import FactorMetadata, FactorPlugin, FactorRegistry, FactorStatus, 
 from factors.registry import hash_code
 from paths import workspace
 
-from ..schemas import confirm_preview, parse_enum
+from ..schemas import confirm_preview
 from ..serialize import json_safe
 from ..tasks import manager
 
@@ -43,22 +40,6 @@ def _check_panel_dependencies(dependencies: list[str]) -> None:
             code="WEBUI_FACTOR_DEPENDENCY_UNKNOWN",
             message=f"因子 dependencies 含面板契约之外的字段：{'、'.join(unknown)}。",
             suggested_action="在因子库查看可用字段。",
-        )
-
-def _check_factor_issue(issue_id: str) -> None:
-    from issues import IssueStore, IssueType
-    from issues import Status as IssueStatus
-
-    issue, _ = IssueStore().load(issue_id)
-    if issue.type != IssueType.FACTOR:
-        raise ContractViolation(
-            code="WEBUI_FACTOR_ISSUE_TYPE",
-            message=f"issue {issue_id} 类型为 {issue.type.value}，需要 factor 类型 issue。",
-        )
-    if issue.status == IssueStatus.OPEN:
-        raise ContractViolation(
-            code="WEBUI_FACTOR_ISSUE_OPEN",
-            message=f"issue {issue_id} 仍在 open 状态，先推进到 in_review/accepted/solved 再注册。",
         )
 
 def _panel_payload_from_yaml(panel_yaml: str) -> dict:
@@ -103,7 +84,6 @@ class CandidateRegisterPayload(BaseModel):
 
     confirm: bool = False
     yaml_text: str
-    issue_id: str
     override: bool = False
 
 @router.post("/factors/candidate/register", include_in_schema=False)
@@ -112,7 +92,6 @@ def candidate_register(payload: CandidateRegisterPayload) -> dict:
 
     _, candidate = _parse_candidate_yaml(payload.yaml_text)
     _check_panel_dependencies(list(candidate.dependencies))
-    _check_factor_issue(payload.issue_id)
 
     errs = syntax_check(candidate.code)
     if errs:
@@ -131,7 +110,6 @@ def candidate_register(payload: CandidateRegisterPayload) -> dict:
                 "方向": candidate.direction,
                 "时间尺度": candidate.timescale,
                 "依赖": "、".join(candidate.dependencies) or "（无）",
-                "关联事项": payload.issue_id,
                 "同名覆盖": ("是" if payload.override else "否")
                 + ("；数据表已存在同名因子" if exists else ""),
                 "说明": "注册写入数据表与插件目录，状态 DRAFT，不自动获得生产权限。",
@@ -170,27 +148,9 @@ def candidate_register(payload: CandidateRegisterPayload) -> dict:
         status=FactorStatus.DRAFT,
         code_hash=hash_code(candidate.code),
         plugin_path=str(plugin_path.relative_to(plugin.ws.root)),
-        related_issue_id=payload.issue_id,
     )
     registry.upsert(metadata, override=payload.override)
     return json_safe({"factor": registry.get(candidate.factor_name)})
-
-def _parse_int_list(raw: str, *, field: str) -> list[int]:
-    try:
-        return [int(x) for x in raw.split(",") if x.strip()]
-    except ValueError as exc:
-        raise ContractViolation(
-            code="WEBUI_INVALID_INT_LIST",
-            message=f"{field} 须为逗号分隔的整数：{raw!r}。",
-        ) from exc
-
-def _parse_neutralizations(raw: str) -> list:
-    from factors.evaluation import Neutralization
-
-    tokens = [t.strip() for t in raw.split(",") if t.strip()]
-    if tokens == ["none"]:
-        return []
-    return [parse_enum(Neutralization, t, "neutralize") for t in tokens]
 
 def _default_eval_range(start: str, end: str) -> tuple[str, str]:
     if start and end:
@@ -215,15 +175,7 @@ class EvaluatePayload(BaseModel):
     start: str = ""
     end: str = ""
     return_field: str = "ret_wd"
-    neutralize: str = "industry"
-    groups: str = "5,10"
-    horizons: str = "1,2,3,5,10,20"
-    horizon: int = 1
-    min_listed_days: int = 120
-    min_cross_section: int = 30
-    limit_filter: bool = True
-    strict_compare: bool = False
-    lookback_buffer: int = 250
+    horizon: int = 5
     resume: str = ""
 
 @router.post("/factors/{name}/evaluate")
@@ -239,14 +191,7 @@ def evaluate_factor_endpoint(name: str, payload: EvaluatePayload) -> dict:
             end=eval_end,
             return_field=payload.return_field,  
             primary_horizon=payload.horizon,
-            decay_horizons=_parse_int_list(payload.horizons, field="horizons"),
-            group_counts=_parse_int_list(payload.groups, field="groups"),
-            neutralizations=_parse_neutralizations(payload.neutralize),
-            min_listed_days=payload.min_listed_days,
-            min_cross_section=payload.min_cross_section,
-            exclude_limit_locked_entry=payload.limit_filter,
-            strict_compare=payload.strict_compare,
-            lookback_buffer_days=payload.lookback_buffer,
+
         )
     except ValueError as exc:
         raise ContractViolation(
@@ -258,14 +203,14 @@ def evaluate_factor_endpoint(name: str, payload: EvaluatePayload) -> dict:
     if not payload.confirm:
         return confirm_preview(
             {
-                "操作": "因子横截面评价（本地执行）",
+                "操作": "因子横截面评价（Spark）",
                 "因子": name,
                 "评价窗口": f"{eval_start} ~ {eval_end}",
                 "收益口径": payload.return_field,
-                "中性化": payload.neutralize,
-                "分组 / 持有期": f"{payload.groups} / {payload.horizons}（核心 {payload.horizon}）",
+                "标准化": "读取因子注册表已发布的 DWS 标准化值",
+                "分组 / 持有期": f"5 分组 / 1、5、10、20 日（核心 {payload.horizon}）",
                 "续算": resume or "（新运行）",
-                "说明": "评价为分钟级任务，确认后在后台执行，可在页面轮询进度。",
+                "说明": "读取已发布因子和成熟标签，确认后在后台提交 Spark 作业。",
             }
         )
 
@@ -276,116 +221,45 @@ def evaluate_factor_endpoint(name: str, payload: EvaluatePayload) -> dict:
     task_id = manager.start(f"factor-evaluate:{name}", run, resource=f"factor-eval:{name}")
     return {"task_id": task_id}
 
-def _read_yaml(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+@router.get('/factors/{name}/eval-runs')
+def list_eval_runs(name:str):
+    from quantlens import ads
+    rows=ads.query('factor_eval','factor=?',[name],limit=10000,order='as_of DESC,eval_end DESC,horizon')
+    groups={}
+    for row in rows:groups.setdefault(row['run_id'],[]).append(row)
+    items=[]
+    for run_id,results in groups.items():
+        row=next((item for item in results if item['horizon']==5),results[0])
+        items.append({'run_id':run_id,'state':'completed','updated_at':row['as_of'],'created_at':row['as_of'],
+                      'period':str(row['eval_start'])+' ~ '+str(row['eval_end']),'return_field':'ret_wd','primary_horizon':row['horizon'],
+                      'has_metrics':True,'variant':'published','ic_mean':row['rank_ic'],
+                      'icir_annualized':row['icir']*244**.5 if row.get('icir') is not None else None})
+    return {'factor':name,'items':items,**ads.provenance('factor_eval')}
 
-def _eval_run_dir(name: str, run_id: str) -> Path:
-    FactorRegistry().get(name)
-    base = (workspace().runs / "factor_eval" / name).resolve()
-    run_dir = (base / run_id).resolve()
-    if run_dir.parent != base or not run_dir.is_dir():
-        raise ContractViolation(
-            code="WEBUI_EVAL_RUN_NOT_FOUND",
-            message=f"因子 {name} 的评价运行 {run_id} 不存在。",
-        )
-    return run_dir
 
-def _headline_metrics(metrics: dict) -> dict:
-    
-    labels = metrics.get("labels") or {}
-    output: dict[str, dict] = {}
-    for label, payload in labels.items():
-        variants = payload.get("variants") or {}
-        selected_name = next(
-            (
-                name
-                for name in ("industry_size", "industry", "size", "raw")
-                if name in variants and (variants[name].get("ic") or {}).get("n_valid_days")
-            ),
-            "",
-        )
-        if not selected_name:
-            continue
-        selected = variants[selected_name]
-        groups = selected.get("groups") or {}
-        largest_group = sorted(
-            groups,
-            key=lambda value: int(str(value).removeprefix("g")),
-        )[-1] if groups else ""
-        long_short = (
-            (groups.get(largest_group) or {}).get("long_short") or {}
-        )
-        output[label] = {
-            "variant": selected_name,
-            "ic_mean": (selected.get("ic") or {}).get("ic_mean"),
-            "icir_annualized": (selected.get("ic") or {}).get("icir_annualized"),
-            "win_rate": (selected.get("ic") or {}).get("win_rate"),
-            "valid_days": (selected.get("ic") or {}).get("n_valid_days"),
-            "long_short_annualized": long_short.get("annualized_return"),
-            "max_drawdown": long_short.get("max_drawdown"),
-            "turnover_oneside": long_short.get("avg_daily_turnover_oneside"),
-        }
-    return output
+@router.get('/factors/{name}/eval-runs/{run_id}')
+def get_eval_run(name:str,run_id:str):
+    from fastapi import HTTPException
+    from quantlens import ads
+    from quantlens.evaluation_view import view
+    rows=ads.query('factor_eval','factor=? AND run_id=?',[name,run_id],limit=1000,order='eval_end DESC,horizon')
+    if not rows:raise HTTPException(404,'评价结果尚未发布')
+    row=rows[0]
+    rows=[item for item in rows if item['eval_start']==row['eval_start'] and item['eval_end']==row['eval_end']]
+    daily=ads.query('factor_eval_daily','factor=? AND version=? AND run_id=? AND horizon=5',[name,row['version'],run_id],limit=10000,order='date')
+    metadata=ads.query('factor_meta','name=? AND version=?',[name,row['version']],limit=1)
+    direction=metadata[0]['direction'] if metadata else FactorRegistry().get(name).direction
+    return json_safe({'factor':name,'run_id':run_id,'status':{'state':'completed'},
+                      'config':{'config':{'factor_name':name,'start':row['eval_start'],'end':row['eval_end'],'return_field':'ret_wd','primary_horizon':5}},
+                      'metrics':view(rows,daily,direction=direction),'charts':['daily.csv'] if daily else [],**ads.provenance('factor_eval')})
 
-@router.get("/factors/{name}/eval-runs")
-def list_eval_runs(name: str) -> dict:
-    FactorRegistry().get(name)
-    base = workspace().runs / "factor_eval" / name
-    items = []
-    if base.is_dir():
-        for run_dir in sorted(base.iterdir(), reverse=True):
-            if not run_dir.is_dir():
-                continue
-            status = _read_yaml(run_dir / "status.yaml")
-            cfg = _read_yaml(run_dir / "config.yaml")
-            config = cfg.get("config") or {}
-            metrics = _read_yaml(run_dir / "metrics.yaml")
-            headline = _headline_metrics(metrics)
-            
-            preferred = headline.get("strict") or headline.get("default") or {}
-            items.append(
-                {
-                    "run_id": run_dir.name,
-                    "state": status.get("state", ""),
-                    "updated_at": status.get("updated_at", ""),
-                    "created_at": cfg.get("created_at", ""),
-                    "period": f"{config.get('start', '')} ~ {config.get('end', '')}",
-                    "return_field": config.get("return_field", ""),
-                    "primary_horizon": config.get("primary_horizon"),
-                    "has_metrics": bool(metrics),
-                    "headline": headline,
-                    **preferred,
-                }
-            )
-    return json_safe({"factor": name, "items": items})
 
-@router.get("/factors/{name}/eval-runs/{run_id}")
-def get_eval_run(name: str, run_id: str) -> dict:
-    run_dir = _eval_run_dir(name, run_id)
-    charts_dir = run_dir / "charts"
-    charts = sorted(p.name for p in charts_dir.iterdir()) if charts_dir.is_dir() else []
-    return json_safe(
-        {
-            "factor": name,
-            "run_id": run_id,
-            "status": _read_yaml(run_dir / "status.yaml"),
-            "config": _read_yaml(run_dir / "config.yaml"),
-            "metrics": _read_yaml(run_dir / "metrics.yaml"),
-            "charts": charts,
-        }
-    )
-
-@router.get("/factors/{name}/eval-runs/{run_id}/charts/{filename}")
-def get_eval_chart(name: str, run_id: str, filename: str) -> FileResponse:
-    run_dir = _eval_run_dir(name, run_id)
-    charts_dir = run_dir / "charts"
-    
-    valid = {p.name for p in charts_dir.iterdir()} if charts_dir.is_dir() else set()
-    if filename not in valid:
-        raise ContractViolation(
-            code="WEBUI_CHART_NOT_FOUND",
-            message=f"图表文件 {filename!r} 不存在。",
-        )
-    return FileResponse(charts_dir / filename, media_type="text/csv")
+@router.get('/factors/{name}/eval-runs/{run_id}/charts/{filename}')
+def get_eval_chart(name:str,run_id:str,filename:str):
+    from fastapi import HTTPException,Response
+    from quantlens import ads
+    import pandas as pd
+    if filename!='daily.csv':raise HTTPException(404,'结果数据不存在')
+    rows=ads.query('factor_eval_daily','factor=? AND run_id=? AND horizon=5',[name,run_id],limit=10000,order='date')
+    if not rows:raise HTTPException(404,'结果数据尚未发布')
+    return Response(pd.DataFrame(rows).to_csv(index=False),media_type='text/csv',headers={'Content-Disposition':'attachment; filename="daily.csv"'})

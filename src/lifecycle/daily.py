@@ -186,7 +186,10 @@ class DailyOperationsService:
         *,
         reference_portfolio_value: float,
     ) -> PortfolioPlan:
-        semantic = [snapshot_id, strategy.strategy_version_id, *plan.account_ids, signal_date]
+        semantic = [snapshot_id, strategy.strategy_version_id, *plan.account_ids, signal_date,
+                    plan.current_holdings_digest, reference_portfolio_value,
+                    [item.model_dump(mode="json") for item in plan.target_holdings],
+                    [item.model_dump(mode="json") for item in plan.suggested_trades], plan.caveats]
         plan_id = f"PP-{_hash(semantic)[:20].upper()}"
         targets = [
             PortfolioTarget(
@@ -295,6 +298,7 @@ class DailyOperationsService:
             sum(
                 order.quantity * order.reference_price
                 for order in plan.proposed_orders
+                if order.side == 'buy'
             )
             / plan.reference_portfolio_value
             if plan.reference_portfolio_value > 0
@@ -308,6 +312,7 @@ class DailyOperationsService:
             "estimated_cost_amount": cost,
             "estimated_cost_rate": cost_rate,
             "net_return": gross - cost_rate,
+            "sharpe": float(daily.mean()/daily.std()*244**.5) if daily.std()>0 else 0.,
             "max_drawdown": max_drawdown,
             "turnover": turnover,
             "reference_portfolio_value": plan.reference_portfolio_value,
@@ -330,21 +335,22 @@ class DailyOperationsService:
 
     def _expire_previous(self, current: PortfolioPlan) -> None:
         for row in self.store.list_objects(ObjectType.PORTFOLIO_PLAN, limit=5000):
-            if row["state"] not in {"proposed", "active", "partially_executed"}:
+            if row["state"] not in {"proposed", "confirmed", "active", "partially_executed"}:
                 continue
             previous = self.store.get(ObjectType.PORTFOLIO_PLAN, row["object_id"])
             assert isinstance(previous, PortfolioPlan)
             if (
                 previous.strategy_version_id == current.strategy_version_id
                 and set(previous.account_ids) == set(current.account_ids)
-                and previous.trading_date < current.trading_date
+                and previous.portfolio_plan_id != current.portfolio_plan_id
+                and previous.trading_date <= current.trading_date
             ):
                 self._transition(
                     ObjectType.PORTFOLIO_PLAN,
                     previous.portfolio_plan_id,
                     "expired",
                     (
-                        "新交易日计划已生成，旧计划执行窗口结束；"
+                        "当前账户的新计划已生成，旧计划失效；"
                         "未成交和部分成交事实保留供恢复核对"
                     ),
                 )

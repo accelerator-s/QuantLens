@@ -40,6 +40,27 @@
   gap: 10px;
 }
 
+.confirm__field--inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-0);
+  cursor: pointer;
+}
+
+.confirm__field--inline input[type="checkbox"] {
+  inline-size: 18px;
+  block-size: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.confirm__field--inline input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .dialog__preview {
   display: flex;
   flex-direction: column;
@@ -71,9 +92,20 @@
 }
 
 .dialog__actions {
+  position: relative;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   padding-top: 6px;
+  border-top: 1px solid transparent;
+}
+
+.dialog__actions::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: -1px;
   border-top: 1px solid var(--line-0);
+  transform: translateY(-2px);
+  pointer-events: none;
 }
