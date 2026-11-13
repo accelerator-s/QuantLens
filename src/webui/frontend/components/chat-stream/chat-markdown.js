@@ -1,6 +1,7 @@
 import { Marked } from "../../resources/vendor/marked/marked.js";
 import DOMPurify from "../../resources/vendor/dompurify/purify.js";
 import katex from "../../resources/vendor/katex/katex.js";
+import { createThinkingStream } from "./thinking-stream.js";
 
 const escapeHtml = text => text.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
@@ -155,4 +156,111 @@ export function renderAssistant(host, source, reasoning = "") {
     renderMarkdown(body, answer);
     host.append(body);
   }
+}
+
+// Streaming updates touch only the active message. Short content gets Markdown
+// previews at most 8 times/s; long content appends text nodes instead of repeatedly
+// parsing its entire history. Each section gets a final rich render once complete.
+export function createAssistantStream(host, onPaint = paint => paint()) {
+  let details, summary, thoughtHost, answerHost, touched = false, answering = false;
+  let timer, stopped = false;
+  const sections = {
+    reasoning: { parts: [], size: 0, painted: 0, tail: null },
+    content: { parts: [], size: 0, painted: 0, tail: null },
+  };
+  function sectionHost(channel) {
+    if (channel === "reasoning") {
+      if (!details) {
+        details = document.createElement("details"); details.className = "chat-thinking"; details.open = !answering;
+        summary = document.createElement("summary");
+        summary.textContent = answering ? "思考过程" : "正在思考…";
+        summary.addEventListener("click", () => { touched = true; });
+        summary.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") touched = true;
+        });
+        details.addEventListener("toggle", () => {
+          if (details.open && !stopped && timer === undefined) timer = setTimeout(paint, 0);
+        });
+        thoughtHost = document.createElement("div"); thoughtHost.className = "chat-thinking__body";
+        details.append(summary, thoughtHost); host.prepend(details);
+      }
+      return thoughtHost;
+    }
+    if (!answerHost) {
+      answerHost = document.createElement("div"); answerHost.className = "chat__answer"; host.append(answerHost);
+    }
+    return answerHost;
+  }
+  function paintSection(channel, final = false) {
+    const section = sections[channel];
+    if (!section.parts.length || (!section.size && !final)) return;
+    const target = sectionHost(channel);
+    if (channel === "reasoning" && !details.open && !final) return;
+    if (final || section.size <= 12000) {
+      if (section.painted !== section.parts.length || final) renderMarkdown(target, section.parts.join(""));
+      section.tail = null;
+    } else if (section.painted < section.parts.length) {
+      if (!section.tail) {
+        const span = document.createElement("span"); span.className = "chat__stream-text";
+        section.tail = document.createTextNode(""); span.append(section.tail); target.append(span);
+      }
+      section.tail.appendData(section.parts.slice(section.painted).join(""));
+    }
+    section.painted = section.parts.length;
+  }
+  function paint() {
+    timer = undefined;
+    if (stopped) return;
+    onPaint(() => {
+      paintSection("reasoning"); paintSection("content");
+    });
+  }
+  function append(channel, text) {
+    if (stopped || !text) return;
+    const section = sections[channel];
+    // Whitespace alone must not create an empty thinking panel.
+    if (!section.parts.length && !text.trim()) return;
+    section.parts.push(text); section.size += text.length;
+    if (channel === "content" && !answering) {
+      answering = true;
+      if (details) {
+        paintSection("reasoning", true);
+        summary.textContent = "思考过程";
+        if (!touched) details.open = false;
+      }
+    }
+    if (timer === undefined) timer = setTimeout(paint, 125);
+  }
+  function release() {
+    stopped = true; clearTimeout(timer);
+    for (const section of Object.values(sections)) {
+      section.parts.length = 0; section.tail = null;
+    }
+  }
+  const splitter = createThinkingStream(append);
+  return {
+    push({ channel, text }) {
+      if (channel === "reasoning") append("reasoning", text);
+      else splitter.feed(text);
+    },
+    finish(source, reasoning = "") {
+      clearTimeout(timer); splitter.finish(); clearTimeout(timer);
+      // A final authoritative split also handles an incomplete <think> response.
+      const parsed = splitThinking(source);
+      const thoughts = [...new Set([reasoning.trim(), parsed.thinking].filter(Boolean))].join("\n\n");
+      if (parsed.answer && !answering) {
+        answering = true;
+        if (details && !touched) details.open = false;
+      }
+      onPaint(() => {
+        if (thoughts) {
+          renderMarkdown(sectionHost("reasoning"), thoughts);
+          summary.textContent = parsed.incomplete ? "思考过程（未完整返回）" : "思考过程";
+        }
+        if (parsed.answer) renderMarkdown(sectionHost("content"), parsed.answer);
+      });
+      release();
+    },
+    destroy: release,
+  };
 }

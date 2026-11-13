@@ -1,10 +1,71 @@
 from __future__ import annotations
 
 import re
+import json
 
 from ai.registry import AIModel
 from ai.router import AIRouter, _api_key_for
 from exceptions import ModelRouteError
+
+
+class _SignatureFilter:
+    """Remove signature tags even when split across provider chunks."""
+    def __init__(self):
+        self.pending = ""
+        self.hidden = False
+
+    def feed(self, text: str, *, final: bool = False) -> str:
+        self.pending += text
+        output = []
+        while self.pending:
+            tag = re.search(r"</?signature\s*>", self.pending, re.IGNORECASE)
+            if tag:
+                if not self.hidden:
+                    output.append(self.pending[:tag.start()])
+                self.hidden = not tag[0].startswith("</")
+                self.pending = self.pending[tag.end():]
+                continue
+            start = self.pending.rfind("<")
+            fragment = self.pending[start:].lower() if start >= 0 else ""
+            partial = fragment and (any(tag.startswith(fragment) for tag in ("<signature", "</signature")) or re.fullmatch(r"</?signature\s*", fragment))
+            end = start if partial else len(self.pending)
+            if not self.hidden:
+                output.append(self.pending[:end])
+            self.pending = "" if final else self.pending[end:]
+            if end == 0:
+                break
+        return "".join(output)
+
+
+def chat_stream(ai_router: AIRouter, model: AIModel, messages: list[dict]):
+    from fastapi.responses import StreamingResponse
+    from ai.transport import stream_completion
+    from exceptions import QuantTrainingError
+    from .errors import unexpected_error
+
+    def encode(event):
+        return json.dumps(event, ensure_ascii=False) + "\n"
+
+    def events():
+        filters = {channel: _SignatureFilter() for channel in ("content", "reasoning")}
+        try:
+            yield encode({"type": "start", "model": model.name})
+            for delta in stream_completion(model, _api_key_for(model), messages, timeout=ai_router.request_timeout):
+                text = filters[delta["channel"]].feed(delta["text"])
+                if text:
+                    yield encode({"type": "delta", "channel": delta["channel"], "text": text})
+            for channel, scrubber in filters.items():
+                text = scrubber.feed("", final=True)
+                if text:
+                    yield encode({"type": "delta", "channel": channel, "text": text})
+            yield encode({"type": "done"})
+        except Exception as exc:
+            error = exc if isinstance(exc, QuantTrainingError) else unexpected_error(exc)
+            yield encode({"type": "error", "message": error.message})
+
+    return StreamingResponse(events(), media_type="application/x-ndjson", headers={
+        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
+    })
 
 def pick_chat_model(ai_router: AIRouter, name: str) -> AIModel:
     

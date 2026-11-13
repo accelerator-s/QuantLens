@@ -249,6 +249,7 @@
 .chat-thinking[open] > summary::before { transform: rotate(45deg); }
 .chat-thinking__body { margin: 10px 0 0 3px; border-left: 2px solid var(--line-0); padding: 2px 0 2px 16px; }
 .chat-thinking__body strong { color: inherit; }
+.chat__stream-text { white-space: pre-wrap; }
 .chat-history__rename.btn { flex: 0 0 24px; width: 24px; height: 26px; min-height: 26px; padding: 5px; border-color: transparent; color: var(--ink-2); }
 .chat-history__rename svg { width: 14px; height: 14px; }
 .chat-history__rename-form { width: 100%; padding: 6px; }

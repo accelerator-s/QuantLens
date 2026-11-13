@@ -311,7 +311,7 @@ async function mountContent(root, ctx) {
         const res = await ctx.api.factorResearchChat({
           model: modelSelect.value,
           messages: history,
-        });
+        }, options);
         return { text: res.reply, reasoning: res.reasoning || "", model: res.model || modelSelect.value };
       },
     });

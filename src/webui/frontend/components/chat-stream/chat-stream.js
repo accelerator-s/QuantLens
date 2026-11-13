@@ -1,5 +1,5 @@
 import { createChatHistory } from "./chat-history.js";
-import { renderAssistant, splitThinking } from "./chat-markdown.js";
+import { renderAssistant, splitThinking, createAssistantStream } from "./chat-markdown.js";
 
 function node(tag, className, text = "") {
   const result = document.createElement(tag);
@@ -14,7 +14,7 @@ export function createChat(host, {
 } = {}) {
   const history = [];
   let busy = false, disabled = false, disposed = false, savedHistory;
-  let historyLoading = Boolean(historyHost && historyKey), saveTimer;
+  let historyLoading = Boolean(historyHost && historyKey), saveTimer, activeStream;
   host.replaceChildren();
   host.classList.add("chat");
 
@@ -100,34 +100,35 @@ export function createChat(host, {
     if (role === "assistant" && !pending) renderAssistant(bubble, text, reasoning);
     else bubble.textContent = text;
     content.append(bubble);
-    if (!pending) {
-      const actions = node("div", "chat__message-actions");
-      const action = node("button", "btn btn--ghost chat__message-action");
-      action.type = "button";
-      action.dataset.chatAction = role === "user" ? "edit" : "regenerate";
-      action.title = role === "user" ? "编辑并重新发送" : "重新生成";
-      action.setAttribute("aria-label", action.title);
-      action.innerHTML = role === "user"
-        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5L8 21H3v-5Z"/><path d="m14 5 5 5"/></svg>'
-        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/></svg>';
-      action.addEventListener("click", () => {
-        if (busy || disabled || historyLoading || disposed) return;
-        if (role === "user") editMessage(item, index);
-        else {
-          const userIndex = history.findLastIndex((message, position) => position < index && message.role === "user");
-          if (userIndex < 0) return;
-          truncate(userIndex + 1);
-          savedHistory?.save();
-          submit({ retry: true });
-        }
-      });
-      actions.append(action);
-      content.append(actions);
-    }
+    if (!pending) appendActions(role, item, index, content);
     item.append(content);
     list.append(item);
     scrollToLatest();
     return item;
+  }
+  function appendActions(role, item, index, content) {
+    const actions = node("div", "chat__message-actions");
+    const action = node("button", "btn btn--ghost chat__message-action");
+    action.type = "button";
+    action.dataset.chatAction = role === "user" ? "edit" : "regenerate";
+    action.title = role === "user" ? "编辑并重新发送" : "重新生成";
+    action.setAttribute("aria-label", action.title);
+    action.innerHTML = role === "user"
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5L8 21H3v-5Z"/><path d="m14 5 5 5"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/></svg>';
+    action.addEventListener("click", () => {
+      if (busy || disabled || historyLoading || disposed) return;
+      if (role === "user") editMessage(item, index);
+      else {
+        const userIndex = history.findLastIndex((message, position) => position < index && message.role === "user");
+        if (userIndex < 0) return;
+        truncate(userIndex + 1);
+        savedHistory?.save();
+        submit({ retry: true });
+      }
+    });
+    actions.append(action);
+    content.append(actions);
   }
 
   async function submit({ retry = false, editIndex, text: editedText } = {}) {
@@ -151,8 +152,22 @@ export function createChat(host, {
     onBusyChange?.(true);
     const pending = appendMessage("assistant", "正在思考…", "", history.length, "", true);
     pending.classList.add("chat__item--pending");
+    const bubble = pending.querySelector(".chat__bubble");
+    let received = false;
+    const live = createAssistantStream(bubble, paint => {
+      if (disposed) return;
+      // Respect a user reading earlier messages; no forced jumps on each token.
+      const follow = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+      paint();
+      if (follow) scrollToLatest();
+    });
+    activeStream = live;
     try {
-      const result = await send(context());
+      const result = await send(context(), { onDelta: delta => {
+        if (disposed) return;
+        if (!received) { bubble.replaceChildren(); pending.classList.remove("chat__item--pending"); received = true; }
+        live.push(delta);
+      } });
       const reply = typeof result === "string" ? result : result?.text || "";
       const reasoning = typeof result === "object" ? result?.reasoning || "" : "";
       if (!reply.trim() && !reasoning.trim()) throw new Error("模型未返回内容，请重试。");
@@ -161,8 +176,12 @@ export function createChat(host, {
       savedHistory?.save({ expectedMessages });
       if (history.filter(message => message.role === "assistant").length === 1) savedHistory?.suggestTitle();
       if (disposed) return;
-      pending.remove();
-      appendMessage("assistant", reply, result?.model || "", history.length - 1, reasoning);
+      if (!received) bubble.replaceChildren();
+      live.finish(reply, reasoning);
+      pending.classList.remove("chat__item--pending");
+      pending.dataset.messageIndex = String(history.length - 1);
+      pending.querySelector(".chat__role").textContent = result?.model || "研究助手";
+      appendActions("assistant", pending, history.length - 1, pending.querySelector(".chat__content"));
     } catch (err) {
       if (disposed) return;
       pending.remove();
@@ -176,6 +195,8 @@ export function createChat(host, {
       list.append(error);
       scrollToLatest();
     } finally {
+      live.destroy();
+      if (activeStream === live) activeStream = undefined;
       busy = false;
       if (!disposed) {
         sync();
@@ -277,7 +298,7 @@ export function createChat(host, {
     get ready() { return savedHistory?.ready || Promise.resolve(); },
     setDisabled(value) { disabled = value; sync(); },
     focus() { input.focus({ preventScroll: true }); },
-    destroy() { clearTimeout(saveTimer); savedHistory?.save(); disposed = true; },
+    destroy() { clearTimeout(saveTimer); activeStream?.destroy(); savedHistory?.save(); disposed = true; },
     clear() {
       if (busy) return;
       history.length = 0;

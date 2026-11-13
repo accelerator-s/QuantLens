@@ -59,7 +59,7 @@ export async function openStrategyChat(ctx, { onYaml, profileName = "" }) {
         model: modelSelect.value || "",
         profile_name: profileName,
         messages: history,
-      });
+      }, options);
       return { text: res.reply, reasoning: res.reasoning || "", model: res.model || "" };
     },
   });

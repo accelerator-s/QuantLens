@@ -152,3 +152,63 @@ def probe_model(model: AIModel, api_key: str) -> dict:
     if not reply:
         raise ModelRouteError(code="AI_OUTPUT_EMPTY", message="模型未返回内容，无法确认连通性。", blocking=True)
     return {"ok": True, "model": model.api_model_id, "reply": reply, "latency_ms": round((time.perf_counter() - start) * 1000)}
+
+
+def stream_completion(model: AIModel, api_key: str, messages: list[dict], *, timeout: float = 180):
+    """Yield real provider deltas; never buffer a completed reply to simulate typing."""
+    anthropic = model.api_type == "anthropic"
+    url = endpoint_base(model.provider_endpoint) + ("/messages" if anthropic else "/chat/completions")
+    body = {"model": model.api_model_id, "stream": True}
+    if anthropic:
+        system, converted = _anthropic_messages(messages)
+        body.update(messages=converted, max_tokens=8192)
+        if system:
+            body["system"] = system
+    else:
+        body["messages"] = [{k: v for k, v in msg.items() if not k.startswith("_")} for msg in messages]
+    try:
+        with create_http_client(timeout=timeout, target_url=url) as client:
+            with client.stream("POST", url, headers=_headers(model.api_type, api_key), json=body) as response:
+                if response.status_code >= 400:
+                    status = response.status_code
+                    detail = {401: "接口密钥无效", 403: "没有访问权限", 404: "接口或模型不存在", 429: "请求过多或额度不足"}.get(status, "服务端请求失败")
+                    raise ModelRouteError(code="AI_HTTP_STATUS_ERROR", message=f"{detail}（HTTP {status}）。", blocking=True)
+                data_lines = []
+                for line in response.iter_lines():
+                    if line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip(" "))
+                        continue
+                    if line or not data_lines:
+                        continue
+                    raw = "\n".join(data_lines)
+                    data_lines.clear()
+                    if raw == "[DONE]":
+                        return
+                    event = json.loads(raw)
+                    if event.get("error") or event.get("type") == "error":
+                        raise ModelRouteError(code="AI_STREAM_ERROR", message="模型服务中断了回复，请重试。", blocking=True)
+                    if anthropic:
+                        if event.get("type") == "message_stop":
+                            return
+                        if event.get("type") == "content_block_start":
+                            delta = event.get("content_block", {})
+                        elif event.get("type") == "content_block_delta":
+                            delta = event.get("delta", {})
+                        else:
+                            continue
+                        for field, channel in (("thinking", "reasoning"), ("text", "content")):
+                            if isinstance(delta.get(field), str) and delta[field]:
+                                yield {"channel": channel, "text": delta[field]}
+                    else:
+                        choices = event.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        for field, channel in (("reasoning_content", "reasoning"), ("content", "content")):
+                            if isinstance(delta.get(field), str) and delta[field]:
+                                yield {"channel": channel, "text": delta[field]}
+                raise ModelRouteError(code="AI_STREAM_INTERRUPTED", message="回复连接意外断开，请重试。", blocking=True)
+    except httpx.HTTPError as exc:
+        raise ModelRouteError(code="AI_HTTP_TRANSPORT_ERROR", message="连接失败或回复中断，请检查网络后重试。", blocking=True) from exc
+    except (ValueError, TypeError, KeyError, IndexError) as exc:
+        raise ModelRouteError(code="AI_HTTP_RESPONSE_INVALID", message="模型流式响应格式异常，请重试。", blocking=True) from exc
