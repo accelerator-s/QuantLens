@@ -299,14 +299,14 @@ async function mountContent(root, ctx) {
       historyKey: "factor-research",
       getMetadata: () => ({ model: modelSelect.value }),
       onRestore: metadata => modelSelect.setOptions(modelOptions, metadata.model || recommendationData.recommended),
-      title: "从一个现象开始研究",
+      title: "研究假设",
       onStateChange: (state) => {
         start.disabled = state.busy || state.disabled || state.loading || !state.hasUserMessages;
         modelTrigger.disabled = state.busy || state.disabled || state.loading;
       },
       greeting:
-        "描述你观察到的现象，一起讨论它的原因、作用时间和失效条件。",
-      placeholder: "填写想验证的现象或假设…",
+        "填写研究假设、作用周期和失效条件。",
+      placeholder: "输入研究假设…",
       send: async (history) => {
         const res = await ctx.api.factorResearchChat({
           model: modelSelect.value,

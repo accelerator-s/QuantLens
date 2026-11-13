@@ -48,19 +48,30 @@
   --p-green-400: #4ade80;
   --p-green-700: #15803d;
 
-  /* 字体栈：无衬线数据字体 + 等宽数值字体 */
-  --font-sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, sans-serif;
+  /* 与 StrataDB 共用中文界面字体；无需在线字体。 */
+  --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "PingFang SC", system-ui, -apple-system, sans-serif;
   --font-display: var(--font-sans);
-  --font-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Mono", "Consolas", "Liberation Mono", monospace;
+  --font-mono: var(--font-sans);
+  --font-code: "Cascadia Mono", "Consolas", "Liberation Mono", monospace;
 
-  /* 字号阶梯 (紧凑高信息密度) */
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-base: 13px;
-  --fs-md: 14px;
-  --fs-lg: 15px;
-  --fs-xl: 18px;
-  --fs-2xl: 22px;
+  /* 字号随浏览器设置缩放，辅助文字不低于 14px。 */
+  --fs-xs: .875rem;
+  --fs-sm: .9375rem;
+  --fs-base: 1rem;
+  --fs-md: 1.125rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.5rem;
+  --fs-2xl: 1.875rem;
+
+  --text-page: var(--fs-lg);
+  --text-section: var(--fs-md);
+  --text-module: var(--fs-base);
+  --text-metric: var(--fs-xl);
+  --text-body: var(--fs-sm);
+  --text-caption: var(--fs-xs);
+  --weight-body: 400;
+  --weight-label: 500;
+  --weight-heading: 600;
 
   /* 间距尺度 (4px 基准网格) */
   --space-1: 4px;
@@ -68,14 +79,22 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
-  --space-6: 28px;
+  --space-6: 24px;
+  --page-pad: clamp(12px, 1.35vw, 20px);
+  --layout-gap: clamp(10px, 1vw, 16px);
+  --panel-gap: 12px;
 
   /* 圆角尺度 (克制、利落的金融终端圆角) */
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-md: 5px;
-  --radius-lg: 6px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
   --radius: var(--radius-md);
+  --border-width: 1.5px;
+  --icon-sm: 18px;
+  --icon-md: 22px;
+  --icon-lg: 28px;
+  --icon-stroke: 1.8;
 
   /* 动效节奏 */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -87,25 +106,33 @@
   /* ------------------------------------------------------------------------
      第二层：语义令牌 (Semantic Tokens - 浅色模式默认)
      ------------------------------------------------------------------------ */
-  --bg-0: var(--p-slate-50);
+  --bg-0: #f5f7fb;
   --bg-1: #ffffff;
   --bg-2: var(--p-slate-100);
   --bg-3: var(--p-slate-200);
 
-  --ink-0: var(--p-slate-900);
-  --ink-1: var(--p-slate-700);
-  --ink-2: var(--p-slate-500);
+  --ink-0: #26323f;
+  --ink-1: #4b5563;
+  --ink-2: #647184;
+  --text-blue: #3c67a3;
+  --heading-ink: var(--text-blue);
+  --surface-blue: #f3f6fa;
+  --surface-teal: #f0f8f7;
+  --surface-amber: #fffbf2;
+  --module-blue: var(--text-blue);
+  --module-teal: #23645f;
+  --module-amber: #8c5b20;
 
   --line-0: var(--p-slate-200);
-  --line-1: var(--p-slate-300);
+  --line-1: #7c8da5;
 
-  --accent: var(--p-blue-800);
-  --accent-hover: var(--p-blue-700);
-  --accent-strong: var(--p-blue-800);
+  --accent: #4c7dc2;
+  --accent-hover: #3f6cae;
+  --accent-strong: #3c659e;
   --accent-ink: #ffffff;
-  --accent-soft: var(--p-blue-50);
+  --accent-soft: #edf3fb;
 
-  --focus-ring: var(--p-blue-600);
+  --focus-ring: var(--accent);
 
   /* 状态语义色 */
   --safe: var(--p-emerald-700);
@@ -142,11 +169,12 @@
   /* ------------------------------------------------------------------------
      第三层：组件令牌 (Component Tokens)
      ------------------------------------------------------------------------ */
-  --rail-w: 204px;
-  --topbar-h: 48px;
-  --control-h: 32px;
-  --card-pad: 14px 16px;
-  --table-cell-pad: 7px 10px;
+  --rail-w: clamp(208px, 15vw, 232px);
+  --topbar-h: 60px;
+  --control-h: 40px;
+  --control-sm-h: 36px;
+  --card-pad: clamp(12px, .95vw, 16px) clamp(14px, 1.15vw, 18px);
+  --table-cell-pad: 9px 12px;
 
   /* 滚动条：淡色中性滑块，避免使用强调色造成视觉抢眼 */
   --scroll-thumb: var(--p-slate-300);
@@ -162,14 +190,22 @@
   --ink-0: var(--p-slate-50);
   --ink-1: var(--p-slate-300);
   --ink-2: var(--p-slate-400);
+  --text-blue: #a7caff;
+  --heading-ink: #dbeafe;
+  --surface-blue: #14243a;
+  --surface-teal: #142c2a;
+  --surface-amber: #2b251b;
+  --module-blue: #a7caff;
+  --module-teal: #8dd2c9;
+  --module-amber: #e6c38d;
 
   --line-0: var(--p-slate-800);
-  --line-1: var(--p-slate-700);
+  --line-1: var(--p-slate-500);
 
-  --accent: var(--p-blue-500);
-  --accent-hover: var(--p-blue-600);
-  --accent-strong: var(--p-blue-500);
-  --accent-ink: #ffffff;
+  --accent: #93c5fd;
+  --accent-hover: #bfdbfe;
+  --accent-strong: #60a5fa;
+  --accent-ink: #0f172a;
   --accent-soft: rgba(59, 130, 246, 0.16);
 
   --focus-ring: var(--p-blue-500);

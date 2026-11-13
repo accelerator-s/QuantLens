@@ -18,7 +18,8 @@
 .topbar__menu-btn {
   display: none;
   padding: 4px 7px;
-  min-height: 28px;
+  min-height: var(--control-h);
+  min-width: var(--control-h);
 }
 
 @media (max-width: 960px) {
@@ -32,18 +33,20 @@
 }
 
 .topbar__group {
+  display: none;
   font-size: var(--fs-xs);
   color: var(--ink-2);
   white-space: nowrap;
 }
 
 .topbar__sep {
+  display: none;
   color: var(--line-1);
   font-size: var(--fs-xs);
 }
 
 .topbar__title {
-  font-size: var(--fs-md);
+  font-size: var(--fs-lg);
   font-weight: 600;
   color: var(--ink-0);
   white-space: nowrap;
@@ -62,10 +65,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 9px;
+  min-height: var(--control-sm-h);
+  padding: 6px 12px;
   border-radius: var(--radius-sm);
   background: var(--bg-0);
-  border: 1px solid var(--line-0);
+  border: var(--border-width) solid transparent;
   font-size: var(--fs-xs);
   color: var(--ink-1);
   font-family: inherit;
@@ -76,8 +80,8 @@
 @keyframes service-pulse { 50% { opacity: .3; } }
 
 .topbar__dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--ink-2);
 }

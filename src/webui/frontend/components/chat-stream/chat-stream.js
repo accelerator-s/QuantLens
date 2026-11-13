@@ -9,7 +9,7 @@ function node(tag, className, text = "") {
 }
 
 export function createChat(host, {
-  send, greeting = "", title = "一起完善研究想法", placeholder = "输入内容…",
+  send, greeting = "", title = "研究想法", placeholder = "输入内容…",
   suggestions = [], onBusyChange, onStateChange, historyHost, historyKey, getMetadata = () => ({}), onRestore,
 } = {}) {
   const history = [];

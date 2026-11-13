@@ -35,3 +35,63 @@
   padding-top: 8px;
   border-top: 1px solid var(--line-0);
 }
+
+/* Account summaries allow every value to grow without crossing a grid cell. */
+.portfolio > .toolbar:first-child {
+  display: grid;
+  grid-template-columns: minmax(220px, 440px) auto minmax(0, 1fr);
+  gap: 8px 12px;
+}
+.portfolio > .toolbar:first-child [data-account-select] { grid-column: 1; grid-row: 1; min-width: 0; width: 100%; }
+.portfolio > .toolbar:first-child [data-account-create] { grid-column: 2; grid-row: 1; }
+.portfolio > .toolbar:first-child [data-account-meta] { grid-column: 3; }
+.portfolio [data-account-card] .kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 8px;
+}
+.portfolio [data-account-card] .kv > .kv__row {
+  display: flex;
+  min-width: 0;
+  padding: 10px 12px;
+  gap: 4px;
+}
+.portfolio [data-account-card] .kv__val { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.portfolio [data-account-card] .kv > .kv__row:has(.tag-badges) {
+  grid-column: 1 / -1;
+  order: -1;
+  background: var(--surface-blue);
+}
+.portfolio [data-account-card] .kv > .kv__row:last-child { grid-column: 1 / -1; }
+.portfolio [data-account-card] .tag-badges { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; gap: 6px; }
+.portfolio [data-account-card] .tag-badges .badge {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-blue);
+  font-size: clamp(16px, 1.5cqi, 20px);
+  font-weight: var(--weight-heading);
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.portfolio [data-account-card] .detail-card > .detail-card__head:last-child {
+  display: grid;
+  grid-template-columns: auto auto minmax(12px, 1fr) auto auto;
+  justify-content: normal;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-0);
+}
+.portfolio [data-account-card] .detail-card__head:last-child > button:nth-child(3) { grid-column: 4; }
+.portfolio [data-account-card] .detail-card__head:last-child > button:nth-child(4) { grid-column: 5; }
+@container workspace (max-width: 640px) {
+  .portfolio > .toolbar:first-child { grid-template-columns: minmax(0, 1fr) auto; }
+  .portfolio > .toolbar:first-child [data-account-meta] { grid-column: 1 / -1; }
+  .portfolio [data-account-card] .detail-card > .detail-card__head:last-child { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
+  .portfolio [data-account-card] .detail-card__head:last-child > button:nth-child(3) { grid-column: 1; }
+  .portfolio [data-account-card] .detail-card__head:last-child > button:nth-child(4) { grid-column: 2; }
+}

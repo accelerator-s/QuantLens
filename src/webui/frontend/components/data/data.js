@@ -360,7 +360,7 @@ export async function mount(root, ctx) {
           [
             { key: "table_name", label: "数据内容" },
             { key: "staged_name", label: "本地表名" },
-            { key: "table_name_phy", label: "来源物理表" },
+            { key: "table_name_phy", label: "来源表" },
             { key: "batch_freq", label: "下载批次", format: (v) => BATCH_FREQ_LABEL[v] || v },
             {
               key: "fields",

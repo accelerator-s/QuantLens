@@ -2,8 +2,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 12px 10px;
-  gap: 14px;
+  padding: 16px 10px;
+  gap: 20px;
   overflow-y: auto;
   user-select: none;
 }
@@ -11,17 +11,16 @@
 .rail__brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 8px 10px;
-  border-bottom: 1px solid var(--line-0);
+  gap: 12px;
+  padding: 0 10px;
 }
 
 .rail__mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: var(--accent-ink);
@@ -29,8 +28,8 @@
 }
 
 .rail__mark svg {
-  width: 16px;
-  height: 16px;
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
 .rail__brand-text {
@@ -39,20 +38,11 @@
 }
 
 .rail__name {
-  font-size: var(--fs-md);
+  font-size: var(--fs-lg);
   font-weight: 700;
   color: var(--ink-0);
   line-height: 1.2;
   white-space: nowrap;
-}
-
-.rail__ver {
-  font-size: var(--fs-xs);
-  color: var(--ink-2);
-  font-family: var(--font-mono);
-  margin-top: 2px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
 }
 
 .rail__groups {
@@ -67,31 +57,25 @@
   gap: 3px;
 }
 
-.rail__group-label {
-  padding: 0 8px 3px;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--ink-2);
-}
-
 .rail__list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .rail__link {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 12px;
+  min-height: 44px;
+  padding: 9px 12px;
   border-radius: var(--radius-sm);
   color: var(--ink-1);
   text-decoration: none;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   font-weight: 500;
   transition: background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
@@ -112,13 +96,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: var(--icon-md);
+  height: var(--icon-md);
   flex-shrink: 0;
-  opacity: 0.85;
+  opacity: 1;
 }
 
 .rail__icon svg {
-  width: 15px;
-  height: 15px;
+  width: var(--icon-md);
+  height: var(--icon-md);
 }

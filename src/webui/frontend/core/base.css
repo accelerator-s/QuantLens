@@ -16,7 +16,7 @@ body {
   color: var(--ink-0);
   font-family: var(--font-sans);
   font-size: var(--fs-base);
-  line-height: 1.5;
+  line-height: 1.6;
   font-feature-settings: "tnum" 1, "cv05" 1;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
@@ -162,12 +162,13 @@ p {
 }
 
 code,
-pre,
-.mono {
-  font-family: var(--font-mono);
+pre {
+  font-family: var(--font-code);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
+
+.mono { font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
 
 pre {
   background: var(--bg-2);

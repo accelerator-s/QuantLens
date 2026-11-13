@@ -36,6 +36,16 @@
 
 .data__last-check { position: relative; top: -2px; }
 
+.data [data-tables] .table { min-width: 780px; }
+.data [data-tables] :is(th, td) { padding: 8px 12px; vertical-align: middle; }
+.data [data-tables] td { color: var(--ink-0); }
+.data [data-tables] :is(th, td):first-child { min-width: 220px; }
+.data [data-tables] :is(th, td):nth-child(2),
+.data [data-tables] :is(th, td):nth-child(3) { white-space: nowrap; overflow-wrap: normal; }
+.data [data-tables] :is(th, td):nth-child(5) { text-align: right; font-variant-numeric: tabular-nums; }
+.data [data-tables] :is(th, td):last-child { text-align: center; white-space: nowrap; }
+.data [data-tables] .table-wrap { max-height: min(64vh, 680px); scrollbar-gutter: stable; }
+
 .sync-progress {
   margin-top: 4px;
   padding: 12px 14px;

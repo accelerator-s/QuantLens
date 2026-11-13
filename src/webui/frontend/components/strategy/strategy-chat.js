@@ -46,14 +46,14 @@ export async function openStrategyChat(ctx, { onYaml, profileName = "" }) {
     historyKey: `strategy:${profileName || "new"}`,
     getMetadata: () => ({ model: modelSelect.value }),
     onRestore: metadata => modelSelect.setOptions(modelOptions, metadata.model || ""),
-    title: profileName ? "这次想调整什么？" : "一起构建你的策略",
+    title: profileName ? "调整策略" : "策略设想",
     onStateChange: (state) => {
       finalizeBtn.disabled = state.busy || state.disabled || state.loading || !state.hasUserMessages;
       modelTrigger.disabled = state.busy || state.disabled || state.loading;
     },
     greeting: profileName
-      ? "说说要改哪些地方，其余设置保持不变。"
-      : "想用哪些因子、持有多久、怎么控制风险？",
+      ? "填写需要调整的内容。"
+      : "填写因子组合、持仓周期和风险限制。",
     send: async (history) => {
       const res = await ctx.api.strategyChat({
         model: modelSelect.value || "",
