@@ -8,6 +8,8 @@ profiles:
 - research_growth_revenue_yoy
 - research_industry_momentum_60
 - research_institutional_holding_change
+- research_lower_shadow_volskew_30d
 - research_quality_cashflow_assets
 - research_quality_gross_margin
 - research_reversal_5
+- research_smooth_uptrend_efficiency_60d

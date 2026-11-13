@@ -18,11 +18,13 @@ router = APIRouter(tags=["factors"])
 def list_factors(status: str = "", market: str = "", instrument_class: str = "") -> dict:
     import json
     from quantlens import ads
+    from quantlens.research_candidate import research_base_name
     items=[]
     current={meta.name:meta.version for meta in FactorRegistry().list()}
     for row in ads.query('factor_meta',limit=10000):
         item=json.loads(row['metadata'])
         if current.get(item['name'])!=item['version']:continue
+        if research_base_name(item['name']) in current:continue
         if status and item['status']!=status: continue
         if market and item.get('applicable_markets') and market not in item['applicable_markets']: continue
         if instrument_class and item.get('applicable_instruments') and instrument_class not in item['applicable_instruments']: continue

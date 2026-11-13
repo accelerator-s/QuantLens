@@ -322,13 +322,14 @@ class TaskManager:
                 )
             return {**record, "log": list(record["log"]), "progress": dict(record["progress"])}
 
-    def latest(self, *, resource: str | None = None, running_only: bool = False, category: str | None = None) -> dict[str, Any] | None:
+    def latest(self, *, resource: str | None = None, name: str | None = None, running_only: bool = False, category: str | None = None) -> dict[str, Any] | None:
         
         with self._lock:
             matches = [
                 record
                 for record in self._tasks.values()
                 if (resource is None or record.get("resource") == resource)
+                and (name is None or record.get("name") == name)
                 and (category is None or task_category(record) == category)
                 and (not running_only or record["status"] == "running")
             ]

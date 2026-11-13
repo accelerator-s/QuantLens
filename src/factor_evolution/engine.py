@@ -114,7 +114,12 @@ class EvolutionEngine:
         return self.store.create(config).research_id
 
     def run(self, research_id: str, *, on_progress: ProgressFn | None = None) -> dict:
-        emit = on_progress or (lambda _message: None)
+        def emit(message: str) -> None:
+            self.store.append_event(research_id, "runtime_log", {"message": message})
+            if on_progress:
+                on_progress(message)
+        if hasattr(on_progress, 'progress'):
+            emit.progress = on_progress.progress
         config = self.store.load_config(research_id)
         status = self.store.load_status(research_id)
         if status.state in {EvolutionState.COMPLETED, EvolutionState.CANCELLED}:
@@ -130,6 +135,20 @@ class EvolutionEngine:
                     "保留本会话记录；新建研究时把旧测试区间降级为训练或验证，并指定新锁定区间。"
                 ),
             )
+        latest_iteration_event = next((event for event in reversed(prior_events)
+                                       if event["event_type"] in {"candidate_created", "candidate_invalidated", "round_completed", "round_failed"}
+                                       and event["payload"].get("iteration") == status.iteration), None)
+        invalidated = latest_iteration_event is not None and latest_iteration_event["event_type"] == "candidate_invalidated"
+        if status.iteration > 0 and (invalidated or not any(
+            event["event_type"] in {"candidate_created", "round_completed", "round_failed"}
+            and event["payload"].get("iteration") == status.iteration
+            for event in prior_events
+        )):
+            # Restart a proposal interrupted before any candidate was saved.
+            # It must not silently consume a research round on process recovery.
+            self.store.append_event(research_id, "proposal_restarted", {"iteration": status.iteration})
+            status.current_version_id = status.best_version_id
+            status.iteration -= 1
         started = time.monotonic()
         prior_elapsed = status.elapsed_seconds
         if status.started_at is None:
@@ -145,6 +164,10 @@ class EvolutionEngine:
                 base = self.services.load_base(config)
                 self.store.save_version(research_id, base)
                 baseline_exp = self.services.begin_experiment(config, base, "")
+                self.store.append_event(
+                    research_id, "baseline_started",
+                    {"version_id": base.version_id, "experiment_id": baseline_exp},
+                )
                 result = self._evaluate_version(
                     config,
                     status,
@@ -580,37 +603,53 @@ class EvolutionEngine:
         prefix = "基线" if baseline else f"第 {status.iteration} 轮"
         folds = build_folds(config)
         fold_results: list[FoldResult] = []
-        for index, fold in enumerate(folds, start=1):
-            fold_label = f"{fold.fold_id} ({index}/{len(folds)})"
-            self._phase(status, f"{prefix}：{fold_label} 训练回测", status.progress, emit)
-            train_fold = self.services.evaluate(
-                config,
-                version,
-                window_name=f"{fold.fold_id}_train",
-                window=fold.train_window,
+        progress_start = 0.01 if baseline else self._progress(config, status.iteration, 0.18)
+        progress_end = 0.05 if baseline else self._progress(config, status.iteration, 0.70)
+        windows = [(f"{fold.fold_id}_{kind}", window)
+                   for fold in folds
+                   for kind, window in (("train", fold.train_window), ("validation", fold.validation_window))]
+        window_positions = {name: index for index, (name, _) in enumerate(windows)}
+
+        def window_started(name):
+            index = window_positions[name]
+            fold_id, kind = name.rsplit("_", 1)
+            label = "训练" if kind == "train" else "验证"
+            progress = progress_start + (progress_end - progress_start) * index / len(windows)
+            self._phase(status, f"{prefix}：{fold_id} ({index // 2 + 1}/{len(folds)}) {label}回测", progress, emit)
+
+        def window_completed(name, result):
+            fold_id, kind = name.rsplit("_", 1)
+            status.progress = progress_start + (progress_end - progress_start) * (window_positions[name] + 1) / len(windows)
+            self._window_completed(status, experiment_id, version, result, fold_id, kind, started, prior_elapsed)
+
+        self._guard(config, status, started, prior_elapsed)
+        if callable(getattr(type(self.services), "evaluate_windows", None)):
+            results = self.services.evaluate_windows(
+                config, version, windows=windows, research_id=status.research_id,
                 timeout_seconds=self._remaining(config, started, prior_elapsed),
-                on_progress=emit,
+                on_progress=emit, on_window_started=window_started, on_window_completed=window_completed,
             )
             self._guard(config, status, started, prior_elapsed)
-            self._phase(status, f"{prefix}：{fold_label} 验证回测", status.progress, emit)
-            validation_fold = self.services.evaluate(
-                config,
-                version,
-                window_name=f"{fold.fold_id}_validation",
-                window=fold.validation_window,
-                timeout_seconds=self._remaining(config, started, prior_elapsed),
-                on_progress=emit,
-            )
-            fold_results.append(
-                FoldResult(
-                    fold_id=fold.fold_id,
-                    train_window=fold.train_window,
-                    validation_window=fold.validation_window,
-                    train=train_fold,
-                    validation=validation_fold,
+            if set(results) != set(window_positions):
+                raise QuantTrainingError(code="EVOLUTION_WINDOWS_INCOMPLETE", message="训练或验证窗口结果不完整。", blocking=True)
+        else:
+            results = {}
+            for name, window in windows:
+                window_started(name)
+                result = self.services.evaluate(
+                    config, version, window_name=name, window=window,
+                    timeout_seconds=self._remaining(config, started, prior_elapsed), on_progress=emit,
                 )
-            )
-            self._guard(config, status, started, prior_elapsed)
+                results[name] = result
+                window_completed(name, result)
+                self._guard(config, status, started, prior_elapsed)
+        fold_results = [FoldResult(
+            fold_id=fold.fold_id, train_window=fold.train_window, validation_window=fold.validation_window,
+            train=results[f"{fold.fold_id}_train"], validation=results[f"{fold.fold_id}_validation"],
+        ) for fold in folds]
+
+        status.progress = progress_end
+        self._save(status, started, prior_elapsed)
 
         train = aggregate_results([fold.train for fold in fold_results], label="train_aggregate")
         validation = aggregate_results(
@@ -643,6 +682,17 @@ class EvolutionEngine:
         if baseline:
             self.services.record_result(experiment_id, result, improved=None)
         return result
+
+    def _window_completed(self, status, experiment_id, version, result, fold_id, window_name, started, prior_elapsed):
+        self.store.append_event(status.research_id, "window_completed", {
+            "experiment_id": experiment_id, "version_id": version.version_id,
+            "fold_id": fold_id, "window_name": window_name,
+            "run_id": result.run_id, "metrics": result.metrics,
+        })
+        record_window = getattr(self.services, "record_window_result", None)
+        if record_window:
+            record_window(experiment_id, result, fold_id=fold_id, window_name=window_name)
+        self._save(status, started, prior_elapsed)
 
     def _latest_result(self, research_id: str, version_id: str) -> VersionResult:
         detail = self.store.detail(research_id)

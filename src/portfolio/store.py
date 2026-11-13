@@ -96,7 +96,7 @@ class PortfolioStore:
                 blocking=True,
             )
 
-        existing = self.read_trades(account_id, market=market, instrument_class=instrument_class)
+        existing = self.read_trades(account_id, market=market, instrument_class=instrument_class, include_reversed=True)
         dup = (
             set(existing["trade_id"]).intersection(set(df["trade_id"]))
             if not existing.empty
@@ -138,6 +138,7 @@ class PortfolioStore:
         instrument_class: str,
         start: datetime | None = None,
         end: datetime | None = None,
+        include_reversed: bool = False,
     ) -> pd.DataFrame:
         pd = _require_pandas()
         target_dir = self.ws.portfolio_trades(market, instrument_class, account_id)
@@ -149,6 +150,9 @@ class PortfolioStore:
         if not frames:
             return pd.DataFrame(columns=list(TRADE_COLUMNS))
         df = pd.concat(frames, ignore_index=True)
+        if not include_reversed:
+            reversed_ids = self.read_trade_ledger(account_id, market=market, instrument_class=instrument_class).get("reversals", {})
+            df = df[~df["trade_id"].isin(reversed_ids)]
         if start is not None or end is not None:
             ts = pd.to_datetime(df["executed_at"], utc=True)
             if start is not None:
@@ -157,35 +161,21 @@ class PortfolioStore:
                 df = df[ts <= pd.Timestamp(end, tz="UTC")]
         return df.reset_index(drop=True)
 
-    def write_trade_audit(
-        self,
-        account_id: str,
-        audit_row: pd.DataFrame,
-        *,
-        market: str,
-        instrument_class: str,
-    ) -> Path:
-        
-        pd = _require_pandas()
-        if audit_row.empty:
-            raise PortfolioContractError(
-                code="portfolio.audit_empty",
-                message="审计行为空",
-                blocking=True,
-            )
-        audit_dir = self.ws.portfolio_trades_audit(market, instrument_class, account_id)
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        month = pd.to_datetime(audit_row["audited_at"], utc=True).dt.strftime("%Y-%m").iloc[0]
-        target = audit_dir / f"{month}.parquet"
-        if target.exists():
-            old = pd.read_parquet(target)
-            merged = pd.concat([old, audit_row], ignore_index=True)
-        else:
-            merged = audit_row
-        tmp = target.with_suffix(".tmp")
-        merged.to_parquet(tmp, index=False)
-        tmp.replace(target)
-        return target
+    def trade_ledger_path(self, account_id: str, *, market: str, instrument_class: str) -> Path:
+        return self.ws.portfolio_trades(market, instrument_class, account_id) / "ledger.yaml"
+
+    def read_trade_ledger(self, account_id: str, *, market: str, instrument_class: str) -> dict:
+        path = self.trade_ledger_path(account_id, market=market, instrument_class=instrument_class)
+        if not path.exists():
+            return {}
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+    def write_trade_ledger(self, account_id: str, data: dict, *, market: str, instrument_class: str) -> None:
+        path = self.trade_ledger_path(account_id, market=market, instrument_class=instrument_class)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        temporary.replace(path)
 
     # 快照（YAML）
 
@@ -393,29 +383,6 @@ class PortfolioStore:
         return path
 
     # 重新初始化日志
-
-    def append_reinit_log(
-        self,
-        account_id: str,
-        *,
-        market: str,
-        instrument_class: str,
-        entry: dict,
-    ) -> Path:
-        target = self.ws.portfolio_account(market, instrument_class, account_id) / "reinit_log.yaml"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        existing = yaml.safe_load(target.read_text(encoding="utf-8")) if target.exists() else None
-        entries = list((existing or {}).get("entries") or [])
-        entries.append(entry)
-        tmp = target.with_suffix(".tmp")
-        tmp.write_text(
-            yaml.safe_dump({"entries": entries}, allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
-        )
-        tmp.replace(target)
-        return target
-
-    # 内部
 
     @staticmethod
     def _validate_columns(df: pd.DataFrame, expected: tuple[str, ...], label: str) -> None:

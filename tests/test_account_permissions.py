@@ -101,6 +101,91 @@ class AccountPermissions(unittest.TestCase):
         self.assertEqual(restored.cash[0].available, Decimal('76543'))
         self.assertEqual(registry.get(DEFAULT_ACCOUNT_ID).cash[0].available, Decimal('76543'))
 
+    def test_delete_preview_is_read_only_and_confirm_removes_account_data(self):
+        from automation import AutomationConfig, AutomationStore
+        from paths import workspace
+        from portfolio.accounts import AccountRegistry, DEFAULT_ACCOUNT_ID
+        from trash import TrashStore
+        account = self.account('待删除账户')
+        directory = workspace().portfolio_account(account.market, account.instrument_class, account.account_id)
+        for name in ['holdings', 'trades', 'snapshots', 'plans/active']:
+            target = directory / name / 'fixture.txt'
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(name)
+        automation = AutomationStore()
+        automation.save(AutomationConfig(enabled=True, account_ids=[account.account_id]))
+        index = workspace().portfolio_index.read_bytes()
+        url = f'/api/accounts/{account.account_id}'
+        preview = self.client.request('DELETE', url, json={})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertTrue(preview.json()['requires_confirm'])
+        self.assertEqual(workspace().portfolio_index.read_bytes(), index)
+        self.assertTrue(directory.exists())
+        self.assertTrue(automation.load().enabled)
+        self.assertEqual(TrashStore().list(), [])
+        response = self.client.request('DELETE', url, json={'confirm': True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {'deleted': account.account_id})
+        self.assertFalse(directory.exists())
+        self.assertEqual([a.account_id for a in AccountRegistry().list()], [DEFAULT_ACCOUNT_ID])
+        self.assertEqual(automation.load().account_ids, [])
+        self.assertFalse(automation.load().enabled)
+        entry, = TrashStore().list(category='portfolio_account')
+        for name in ['holdings', 'trades', 'snapshots', 'plans/active']:
+            self.assertEqual((entry.content_path / name / 'fixture.txt').read_text(), name)
+        self.assertEqual(self.client.request('DELETE', url, json={'confirm': True}).status_code, 404)
+
+    def test_delete_default_selects_remaining_account_and_survives_restart(self):
+        from automation import AutomationConfig, AutomationStore
+        from portfolio.accounts import AccountRegistry, DEFAULT_ACCOUNT_ID
+        from quantlens.bootstrap import prepare
+        other = self.account('保留账户')
+        automation = AutomationStore()
+        automation.save(AutomationConfig(enabled=True, account_ids=[DEFAULT_ACCOUNT_ID, other.account_id]))
+        response = self.client.request('DELETE', f'/api/accounts/{DEFAULT_ACCOUNT_ID}', json={'confirm': True})
+        self.assertEqual(response.status_code, 200, response.text)
+        # Subsequent index updates and startup must preserve the explicit deletion.
+        self.account('新账户')
+        prepare()
+        listed = self.client.get('/api/accounts').json()
+        self.assertNotIn(DEFAULT_ACCOUNT_ID, [a['account_id'] for a in listed['items']])
+        self.assertIn(listed['default_account_id'], [a['account_id'] for a in listed['items']])
+        self.assertEqual(AccountRegistry().resolve().account_id, listed['default_account_id'])
+        self.assertEqual(automation.load().account_ids, [other.account_id])
+        self.assertTrue(automation.load().enabled)
+
+    def test_delete_last_account_returns_empty_list_and_clear_missing_account_error(self):
+        from portfolio.accounts import DEFAULT_ACCOUNT_ID
+        from quantlens.bootstrap import prepare
+        response = self.client.request('DELETE', f'/api/accounts/{DEFAULT_ACCOUNT_ID}', json={'confirm': True})
+        self.assertEqual(response.status_code, 200, response.text)
+        prepare()
+        self.assertEqual(self.client.get('/api/accounts').json(), {'items': [], 'default_account_id': ''})
+        result = self.client.post('/api/backtests', json={'strategy_id': 'research_reversal_5',
+            'start': '2024-01-02', 'end': '2024-01-05'})
+        self.assertEqual(result.status_code, 404, result.text)
+        self.assertIn('创建账户', result.json()['detail']['suggested_action'])
+        created = self.account('重新创建')
+        self.assertEqual(self.client.get('/api/accounts').json()['default_account_id'], created.account_id)
+
+    def test_delete_requires_confirmation_and_restores_files_on_index_failure(self):
+        from exceptions import PortfolioContractError
+        from portfolio.accounts import AccountRegistry, DEFAULT_ACCOUNT_ID
+        from trash import TrashStore
+        registry = AccountRegistry()
+        with self.assertRaises(PortfolioContractError):
+            registry.delete(DEFAULT_ACCOUNT_ID, confirm=False)
+        with patch.object(registry, '_write_index', side_effect=OSError('disk unavailable')):
+            with self.assertRaises(OSError):
+                registry.delete(DEFAULT_ACCOUNT_ID, confirm=True)
+        self.assertEqual(registry.get(DEFAULT_ACCOUNT_ID).cash[0].available, Decimal('1000000'))
+        self.assertEqual(TrashStore().list(), [])
+
+    def test_removed_account_actions_are_not_exposed_by_backend(self):
+        from portfolio.accounts import DEFAULT_ACCOUNT_ID
+        for url in [f'/api/accounts/{DEFAULT_ACCOUNT_ID}/archive', f'/api/portfolio/{DEFAULT_ACCOUNT_ID}/reinit']:
+            self.assertIn(self.client.post(url, json={'confirm': True}).status_code, {404, 405})
+
     def test_permission_and_capital_filter_before_top_n(self):
         from portfolio.construct import construct, Constraints
         frame = pd.DataFrame({'code': ['688001', '689001', '000001', '000002'],
@@ -191,7 +276,7 @@ class AccountPermissions(unittest.TestCase):
             jobs.append(action)
             return 'test-task'
         outcome = SimpleNamespace(run_id='BT-test', metrics={})
-        with patch('backtest.engine.run_backtest', return_value=outcome) as run, patch('quantlens.routes.manager.start', side_effect=start), patch('portfolio.capital_compare._account_capital', return_value=Decimal('12345')):
+        with patch('backtest.engine.run_backtest', return_value=outcome) as run, patch('quantlens.routes.manager.start', side_effect=start), patch('portfolio.capital.account_capital', return_value=Decimal('12345')):
             result = self.client.post('/api/backtests', json={'strategy_id': 'research_reversal_5',
                 'start': '2024-01-02', 'end': '2024-01-05', 'account_id': account.account_id, 'capital': 999999})
         self.assertEqual(result.status_code, 200, result.text)
@@ -211,7 +296,7 @@ class AccountPermissions(unittest.TestCase):
         outcome = SimpleNamespace(run_id='BT-default', metrics={})
         with patch('backtest.engine.run_backtest', return_value=outcome) as run, \
              patch('quantlens.routes.manager.start', side_effect=start), \
-             patch('portfolio.capital_compare._account_capital', return_value=Decimal('1000000')) as capital:
+             patch('portfolio.capital.account_capital', return_value=Decimal('1000000')) as capital:
             for account_id in [None, '', DEFAULT_ACCOUNT_ID]:
                 payload = {'strategy_id': 'research_reversal_5', 'start': '2024-01-02',
                            'end': '2024-01-05', 'capital': 99}

@@ -4,15 +4,11 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-import yaml
 
 from exceptions import (
     PortfolioContractError,
     PortfolioInsufficientError,
-    PortfolioReconcileError,
-    QuantTrainingError,
 )
-from paths import workspace
 
 from .adapters import InstrumentAdapter, get_adapter
 from .models import HOLDING_COLUMNS, Account, Action, Side
@@ -238,65 +234,12 @@ def entry_apply_trade(
     full = pd.concat([prior, current], ignore_index=True) if not prior.empty else current
     refresh_available_qty(positions, full, adapter=adapter, as_of=exec_date)
 
-def replay_trades(trades_df: pd.DataFrame) -> Positions:
-    
-    positions: Positions = {}
-    if trades_df.empty:
-        return positions
-    for _, row in trades_df.sort_values("executed_at").iterrows():
-        try:
-            apply_trade(
-                positions,
-                instrument_id=str(row["instrument_id"]),
-                side=Side(str(row["side"])),
-                action=Action(str(row["action"])),
-                qty=Decimal(str(row["qty"])),
-                price=Decimal(str(row["price"])),
-                currency=str(row["currency"]),
-                as_of=str(row["executed_at"]),
-            )
-        except QuantTrainingError as exc:
-            raise PortfolioReconcileError(
-                code="portfolio.reconcile_replay_failed",
-                message=(
-                    f"重放成交 {row['trade_id']} 失败：{exc.message}；成交流水与持仓推导规则冲突"
-                ),
-                context={"trade_id": str(row["trade_id"])},
-                blocking=True,
-                suggested_action=(
-                    "请检查该笔成交是否录入有误；如需修正，"
-                    "在持仓与成交页面提交审计补丁。"
-                ),
-            ) from exc
-    return positions
-
-def last_reinit_at(account: Account) -> datetime | None:
-    
-    path = (
-        workspace().portfolio_account(account.market, account.instrument_class, account.account_id)
-        / "reinit_log.yaml"
-    )
-    if not path.exists():
-        return None
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    entries = list(raw.get("entries") or [])
-    if not entries:
-        return None
-    last = entries[-1].get("at", "")
-    try:
-        value = datetime.fromisoformat(str(last))
-    except ValueError:
-        return None
-    return value if value.tzinfo else value.replace(tzinfo=UTC)
-
 __all__ = [
     "QUANT",
     "Positions",
     "apply_trade",
     "entry_apply_trade",
     "holdings_to_positions",
-    "last_reinit_at",
     "positions_to_holdings_df",
     "refresh_available_qty",
-    "replay_trades",
 ]

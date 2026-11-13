@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, timedelta
 
@@ -46,10 +47,17 @@ _CANDIDATE_SYSTEM = """\
 候选必须有清晰的经济机制和可证伪的失效条件，不得为追求历史表现堆叠算子。
 factor_name 使用稳定的英文小写内部标识，display_name 使用简洁自然的中文。
 代码提供 compute(panel) 入口，返回与面板轴一致的 pandas.DataFrame。
+输出必须是单个 JSON 对象，严格使用下面 JSON Schema 的字段，不得自行改名或增加字段。
+assumption 写明金融假设、经济机制和失效条件；完整 Python 源码放在 code 字符串中，
+不得使用 description、mechanism、hypothesis、compute 或 failure_conditions 等替代字段。
+direction 只能是 positive（数值越高越看好）或 negative（数值越低越看好）。
+timescale 表示因子输出频率，只能使用 schema 中的枚举；日频研究使用 daily，
+20 个交易日等预期持有期写在 assumption 中，不能作为 timescale 的值。
 禁止使用未来数据；dependencies 列出研究所需的面板字段。
 对基本面字段必须按 PIT 语义使用，不得以报告期充当当时可见日期。
 不要输出 schema 之外的字段。
-"""
+\nFactorCandidate JSON Schema：
+""" + json.dumps(FactorCandidate.model_json_schema(), ensure_ascii=False)
 
 class ChatMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -182,12 +190,6 @@ def _register_draft(candidate: FactorCandidate) -> tuple[str, str]:
     session = load_session()
     markets = [session.active_market] if has_active_market(session) else []
     instruments = [session.active_instrument_class] if has_active_market(session) else []
-    direction = {
-        "long_only_positive": "positive",
-        "long_only_negative": "negative",
-        "long_short": "undecided",
-        "undecided": "undecided",
-    }[candidate.direction]
     metadata = FactorMetadata(
         name=candidate.factor_name,
         display_name=candidate.display_name,
@@ -197,7 +199,7 @@ def _register_draft(candidate: FactorCandidate) -> tuple[str, str]:
         timescale=candidate.timescale,
         dependencies=list(candidate.dependencies),
         output_frequency=candidate.timescale,
-        direction=direction,
+        direction=candidate.direction,
         parameters=dict(candidate.parameters),
         standardization=list(candidate.standardization),
         missing_handling=candidate.missing_handling,
@@ -265,6 +267,7 @@ def start_factor_chat_research(payload: FactorChatPayload) -> dict:
         report.progress({"state": "running", "step": "理解金融现象", "percent": 8.0})
         report("已将讨论整理为可证伪的金融假设。")
         last_error = ""
+        last_error_code = ""
         candidate: FactorCandidate | None = None
         for attempt in range(1, _MAX_CANDIDATE_ATTEMPTS + 1):
             report.progress(
@@ -289,21 +292,31 @@ def start_factor_chat_research(payload: FactorChatPayload) -> dict:
                 _check_candidate(candidate)
                 report(f"候选“{candidate.display_name}”已通过语法检查和真实数据试运行。")
                 break
-            except ModelRouteError:
-                raise
             except QuantTrainingError as exc:
+                if isinstance(exc, ModelRouteError) and exc.code not in {
+                    "AI_OUTPUT_NOT_JSON", "AI_OUTPUT_NOT_OBJECT", "AI_OUTPUT_EMPTY",
+                }:
+                    raise
                 if exc.code.startswith("PANEL_") or exc.code.startswith("FACTOR_AI_PANEL_"):
                     
                     raise
                 last_error = f"[{exc.code}] {exc.message}"
-                report(f"第 {attempt} 版候选未通过，AI 将自动修正：{exc.message}")
+                last_error_code = exc.code
+                next_step = "，AI 将自动修正" if attempt < _MAX_CANDIDATE_ATTEMPTS else "，已达到尝试上限"
+                report(f"第 {attempt} 次候选检查未通过{next_step}：{exc.message}")
                 candidate = None
         if candidate is None:
+            report.progress({"step": "候选生成失败"})
             raise ContractViolation(
                 code="FACTOR_AI_CANDIDATE_EXHAUSTED",
                 message=f"连续 {_MAX_CANDIDATE_ATTEMPTS} 次仍未生成通过检查的候选。",
+                context={"last_error_code": last_error_code, "last_error": last_error},
                 blocking=True,
-                suggested_action="补充金融现象的逻辑链或失效条件后重新发起研究。",
+                suggested_action=(
+                    "保留当前讨论，检查或更换支持结构化输出的研究模型后重试；无需补充投资假设。"
+                    if last_error_code.startswith("AI_OUTPUT_")
+                    else "保留当前讨论，核对日志中的代码或数据检查错误后重试。"
+                ),
             )
 
         report.progress({"state": "running", "step": "登记研究候选", "percent": 78.0})

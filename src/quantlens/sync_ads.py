@@ -7,6 +7,9 @@ from storage.hdfs import HDFS
 from quantlens.warehouse import batch_identifier
 
 def _publish_manifest(path, manifest):
+    if manifest.get('scope') == 'backtest' and path.exists():
+        previous = json.loads(path.read_text())
+        manifest = {**previous, 'tables': {**previous.get('tables', {}), **manifest['tables']}}
     if manifest.get('scope')=='data' and path.exists():
         previous=json.loads(path.read_text())
         manifest={**manifest,'tables':{**previous.get('tables',{}),**manifest['tables']}}

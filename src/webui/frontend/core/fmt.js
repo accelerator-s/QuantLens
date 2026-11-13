@@ -1,5 +1,10 @@
 import { labelText } from "./labels.js";
 
+export function compactRunId(value) {
+  const text = String(value ?? "");
+  return /^BT-[A-Za-z0-9._-]{13,}$/.test(text) ? `${text.slice(0, 9)}…${text.slice(-4)}` : text;
+}
+
 
 
 export function fmtTime(iso) {

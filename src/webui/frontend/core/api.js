@@ -102,6 +102,7 @@ export const api = {
   researchReportApprove: (id, payload) => request("POST", `/api/lifecycle/research-reports/${id}/approve`, payload),
   factorVersionPromote: (id, payload) => request("POST", `/api/lifecycle/factor-versions/${id}/promote`, payload),
   task: (id) => request("GET", `/api/tasks/${id}`),
+  jobs: () => request("GET", "/api/jobs"),
 
   
   factors: (params) => request("GET", withQuery("/api/factors", params)),
@@ -129,19 +130,6 @@ export const api = {
   strategyEvolution: (id) => request("GET", `/api/strategy-evolution/${id}`),
   strategyEvolutionStart: (payload) => request("POST", "/api/strategy-evolution", payload),
   strategyEvolutionResume: (id) => request("POST", `/api/strategy-evolution/${id}/resume`, {}),
-  dailyOperationsRun: (payload) => request("POST", "/api/operations/daily-run", payload),
-  executionRecovery: (payload) => request("POST", "/api/operations/execution-recovery", payload),
-  automation: () => request("GET", "/api/operations/automation"),
-  automationSave: (payload) => request("PUT", "/api/operations/automation", payload),
-  shadowObserve: (payload) => request("POST", "/api/operations/shadow-observe", payload),
-  attributionMature: (payload) => request("POST", "/api/operations/attribution-mature", payload),
-  attributions: (params) => request("GET", withQuery("/api/operations/attributions", params)),
-  decayScan: () => request("POST", "/api/operations/decay-scan", {}),
-  learningEvents: () => request("GET", "/api/operations/learning-events"),
-  learningEventAccept: (id, payload) => request("POST", `/api/operations/learning-events/${id}/accept`, payload),
-  canonicalPlans: (params) => request("GET", withQuery("/api/operations/plans", params)),
-  canonicalPlanConfirm: (id, payload) => request("POST", `/api/operations/plans/${id}/confirm`, payload),
-  canonicalPlanReject: (id, payload) => request("POST", `/api/operations/plans/${id}/reject`, payload),
   championSlots: () => request("GET", "/api/operations/champion-slots"),
   bootstrapChampion: (id, payload) => request("POST", `/api/operations/strategies/${id}/bootstrap-champion`, payload),
   proposePromotion: (id) => request("POST", `/api/operations/strategies/${id}/propose-promotion`),
@@ -177,34 +165,20 @@ export const api = {
 
   
   accounts: () => request("GET", "/api/accounts"),
+  stockSuggestions: (q) => request("GET", withQuery("/api/stocks/suggestions", { q, limit: 20 })),
   accountCreate: (payload) => request("POST", "/api/accounts", payload),
   accountSettings: (id, payload) => request("POST", `/api/accounts/${id}/settings`, payload),
   backtestStart: (payload) => request("POST", "/api/backtests", payload),
-  accountArchive: (id, payload) => request("POST", `/api/accounts/${id}/archive`, payload),
+  accountDelete: (id, payload) => request("DELETE", `/api/accounts/${encodeURIComponent(id)}`, payload),
   accountCashSet: (id, payload) => request("POST", `/api/accounts/${id}/cash`, payload),
   holdings: (account) => request("GET", `/api/portfolio/${account}/holdings`),
   trades: (account, params) =>
     request("GET", withQuery(`/api/portfolio/${account}/trades`, params)),
-  portfolioSnapshots: (account) => request("GET", `/api/portfolio/${account}/snapshots`),
   plans: (account) => request("GET", `/api/portfolio/${account}/plans`),
-  snapshotSubmit: (payload) => request("POST", "/api/portfolio/snapshot/submit", payload),
-  snapshotCommit: (payload) => request("POST", "/api/portfolio/snapshot/commit", payload),
+  holdingsSet: (account, payload) => request("PUT", `/api/portfolio/${account}/holdings`, payload),
   tradesAdd: (payload) => request("POST", "/api/portfolio/trades/add", payload),
-  tradesAppend: (payload) => request("POST", "/api/portfolio/trades/append", payload),
-  tradesFix: (payload) => request("POST", "/api/portfolio/trades/fix", payload),
-  reconcile: (account) => request("GET", `/api/portfolio/${account}/reconcile`),
-  planSubmit: (payload) => request("POST", "/api/portfolio/plan/submit", payload),
-  planTransition: (planId, payload) =>
-    request("POST", `/api/portfolio/plan/${planId}/transition`, payload),
+  tradeUndo: (account, payload) => request("POST", `/api/portfolio/${account}/trades/undo`, payload),
   recommendGenerate: (payload) => request("POST", "/api/portfolio/recommend", payload),
-  planDetail: (account, planId) => request("GET", `/api/portfolio/${account}/plan/${planId}`),
-  planReview: (planId, payload) => request("POST", `/api/portfolio/plan/${planId}/review`, payload),
-  planCompareRun: (planId, payload) =>
-    request("POST", `/api/portfolio/plan/${planId}/capital-comparison`, payload),
-  planComparison: (account, planId) =>
-    request("GET", `/api/portfolio/${account}/plan/${planId}/capital-comparison`),
-  portfolioReinit: (account, payload) =>
-    request("POST", `/api/portfolio/${account}/reinit`, payload),
 
   
   proposals: (params) => request("GET", withQuery("/api/proposals", params)),

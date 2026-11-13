@@ -1,57 +1,50 @@
 <section class="portfolio">
   <div class="toolbar">
-    <button type="button" class="btn btn--primary" data-account-create>创建账户</button>
     <div class="select portfolio__account-select" data-account-select></div>
-    <span class="item-row__meta" data-account-meta></span>
+    <button type="button" class="btn btn--ghost" data-account-create>创建账户</button>
   </div>
 
   <div data-account-card></div>
-
-  <div class="tabs" data-tabs>
-    <button type="button" class="tabs__btn is-active" data-tab="holdings">持仓</button>
-    <button type="button" class="tabs__btn" data-tab="trades">成交</button>
-    <button type="button" class="tabs__btn" data-tab="snapshots">快照</button>
-    <button type="button" class="tabs__btn" data-tab="plans">计划</button>
-    <button type="button" class="tabs__btn" data-tab="reconcile">对账</button>
-  </div>
-
-  <div data-panel="holdings">
-    <div data-holdings></div>
-  </div>
-  <div data-panel="trades" hidden>
-    <div class="toolbar">
-      <button type="button" class="btn btn--primary" data-trade-add>录入成交</button>
-      <button type="button" class="btn btn--ghost" data-trades-append>批量追加</button>
-      <button type="button" class="btn btn--ghost" data-trades-fix>审计补丁</button>
-    </div>
-    <div data-trades></div>
-    <div class="toolbar">
-      <button type="button" class="btn btn--ghost" data-trades-more hidden>加载更多</button>
-    </div>
-  </div>
-  <div data-panel="snapshots" hidden>
-    <div class="toolbar">
-      <button type="button" class="btn btn--primary" data-snapshot-commit>生成快照</button>
-      <button type="button" class="btn btn--ghost" data-snapshot-submit>导入快照</button>
-    </div>
-    <div data-snapshots></div>
-  </div>
-  <div data-panel="plans" hidden>
-    <div class="toolbar">
-      <button type="button" class="btn btn--primary" data-daily-run>每日策略运行</button>
-      <button type="button" class="btn btn--ghost" data-automation-config>每日调度</button>
-      <button type="button" class="btn btn--ghost" data-shadow-observe>补写到期影子结果</button>
-      <button type="button" class="btn btn--ghost" data-attribution-mature>运行到期归因</button>
-      <button type="button" class="btn btn--ghost" data-execution-recovery>补齐成交关联</button>
-      <button type="button" class="btn btn--ghost" data-decay-scan>扫描衰减</button>
-      <button type="button" class="btn btn--ghost" data-recommend-generate>按策略生成</button>
-      <button type="button" class="btn btn--ghost" data-plan-submit>提交计划</button>
-    </div>
-    <div data-plans></div>
-  </div>
-  <div data-panel="reconcile" hidden>
-    <div data-reconcile></div>
-  </div>
-
   <div data-empty hidden></div>
+
+  <section class="portfolio__workflow" data-recommendation-workflow hidden aria-label="策略选股">
+    <form class="card portfolio__strategy-form" data-recommendation-form>
+      <div class="portfolio__strategy-heading">
+        <h2>按策略选股</h2>
+        <p class="portfolio__hint" data-strategy-hint></p>
+      </div>
+      <div class="portfolio__strategy-controls">
+        <div class="portfolio__strategy-field">
+          <span id="portfolio-strategy-label" class="field__label">选择策略</span>
+          <div class="select" data-strategy-select aria-labelledby="portfolio-strategy-label"></div>
+        </div>
+        <button type="submit" class="btn btn--primary" data-recommend-generate disabled>获取选股建议</button>
+      </div>
+    </form>
+    <div data-recommendation-result aria-live="polite" aria-busy="false"></div>
+  </section>
+
+  <section class="portfolio__ledger" data-account-ledger hidden aria-label="持仓与交易">
+    <article class="card detail-card">
+      <div class="portfolio__section-heading">
+        <h3>当前持仓</h3>
+        <div class="toolbar">
+          <button type="button" class="btn btn--ghost" data-holding-add>录入持仓</button>
+          <button type="button" class="btn btn--primary" data-trade-add>录入成交</button>
+        </div>
+      </div>
+      <div data-holdings></div>
+    </article>
+    <article class="card detail-card">
+      <div class="portfolio__section-heading">
+        <h3>交易记录</h3>
+        <button type="button" class="btn btn--ghost" data-trade-undo disabled>撤回上一笔交易</button>
+      </div>
+      <div data-trades></div>
+      <div class="toolbar">
+        <span class="item-row__meta" data-trades-count></span>
+        <button type="button" class="btn btn--ghost" data-trades-more hidden>加载更多</button>
+      </div>
+    </article>
+  </section>
 </section>

@@ -38,6 +38,41 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
+  padding-inline-end: 12px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.dialog__body > * {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.confirm__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.confirm__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.confirm__choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.confirm__choice input {
+  accent-color: var(--accent);
 }
 
 .confirm__field--inline {

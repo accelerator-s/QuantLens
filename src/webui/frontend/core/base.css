@@ -971,3 +971,39 @@ input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.stock-picker {
+  min-width: 0;
+  width: 100%;
+}
+.stock-picker > input { width: 100%; }
+.stock-picker__menu {
+  position: fixed;
+  z-index: 200;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-md);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.stock-picker__option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--ink-0);
+  text-align: left;
+  cursor: pointer;
+}
+.stock-picker__option:hover,
+.stock-picker__option.is-active { background: var(--accent-soft); color: var(--accent); }
+.stock-picker__code { flex-shrink: 0; font-family: var(--font-mono); }
+.stock-picker__name { min-width: 0; overflow-wrap: anywhere; }
+.stock-picker__message { padding: 8px; color: var(--ink-2); font-size: var(--fs-sm); }

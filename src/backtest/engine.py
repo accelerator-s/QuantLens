@@ -174,7 +174,7 @@ def run_backtest(
     import os
     if warehouse_inputs is None and os.environ.get('QUANTLENS_COMPUTE_LOCAL')!='1' and not os.path.isdir('/workspace'):
         from quantlens.remote_backtest import run_remote
-        return run_remote(config,profile,protocol,run_id=run_id)
+        return run_remote(config,profile,protocol,run_id=run_id,reporter=console.print)
     if protocol.price_anchor != "next_close":
         raise BacktestError(
             code="BACKTEST_UNSUPPORTED_ANCHOR",

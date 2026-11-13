@@ -40,7 +40,8 @@ change_type、change_summary、expected_impact、proposal_id 等 schema 外字�
 dependencies、parameters、standardization、missing_handling、code、evaluation_metric_hints；
 即使字段与父版本相同也必须照抄，禁止省略 factor_name 或 assumption。
 display_name 必须是简洁、可解释的自然中文因子名称，不得使用测试编号或英文缩写堆砌。
-direction 只能是 long_only_positive、long_only_negative、long_short、undecided。
+direction 只能是 positive 或 negative。父版本的方向字段已按此枚举提供。
+必须做会改变因子计算或排序的实质修改；更名、注释、枚举别名或研究元数据变化不构成新候选。
 允许的 change_type：formula、lookback、winsorization、neutralization、missing、direction、market_regime、orthogonalization。
 parameters 必须包含三个研究字段：
 - _evolution_change_type：上述一个值；
@@ -56,6 +57,7 @@ industry_neutral:分类ID、size_neutral:mktcap_float、fillna:drop|zero|cross_m
 费用、滑点、样本划分和验收阈值。factor_name 必须保持不变。"""
 
 _SYSTEM_PROPOSE += "\northogonalization 只允许改代码/必要依赖，用 PIT 横截面残差化降低与已有风格的相关性；不得读取其他因子的未登记产物。"
+_SYSTEM_PROPOSE += "\n只输出合法 JSON 对象，代码字符串中的换行必须转义为 \\n。FactorCandidate JSON Schema：\n" + json.dumps(FactorCandidate.model_json_schema(), ensure_ascii=False)
 
 _SYSTEM_REVIEW = """你是单因子实验复盘助手。输出 StructuredConfig 根对象，不得使用
 structured_config 包装键，也不得输出 schema 外字段。
@@ -81,21 +83,13 @@ def _positive_direction(direction: str) -> str:
     }
     return mapping.get(direction, direction)
 
-def _candidate_direction(direction: str) -> str:
-    mapping = {
-        "positive": "long_only_positive",
-        "negative": "long_only_negative",
-        "undecided": "undecided",
-    }
-    return mapping.get(direction, direction)
-
 def _candidate_parent(version: FactorVersion) -> dict[str, Any]:
     
     return {
         "factor_name": version.factor_name,
         "display_name": "",
         "assumption": version.assumption,
-        "direction": _candidate_direction(version.direction),
+        "direction": _positive_direction(version.direction),
         "timescale": version.timescale,
         "dependencies": version.dependencies,
         "parameters": version.parameters,
@@ -161,9 +155,10 @@ class _LogConsole:
         self.emit(self._markup.sub("", text))
 
 class ProductionEvolutionServices:
-    def __init__(self) -> None:
+    def __init__(self, on_progress=None) -> None:
         self._profiles: dict[str, Any] = {}
         self._published_candidates: dict[str, str] = {}
+        self._on_progress = on_progress
 
     def _context(self, config: EvolutionConfig):
         from backtest.config import BacktestConfig, resolve_and_check
@@ -258,7 +253,7 @@ class ProductionEvolutionServices:
         router = AIRouter(request_timeout=max(1.0, min(180.0, timeout_seconds)))
         selected = router.pick("factor_candidate", model_name=config.model_name or None)
         base_prompt = prompt
-        last_error: ContractViolation | None = None
+        last_error: QuantTrainingError | None = None
         candidate: FactorCandidate | None = None
         payload: dict[str, Any] = {}
         change_type = ""
@@ -267,6 +262,8 @@ class ProductionEvolutionServices:
         attempts = 0
         for attempts in range(1, _AI_CONTRACT_ATTEMPTS + 1):
             try:
+                if self._on_progress:
+                    self._on_progress(f"第 {iteration} 轮候选请求：{selected.name}（尝试 {attempts}/{_AI_CONTRACT_ATTEMPTS}）")
                 payload = router.run_task(
                     task="factor_candidate",
                     prompt=prompt,
@@ -292,9 +289,13 @@ class ProductionEvolutionServices:
                     )
                 self._require_single_change(current, candidate, change_type)
                 break
-            except ContractViolation as exc:
+            except QuantTrainingError as exc:
+                if not isinstance(exc, ContractViolation) and exc.code not in {"AI_OUTPUT_NOT_JSON", "AI_OUTPUT_NOT_OBJECT"}:
+                    raise
                 last_error = exc
                 candidate = None
+                if self._on_progress:
+                    self._on_progress(f"候选检查未通过 [{exc.code}]：{exc.message}；保留本轮并在尝试上限内纠正。")
                 if attempts >= _AI_CONTRACT_ATTEMPTS:
                     break
                 prompt = (
@@ -323,8 +324,14 @@ class ProductionEvolutionServices:
             payload=payload,
             model_name=candidate.model_name,
         )
-        code_tag = hashlib.sha256(candidate.code.encode("utf-8")).hexdigest()[:8]
-        version_id = f"v{iteration:03d}-{code_tag}"
+        version_identity = {
+            "code": candidate.code, "direction": _positive_direction(candidate.direction),
+            "dependencies": candidate.dependencies, "standardization": candidate.standardization,
+            "missing_handling": candidate.missing_handling,
+            "parameters": {key: value for key, value in candidate.parameters.items() if not key.startswith("_")},
+        }
+        version_tag = hashlib.sha256(json.dumps(version_identity, sort_keys=True).encode("utf-8")).hexdigest()[:8]
+        version_id = f"v{iteration:03d}-{version_tag}"
         return FactorVersion(
             version_id=version_id,
             parent_version_id=current.version_id,
@@ -351,12 +358,22 @@ class ProductionEvolutionServices:
     ) -> None:
         direction = _positive_direction(candidate.direction)
         unchanged = {
-            "direction": direction == current.direction,
+            "direction": direction == _positive_direction(current.direction),
             "standardization": list(candidate.standardization) == current.standardization,
             "missing": candidate.missing_handling == current.missing_handling,
             "code": candidate.code.strip() == current.code.strip(),
             "dependencies": list(candidate.dependencies) == current.dependencies,
         }
+        import ast
+        try:
+            same_code = ast.dump(ast.parse(candidate.code), include_attributes=False) == ast.dump(ast.parse(current.code), include_attributes=False)
+        except SyntaxError:
+            same_code = unchanged["code"]
+        if same_code and all(unchanged[name] for name in ("direction", "standardization", "missing", "dependencies")):
+            raise ContractViolation(
+                code="EVOLUTION_NO_EFFECTIVE_CHANGE", message="候选没有改变公式、方向、依赖、标准化或缺失处理；枚举别名和研究元数据不算实质改动。",
+                blocking=False, suggested_action="保持同一金融假设，选择一个会改变实际因子计算或排序的维度。",
+            )
         required_unchanged: dict[str, tuple[str, ...]] = {
             "formula": ("direction", "standardization", "missing"),
             "lookback": ("direction", "standardization", "missing"),
@@ -406,7 +423,9 @@ class ProductionEvolutionServices:
         from quantlens.research_candidate import publish_candidate
         key=version.version_id+':'+version.code_hash
         if key not in self._published_candidates:
-            self._published_candidates[key]=publish_candidate(config.base_factor,version)
+            if self._on_progress:
+                self._on_progress(f"计算并发布候选因子 {version.version_id}")
+            self._published_candidates[key]=publish_candidate(config.base_factor,version,reporter=self._on_progress)
 
     def evaluate(
         self,
@@ -418,10 +437,8 @@ class ProductionEvolutionServices:
         timeout_seconds: float,
         on_progress,
     ) -> WindowResult:
-        from quantlens.compute import submit
         from backtest.report import BacktestRunStore
-        from strategy import StrategyProfileStore
-        from strategy.models import StrategyProfileDoc,FactorSpec,FactorRef,WeightMode
+        from strategy.models import FactorSpec,FactorRef,WeightMode
         import uuid
         protocol,base_profile=self._context(config)
         if window is None:
@@ -435,9 +452,83 @@ class ProductionEvolutionServices:
         profile=base_profile.model_copy(update={'factors':FactorSpec(weighting=WeightMode.EQUAL,items=[FactorRef(name=name)])})
         run_id='BT-'+uuid.uuid4().hex
         on_progress('读取已发布的候选因子与统一行情，执行逐日回测')
-        run_backtest(BacktestConfig(profile_name=profile.profile_name,start=window.start,end=window.end,initial_capital=config.initial_capital),protocol=protocol,profile=profile,run_id=run_id)
+        run_backtest(BacktestConfig(profile_name=profile.profile_name,start=window.start,end=window.end,initial_capital=config.initial_capital,lookback_buffer_days=config.lookback_buffer_days),protocol=protocol,profile=profile,run_id=run_id,console=_LogConsole(on_progress))
         record=BacktestRunStore.open_run(run_id)
         return WindowResult(window=window_name,run_id=run_id,metrics=record.read_metrics())
+
+    def evaluate_windows(
+        self, config, version, *, windows, research_id, timeout_seconds,
+        on_progress, on_window_started, on_window_completed,
+    ):
+        import json
+        import time
+        import uuid
+        from backtest.config import BacktestConfig
+        from backtest.report import BacktestRunStore
+        from quantlens.compute import submit
+        from quantlens.sync_ads import sync
+        from strategy.models import FactorSpec, FactorRef, WeightMode
+
+        deadline = time.time() + timeout_seconds
+        protocol, base_profile = self._context(config)
+        key = version.version_id + ':' + version.code_hash
+        if key not in self._published_candidates:
+            self.check_candidate(config, version, timeout_seconds=timeout_seconds)
+        profile = base_profile.model_copy(update={'factors': FactorSpec(
+            weighting=WeightMode.EQUAL, items=[FactorRef(name=self._published_candidates[key])])})
+        requests = [{
+            'window': name, 'run_id': 'BT-' + uuid.uuid4().hex,
+            'config': BacktestConfig(profile_name=profile.profile_name, start=window.start, end=window.end,
+                                     initial_capital=config.initial_capital,
+                                     lookback_buffer_days=config.lookback_buffer_days).model_dump(mode='json'),
+        } for name, window in windows]
+        expected = {item['window']: item['run_id'] for item in requests}
+        results = {}
+        callback_errors = []
+
+        def report(line):
+            # Drain the subprocess even if evidence persistence fails; surface the
+            # original callback error after submission rather than losing its pipe.
+            if callback_errors:
+                return
+            try:
+                if line.startswith('QUANTLENS_WINDOW_STARTED='):
+                    name = json.loads(line.partition('=')[2])['window']
+                    if name not in expected:
+                        raise ValueError('Unexpected research window')
+                    on_window_started(name)
+                elif line.startswith('QUANTLENS_WINDOW_COMPLETED='):
+                    item = json.loads(line.partition('=')[2])
+                    name, run_id = item['window'], item['run_id']
+                    if expected.get(name) != run_id or name in results:
+                        raise ValueError('Unexpected or duplicate research result')
+                    record = BacktestRunStore.open_run(run_id)
+                    if record.read_status().get('state') != 'completed':
+                        raise ValueError('Incomplete research backtest')
+                    result = WindowResult(window=name, run_id=run_id, metrics=record.read_metrics())
+                    results[name] = result
+                    on_window_completed(name, result)
+                else:
+                    on_progress(line)
+            except Exception as exc:
+                callback_errors.append(exc)
+
+        if hasattr(on_progress, 'progress'):
+            report.progress = on_progress.progress
+
+        batch_id = 'research-backtest-' + uuid.uuid4().hex
+        on_progress(f'合并提交 {len(requests)} 个训练/验证窗口，共用 Spark 会话；每个窗口独立撮合。')
+        submit('spark_backtest', '--windows', json.dumps(requests),
+               '--profile', json.dumps(profile.model_dump(mode='json')),
+               '--protocol', json.dumps(protocol.model_dump(mode='json')),
+               '--deadline', str(deadline), '--research-id', research_id,
+               '--batch', batch_id, reporter=report)
+        if callback_errors:
+            raise callback_errors[0]
+        if results:
+            on_progress('统一同步本版训练与验证的回测结果')
+            sync(batch_id)
+        return results
 
     def begin_experiment(
         self, config: EvolutionConfig, version: FactorVersion, parent_experiment_id: str
@@ -504,6 +595,16 @@ class ProductionEvolutionServices:
 
         ExperimentStore().append_event(experiment_id, "abort", {"reason": reason, "code": code})
 
+    def record_window_result(self, experiment_id, result, *, fold_id, window_name):
+        from experiments import ExperimentStore
+
+        label = "训练" if window_name == "train" else "验证"
+        ExperimentStore().append_event(experiment_id, "note", {
+            "text": f"{fold_id} {label}回测已完成，整组评估仍在进行。",
+            "run_id": result.run_id, "metrics": result.metrics,
+            "fold_id": fold_id, "window_name": window_name,
+        })
+
     def review(
         self,
         config: EvolutionConfig,
@@ -540,7 +641,7 @@ class ProductionEvolutionServices:
         router = AIRouter(request_timeout=max(1.0, min(180.0, timeout_seconds)))
         selected = router.pick("structured_config", model_name=config.model_name or None)
         base_prompt = prompt
-        last_error: ContractViolation | None = None
+        last_error: QuantTrainingError | None = None
         payload: dict[str, Any] = {}
         value: dict[str, Any] = {}
         decision = ""
@@ -570,7 +671,9 @@ class ProductionEvolutionServices:
                         blocking=False,
                     )
                 break
-            except ContractViolation as exc:
+            except QuantTrainingError as exc:
+                if not isinstance(exc, ContractViolation) and exc.code not in {"AI_OUTPUT_NOT_JSON", "AI_OUTPUT_NOT_OBJECT"}:
+                    raise
                 last_error = exc
                 payload = {}
                 if attempts >= _AI_CONTRACT_ATTEMPTS:

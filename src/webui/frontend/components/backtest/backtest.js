@@ -41,7 +41,6 @@ const METRIC_DEFS = {
 };
 
 const METRIC_GROUPS = [
-  ["window", "回测窗口"],
   ["returns", "收益"],
   ["risk", "风险"],
   ["trading", "交易"],
@@ -139,50 +138,28 @@ async function mountContent(root, ctx) {
       return;
     }
     
-    const groups = new Map();
-    for (const item of items) {
-      if (!groups.has(item.profile)) groups.set(item.profile, []);
-      groups.get(item.profile).push(item);
+    if (!currentId || !items.some(item => item.run_id === currentId)) currentId = items[0].run_id;
+    function selectRun(item) {
+      currentId = item.run_id;
+      listHost.querySelectorAll('tbody tr').forEach(row => row.classList.toggle('is-active', row.dataset.runId === currentId));
+      loadDetail(currentId);
     }
-    for (const [profile, runs] of groups) {
-      const group = el("section", "backtest__run-group");
-      const groupEl = el("div", "item-list__group");
-      const displayName = runs[0].profile_display_name || profile;
-      groupEl.append(el("span", "", displayName));
-      if (runs[0].archived) groupEl.append(badge("历史归档", "muted"));
-      group.append(groupEl);
-      const factorNames = runs[0].factor_display_names || [];
-      if (factorNames.length) {
-        groupEl.append(el("span", "item-list__group-sub", `使用因子：${factorNames.join("、")}`));
-      }
-      const runItems = el("div", "backtest__run-items");
-      group.append(runItems);
-      for (const item of runs) {
-        const row = el("button", "item-row");
-        row.type = "button";
-        row.dataset.runId = item.run_id;
-        if (item.run_id === currentId) row.classList.add("is-active");
-        row.append(el("span", "item-row__title", item.run_id));
-        const meta = el("span", "item-row__meta");
-        meta.append(runStateBadge(item.state), el("span", "", `${item.start} ~ ${item.end}`));
-        if(item.account_name)meta.append(badge(item.account_name,'accent'));
-        if (item.protocol_locked === false) meta.append(badge("协议未锁定", "warn"));
-        row.append(meta);
-        row.addEventListener("click", () => {
-          currentId = item.run_id;
-          listHost.querySelectorAll(".item-row").forEach((n) => {
-            n.classList.toggle("is-active", n.dataset.runId === currentId);
-          });
-          loadDetail(item.run_id);
-        });
-        runItems.append(row);
-      }
-      listHost.append(group);
-    }
-    if (!currentId || !items.some((i) => i.run_id === currentId)) {
-      currentId = items[0].run_id;
-      listHost.querySelector(".item-row")?.classList.add("is-active");
-    }
+    const table = tableEl([
+      { key: 'run_id', label: '回测编号' },
+      { key: 'profile', label: '采用策略', format: (value, row) => row.profile_display_name || value },
+      { key: 'start', label: '回测区间', format: (value, row) => `${value} 至 ${row.end}` },
+      { key: 'state', label: '状态', format: runStateBadge },
+      { key: 'account_name', label: '账户', format: value => value || '通用研究' },
+    ], items, { onRowClick: selectRun });
+    table.querySelectorAll('tbody tr').forEach((row, index) => {
+      row.dataset.runId = items[index].run_id;
+      row.classList.toggle('is-active', items[index].run_id === currentId);
+      row.tabIndex = 0;
+      row.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectRun(items[index]); }
+      });
+    });
+    listHost.append(table);
     loadDetail(currentId);
   }
 
@@ -193,7 +170,8 @@ async function mountContent(root, ctx) {
         ctx.api.backtestRun(runId),
         ctx.api.backtestNav(runId).catch(() => null),
       ]);
-      renderDetail(run, nav);
+      if (currentId !== runId) return;
+      renderDetail({ ...run, run_id: runId }, nav);
     } catch (err) {
       await renderState(detailHost, {
         kind: "error",
@@ -207,10 +185,12 @@ async function mountContent(root, ctx) {
   function metricItem(key, value) {
     const def = METRIC_DEFS[key] || [key, null, false];
     const item = el("div", "metric");
+    item.dataset.metric = key;
     item.append(el("span", "metric__label", def[0]));
     const text = value == null ? "—" : def[1] ? def[1](value) : String(value);
     const val = el("span", "metric__value", text);
-    if (def[2]) val.classList.add(signClass(value));
+    const sign = def[2] ? signClass(value) : "";
+    if (sign) val.classList.add(sign);
     item.append(val);
     return item;
   }
@@ -256,15 +236,22 @@ async function mountContent(root, ctx) {
         ["最近更新", fmtTime(run.status?.updated_at)],
       ]),
     );
+    detailHost.append(card);
 
     // ---- 指标卡矩阵
     const metrics = run.metrics || {};
     if (Object.keys(metrics).length) {
+      const metricsCard = el("article", "card detail-card");
+      metricsCard.append(el("h3", "", "回测指标"));
+      const window = metrics.window || {};
+      if (window.start && window.end) metricsCard.append(el("p", "backtest__metric-window item-row__meta",
+        `实际交易区间 ${window.start} 至 ${window.end} · ${window.trading_days} 个交易日 · 年化按 ${window.trading_days_per_year} 日计算`));
       const grid = el("div", "metric-groups");
       for (const [group, title] of METRIC_GROUPS) {
         const values = metrics[group];
         if (!values) continue;
-        const g = el("div", "card metric-group");
+        const g = el("div", "metric-group");
+        g.dataset.metricGroup = group;
         g.append(el("h4", "", title));
         const items = el("div", "metric-group__items");
         for (const [key, value] of Object.entries(values)) {
@@ -285,14 +272,16 @@ async function mountContent(root, ctx) {
         }
         grid.append(g);
       }
-      card.append(grid);
+      metricsCard.append(grid);
+      detailHost.append(metricsCard);
     } else {
       card.append(el("p", "item-row__meta", "暂无指标"));
     }
 
     // ---- 净值与回撤
     if (nav && nav.items.length) {
-      card.append(el("h4", "", `净值曲线（${nav.total_rows} 个交易日）`));
+      const navCard = el("article", "card detail-card");
+      navCard.append(el("h3", "", `净值曲线（${nav.total_rows} 个交易日）`));
       const labels = nav.items.map((r) => fmtDate(r.date));
       const nav0 = Number(nav.items[0].nav) || 1;
       const series = [
@@ -309,15 +298,19 @@ async function mountContent(root, ctx) {
           values: nav.items.map((r) => (r.benchmark_nav == null ? null : Number(r.benchmark_nav))),
         });
       }
-      card.append(lineChart({ series, labels, height: 280 }));
-      card.append(el("h4", "", "回撤"));
-      card.append(
+      navCard.append(lineChart({ series, labels, height: 280 }));
+      detailHost.append(navCard);
+      const drawdownCard = el("article", "card detail-card");
+      drawdownCard.append(el("h3", "", "回撤"));
+      drawdownCard.append(
         areaChart({ values: nav.items.map((r) => Number(r.drawdown) || 0), labels, height: 140 }),
       );
+      detailHost.append(drawdownCard);
 
       // ---- 月度收益热力表
       if ((nav.monthly_returns || []).length) {
-        card.append(el("h4", "", "月度收益"));
+        const monthlyCard = el("article", "card detail-card");
+        monthlyCard.append(el("h3", "", "月度收益"));
         const heat = el("div", "heatmap");
         for (const m of nav.monthly_returns) {
           const cell = el("div", "heatmap__cell");
@@ -329,17 +322,16 @@ async function mountContent(root, ctx) {
           cell.append(el("span", `heatmap__value ${signClass(m.value)}`, fmtPct(m.value, 1)));
           heat.append(cell);
         }
-        card.append(heat);
+        monthlyCard.append(heat);
+        detailHost.append(monthlyCard);
       }
     }
-
-    detailHost.append(card);
 
     
     detailHost.append(buildTradesCard(run.run_id));
     detailHost.append(buildPositionsCard(run.run_id));
     buildAnalysisCard(run.run_id).then((node) => {
-      if (node) detailHost.append(node);
+      if (node && currentId === run.run_id) detailHost.append(node);
     });
   }
 

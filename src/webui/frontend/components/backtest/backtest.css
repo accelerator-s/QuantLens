@@ -82,17 +82,26 @@
 }
 
 .metric-group {
+  --metric-color: var(--accent);
   padding: 10px 12px;
   border: 1px solid var(--line-0);
+  border-top: 3px solid var(--metric-color);
   border-radius: var(--radius-sm);
-  background: var(--bg-0);
+  background: color-mix(in srgb, var(--metric-color) 3%, var(--bg-1));
 }
 
+.metric-group[data-metric-group="returns"] { --metric-color: var(--safe); }
+.metric-group[data-metric-group="risk"] { --metric-color: var(--danger); }
+.metric-group[data-metric-group="orders"] { --metric-color: var(--warn); }
+
 .metric-group > h4 {
-  margin: 0 0 8px;
+  margin: -10px -12px 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--metric-color) 15%, var(--line-0));
+  background: color-mix(in srgb, var(--metric-color) 9%, var(--bg-1));
   font-size: var(--fs-xs);
   font-weight: 600;
-  color: var(--ink-2);
+  color: var(--metric-color);
 }
 
 .metric-group__items {
@@ -152,10 +161,58 @@
 }
 
 .backtest .split > .backtest__runs {
+  display: block;
+  padding: 0 10px 8px 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.backtest__runs .table-wrap {
+  max-height: none;
+  overflow: visible;
+}
+
+.backtest__runs .table {
+  min-width: 760px;
+}
+
+.backtest__runs .table :is(th, td) {
+  white-space: nowrap;
+}
+
+.backtest__runs tr.is-active td {
+  background: var(--accent-soft);
+}
+
+.backtest__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.backtest__detail .detail-card > h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+}
+
+.backtest .metric-groups {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
-  align-items: start;
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  margin: 0;
+}
+
+.backtest__metric-window { margin: 0; }
+.metric[data-metric="max_drawdown"] .metric__value { color: var(--danger); }
+.metric[data-metric="annualized_cost_drag"] .metric__value,
+.metric[data-metric="total_cost_paid"] .metric__value { color: var(--warn); }
+
+@media (max-width: 1100px) {
+  .backtest .metric-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .backtest .metric-groups { grid-template-columns: 1fr; }
 }
 .backtest__run-group {
   display: grid;

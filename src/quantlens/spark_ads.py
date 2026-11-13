@@ -3,6 +3,29 @@ from quantlens.warehouse import root_uri, write_json, lineage, publish, batch_id
 
 MIRRORS={'factor_eval_daily':'dws.factor_eval_daily','model_comparison':'ads.model_comparison','factor_meta':'dws.factor_meta','factor_eval':'dws.factor_eval','factor_values':'dws.factor_values','factor_weights':'dws.factor_weights','strategy_signal':'ads.strategy_signal','backtest_summary':'ads.backtest_summary','backtest_nav':'ads.backtest_nav','backtest_trades':'ads.backtest_trades','backtest_positions':'ads.backtest_positions','attribution':'ads.attribution','portfolio_target':'ads.portfolio_target','weighting_compare':'ads.weighting_compare','audit_log':'ads.audit_log','quality_report':'dwd.quality_report'}
 
+BACKTEST_TABLES = ('backtest_summary', 'backtest_nav', 'backtest_trades', 'backtest_positions', 'attribution')
+
+
+def export_backtests(spark, context, batch_id, as_of):
+    """Publish backtest evidence without rebuilding unrelated serving tables."""
+    batch_identifier(batch_id)
+    manifest = {'scope': 'backtest', 'data_as_of': str(as_of),
+                'run_id': context['run_id'], 'data_snapshot': context['data_snapshot'], 'tables': {}}
+    for name in BACKTEST_TABLES:
+        source = MIRRORS[name]
+        if not spark.catalog.tableExists(source):
+            continue
+        # Keep all historical runs available, including older research windows.
+        frame = spark.table(source)
+        uri = f'{root_uri()}/ads/_exports/{batch_id}/{name}'
+        frame.coalesce(1).write.mode('errorifexists').option('compression', 'snappy').parquet(uri)
+        manifest['tables'][name] = {'source_uri': uri, 'data_as_of': str(as_of),
+                                  'run_id': context['run_id'], 'data_snapshot': context['data_snapshot'],
+                                  'rows': frame.count()}
+        print(f'QUANTLENS_BACKTEST=已导出 {name}', flush=True)
+    write_json(spark, f'{root_uri()}/meta/batches/{batch_id}/manifest', manifest)
+    return manifest
+
 
 def recent_events(frame,keys):
     from pyspark.sql import functions as F, Window

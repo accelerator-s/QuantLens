@@ -39,6 +39,17 @@ def _hash(payload: Any) -> str:
 def _window(raw: dict[str, Any]) -> TimeWindow:
     return TimeWindow(start=raw["start"], end=raw["end"])
 
+def _scalar_metrics(metrics: dict[str, Any], prefix: str = "") -> dict[str, float | int | str]:
+    """Keep the original metric paths while satisfying the ledger's scalar schema."""
+    result: dict[str, float | int | str] = {}
+    for key, value in metrics.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            result.update(_scalar_metrics(value, path))
+        elif isinstance(value, (float, int, str)):
+            result[path] = value
+    return result
+
 class FactorEvolutionBridge:
 
     def __init__(self, store: LifecycleStore | None = None) -> None:
@@ -453,7 +464,7 @@ class FactorEvolutionBridge:
                 factor_version_id=factor_id,
                 data_snapshot_id=snapshot_id,
                 evaluation_run_ids=sorted(set(run_ids_by_version[legacy_id])),
-                primary_metrics=validation_metrics,
+                primary_metrics=_scalar_metrics(validation_metrics),
                 annual_stability={"oos_stability": payload.get("stability") or 0},
                 decay_metrics={"recent_degradation": generalization.get("recent_degradation", 0)},
                 similarity=similarity,

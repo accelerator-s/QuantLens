@@ -4,6 +4,7 @@
 import { el, selectMarkup } from "../../core/dom.js";
 import { createSelect } from "../../core/select.js";
 import { createMultiSelect } from "../../core/multi-select.js";
+import { attachStockPicker } from "../../core/stock-picker.js";
 
 // 弹窗高度自适应：
 
@@ -42,8 +43,34 @@ export function formDialog({ title = "填写表单", submitLabel = "提交", mes
     const body = el("div", "dialog__body");
     if (message) body.append(el("p", "confirm__message", message));
     const controls = {};
+    const stockPickers = [];
 
     for (const [fieldIndex, f] of fields.entries()) {
+      if (f.kind === "radio") {
+        const wrap = el("div", "confirm__field");
+        const label = el("span", "", f.label);
+        label.id = `form-field-${fieldIndex}-label`;
+        const choices = el("div", "confirm__choices");
+        choices.setAttribute("role", "radiogroup");
+        choices.setAttribute("aria-labelledby", label.id);
+        for (const [index, option] of (f.options || []).entries()) {
+          const choice = el("label", "confirm__choice");
+          const input = document.createElement("input");
+          input.type = "radio";
+          input.name = f.key;
+          input.value = option.value;
+          input.checked = f.value ? f.value === option.value : index === 0;
+          choice.append(input, el("span", "", option.label));
+          choices.append(choice);
+        }
+        wrap.append(label, choices);
+        body.append(wrap);
+        controls[f.key] = {
+          get value() { return choices.querySelector("input:checked")?.value || ""; },
+          focus() { choices.querySelector("input")?.focus(); },
+        };
+        continue;
+      }
       if (f.kind === "checkbox") {
         const wrap = el("label", "confirm__field confirm__field--inline");
         const input = document.createElement("input");
@@ -56,7 +83,7 @@ export function formDialog({ title = "填写表单", submitLabel = "提交", mes
         continue;
       }
       const usesThemedSelect = f.kind === "select" || f.kind === "multiselect";
-      const wrap = el(usesThemedSelect ? "div" : "label", "confirm__field");
+      const wrap = el(usesThemedSelect || f.kind === "stock" ? "div" : "label", "confirm__field");
       const label = el("span", "", f.required ? `${f.label}（必填）` : f.label);
       label.id = `form-field-${fieldIndex}-label`;
       wrap.append(label);
@@ -123,15 +150,23 @@ export function formDialog({ title = "填写表单", submitLabel = "提交", mes
         input.rows = f.rows || 6;
       } else {
         input = document.createElement("input");
-        input.type = f.kind || "text";
+        input.type = f.kind === "stock" ? "text" : f.kind || "text";
       }
       input.className = "input";
+      input.name = f.key;
+      for (const name of ["min", "max", "step", "inputmode"]) {
+        if (f[name] !== undefined) input.setAttribute(name, f[name]);
+      }
       if (f.placeholder) input.placeholder = f.placeholder;
       if (f.value !== undefined) input.value = f.value;
       wrap.append(input);
       if (f.hint) wrap.append(el("span", "item-row__meta", f.hint));
       body.append(wrap);
       controls[f.key] = input;
+      if (f.kind === "stock") {
+        input.setAttribute("aria-labelledby", label.id);
+        stockPickers.push(attachStockPicker(input));
+      }
     }
     dialog.append(body);
 
@@ -156,6 +191,7 @@ export function formDialog({ title = "填写表单", submitLabel = "提交", mes
     window.addEventListener("resize", refit);
 
     function close(result) {
+      stockPickers.forEach((picker) => picker.destroy());
       observer.disconnect();
       window.removeEventListener("resize", refit);
       backdrop.remove();
@@ -182,6 +218,11 @@ export function formDialog({ title = "填写表单", submitLabel = "提交", mes
           continue;
         }
         const val = String(input.value ?? "").trim();
+        if (["number", "stock"].includes(f.kind) && !input.checkValidity()) {
+          input.classList.add("is-invalid");
+          input.focus();
+          return;
+        }
         if (f.required && !val) {
           if (typeof input.markInvalid === "function") input.markInvalid();
           else input.classList.add("is-invalid");

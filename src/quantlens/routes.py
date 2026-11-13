@@ -23,6 +23,11 @@ def datasets():
     return {'items':data.inventory(),'coverage':data.coverage(),**ads.provenance()}
 
 
+@router.get('/stocks/suggestions')
+def stock_suggestions(q: str = Query(default='', max_length=32), limit: int = Query(default=20, ge=1, le=50)):
+    return {'items': data.stock_candidates(q, limit), 'query': q}
+
+
 @router.get('/stocks/{code}')
 def stock(code:str,as_of:date|None=None):
     return data.stock(code,str(as_of) if as_of else None)
@@ -141,10 +146,10 @@ def backtest(payload:BacktestRequest):
     from backtest.config import BacktestConfig
     from backtest.engine import run_backtest
     if payload.start>=payload.end: raise ContractViolation(code='BACKTEST_BAD_RANGE',message='回测日期顺序错误',suggested_action='结束日期必须晚于开始日期')
-    from portfolio.accounts import AccountRegistry, DEFAULT_ACCOUNT_ID
-    from portfolio.capital_compare import _account_capital
-    account = AccountRegistry().get(payload.account_id or DEFAULT_ACCOUNT_ID)
-    capital = _account_capital(account)
+    from portfolio.accounts import AccountRegistry
+    from portfolio.capital import account_capital
+    account = AccountRegistry().resolve(payload.account_id)
+    capital = account_capital(account)
     # Freeze account settings before the asynchronous job starts.
     config=BacktestConfig(profile_name=payload.strategy_id,start=str(payload.start),end=str(payload.end),initial_capital=capital,
                           account_id=account.account_id,account_name=account.alias,
@@ -162,26 +167,6 @@ def backtest(payload:BacktestRequest):
 @router.get('/backtests/{run_id}')
 def backtest_result(run_id:str):
     return {'summary':ads.query('backtest_summary','backtest_run=?',[run_id]),'nav':ads.query('backtest_nav','backtest_run=?',[run_id],limit=10000,order='date'),**ads.provenance('backtest_summary')}
-
-
-@router.get('/portfolio/{portfolio_id}/candidates')
-def candidates(portfolio_id:str,account_id:str=''):
-    where='strategy_id=?';params=[portfolio_id]
-    if account_id:
-        from portfolio.accounts import AccountRegistry
-        if not AccountRegistry().get(account_id).star_market_enabled:
-            where+=" AND code NOT LIKE '688%' AND code NOT LIKE '689%'"
-    return {**ads.response('strategy_signal',where=where,params=params,order='as_of DESC,score DESC'),'watch':watchlist()['items']}
-
-
-@router.get('/portfolio/{portfolio_id}/attribution')
-def portfolio_attribution(portfolio_id:str,run_id:str=''):
-    if not run_id:
-        summaries=ads.query('backtest_summary','strategy_id=?',[portfolio_id],limit=10000)
-        if not summaries:return {'items':[],'backtest_run':None,**ads.provenance('attribution')}
-        latest=max(summaries,key=lambda row:(json.loads(row['status']).get('updated_at',''),row['backtest_run']))
-        run_id=latest['backtest_run']
-    return {**ads.response('attribution',where='strategy_id=? AND backtest_run=?',params=[portfolio_id,run_id],limit=10000,order='date,factor'),'backtest_run':run_id}
 
 
 @router.get('/settings/data')

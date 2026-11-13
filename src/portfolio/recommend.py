@@ -171,7 +171,7 @@ def investable_nav(
                 message=f"持仓标的 {instrument_id} 无法取得现价（可能长期停牌）",
                 context={"instrument_id": instrument_id},
                 blocking=True,
-                suggested_action=("该标的近期无收盘价；请人工处理该持仓（快照 / reinit）后重试"),
+                suggested_action=("该标的近期无收盘价；请核对并手动修正该股票的持仓后重试"),
             )
         nav += p["qty"] * price
     return nav

@@ -214,8 +214,28 @@ class WarehouseSync(unittest.TestCase):
              patch('quantlens.compute.ensure_cluster'), \
              patch.object(sync.store, 'add'):
             result=sync.run_sync(dp,console=console)
-            pipeline.assert_called_once_with(console.print, mode='data')
+            self.assertEqual(pipeline.call_args.kwargs, {'mode':'data'})
+            self.assertTrue(callable(pipeline.call_args.args[0].progress))
             self.assertIn(('数据清洗与发布','done'),result.steps)
+
+    def test_publication_progress_reaches_ui_instead_of_staying_at_ninety_percent(self):
+        from quantlens import sync
+        console = Console(file=io.StringIO())
+        events=[]
+        def update(**kwargs):
+            kwargs['on_progress']({'fraction':.5})
+            return SimpleNamespace(outcomes=[])
+        def publish(reporter, **kwargs):
+            reporter.progress({'state':'queued','step':'等待集群计算资源'})
+            reporter.progress({'state':'running','step':'清洗行情','percent':50})
+            reporter.progress({'state':'running','step':'发布数据','percent':100})
+            return {'run_id':'batch-test'}
+        dp=SimpleNamespace(name='test',update_all=update)
+        with patch('quantlens.spark_daily.run',side_effect=publish), \
+             patch('quantlens.compute.ensure_cluster'), patch.object(sync.store,'add'):
+            sync.run_sync(dp,console=console,on_progress=events.append)
+        self.assertEqual([e['percent'] for e in events if 'percent' in e], [0,40,80,89,98,100])
+        self.assertEqual(next(e['phase'] for e in events if e.get('state')=='queued'),'等待集群计算资源')
 
 
 

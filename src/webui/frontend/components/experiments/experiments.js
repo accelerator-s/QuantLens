@@ -31,6 +31,10 @@ const EVENT_LABEL = {
 };
 
 const EVO_EVENT_LABEL = {
+  proposal_restarted: "从已完成的基线继续生成候选",
+  candidate_invalidated: "候选无实质改动，已跳过重复计算",
+  baseline_started: "基线实验已登记",
+  window_completed: "窗口回测完成",
   baseline_completed: "基线回测完成",
   candidate_created: "生成新候选因子",
   version_evaluated: "候选评估完成",
@@ -46,6 +50,7 @@ const EVO_EVENT_LABEL = {
 
 
 const EVO_EVENT_HIDDEN = new Set([
+  "runtime_log",
   "session_created",
   "model_context_dispatched",
   "locked_test_reserved",
@@ -106,6 +111,7 @@ export async function mount(root, ctx) {
   const polledResearchIds = new Set();
   let chainItems = null;
   let lastItems = null;
+  let evolutionItems = [];
   
   let sessionFilter = null;
 
@@ -113,7 +119,7 @@ export async function mount(root, ctx) {
     if (!sessionFilter) return items;
     
     return items.filter(
-      (item) => item.subject_type !== "factor" || sessionFilter.expIds.has(item.exp_id),
+      (item) => sessionFilter.expIds.has(item.exp_id),
     );
   }
 
@@ -125,12 +131,15 @@ export async function mount(root, ctx) {
     if (detailPoll) clearTimeout(detailPoll);
     detailPoll = null;
     sessionFilter = { researchId, expIds: new Set() };
+    evolutionList.querySelectorAll("tbody tr").forEach(row => {
+      row.classList.toggle("is-active", row.dataset.researchId === researchId);
+    });
     await showEvolution(researchId);
     renderFiltered();
   }
 
   ctx.bus.on("route", (id) => {
-    if (id === "experiments") {
+    if (id === "experiments" || id === "factors/experiments") {
       load();
       loadEvolutions();
     }
@@ -153,6 +162,7 @@ export async function mount(root, ctx) {
   }
 
   function renderEvolutions(items) {
+    evolutionItems = items;
     evolutionList.innerHTML = "";
     if (!items.length) {
       evolutionList.append(el("p", "item-row__meta", "暂无实验"));
@@ -163,19 +173,20 @@ export async function mount(root, ctx) {
     evolutionList.append(el("div", "item-list__group", "单因子迭代研究"));
     const table = tableEl(
       [
-        { key: "research_id", label: "会话" },
         { key: "base_factor_display_name", label: "基础因子" },
-        { key: "profile_display_name", label: "研究规则" },
         { key: "model_name", label: "模型" },
         { key: "started_at", label: "启动时间", format: (value) => fmtTime(value) },
-        { key: "state", label: "状态", format: (value, row) => stateText(value, row.decision) },
-        { key: "iteration", label: "轮次", num: true },
-        { key: "progress", label: "进度", format: (value) => fmtPct(value) },
-        { key: "best_version_id", label: "最佳方案" },
+        { key: "state", label: "状态", format: (value, row) => badge(...stateBadgeArgs(row)) },
+        { key: "phase", label: "研究进展", format: (value, row) => `${value || "等待执行"} · 第 ${row.iteration || 0} 轮 · ${fmtPct(row.progress, 1)}` },
       ],
       items,
       { onRowClick: (item) => selectEvolution(item.research_id) },
     );
+    table.classList.add("evolution-sessions");
+    table.querySelectorAll("tbody tr").forEach((row, index) => {
+      row.dataset.researchId = items[index].research_id;
+      row.title = items[index].research_id;
+    });
     evolutionList.append(table);
     const target = items.find((i) => i.research_id === sessionFilter?.researchId) || items[0];
     selectEvolution(target.research_id);
@@ -186,17 +197,51 @@ export async function mount(root, ctx) {
       const previousLog = evolutionDetail.querySelector("[data-task-log]");
       const retainedLog = previousLog?.dataset.subject === researchId ? previousLog : null;
       const data = await ctx.api.factorEvolution(researchId);
+      // Also restore tasks served by a process started before task linkage was added.
+      if (data.task === undefined) {
+        const jobs = await ctx.api.jobs();
+        data.task = (jobs.items || []).find(task => task.name === `factor-evolution:${researchId}`);
+      }
+      if (data.experiment_ids === undefined) {
+        const start = (data.events || []).find(event => event.event_type === "session_created")?.created_at || data.status?.started_at;
+        const boundaries = evolutionItems.filter(item => item.research_id !== researchId &&
+          item.base_factor === data.config?.base_factor && item.started_at > start).map(item => item.started_at);
+        if (data.status?.finished_at) boundaries.push(data.status.finished_at);
+        const end = boundaries.sort()[0];
+        const roots = (lastItems || []).filter(item => item.subject_type === "factor" &&
+          item.subject_name === data.config?.base_factor && item.profile_name === data.config?.profile_name &&
+          !item.parent_exp_id && start && item.created_at >= start && (!end || item.created_at < end));
+        data.experiment_ids = roots.length === 1 ? [roots[0].exp_id] : [];
+      }
+      if (sessionFilter?.researchId !== researchId) return;
       if (sessionFilter?.researchId === researchId) {
         const ids = new Set(
-          (data.events || []).map((event) => event.payload?.experiment_id).filter(Boolean),
+          [...(data.experiment_ids || []), ...(data.events || []).flatMap((event) =>
+            [event.payload?.experiment_id, event.payload?.result?.experiment_id])].filter(Boolean),
         );
-        const changed = ids.size !== sessionFilter.expIds.size;
+        const changed = ids.size !== sessionFilter.expIds.size || [...ids].some(id => !sessionFilter.expIds.has(id));
+        const revision = (data.events || []).filter(event =>
+          ["window_completed", "version_evaluated", "round_completed", "round_failed", "session_finished", "session_failed"].includes(event.event_type)).length;
+        const resultsChanged = sessionFilter.revision !== revision;
+        sessionFilter.revision = revision;
         sessionFilter.expIds = ids;
-        if (changed) renderFiltered();
+        sessionFilter.state = data.lifecycle_state === "paused" ? "paused" : data.status?.state;
+        sessionFilter.phase = data.status?.phase;
+        sessionFilter.error = data.task?.error || data.status?.error;
+        if ((changed || resultsChanged) && ids.size) await load(true);
+        else if (!ids.size) renderFiltered();
       }
       const status = data.status || {};
       const lifecycleState = data.lifecycle_state || "";
-      const displayStatus = lifecycleState === "paused" ? { ...status, state: "paused" } : status;
+      const taskState = data.task?.status === "interrupted" ? "paused"
+        : data.task?.status === "failed" ? "failed"
+        : data.task?.progress?.state === "queued" ? "queued" : status.state;
+      const displayStatus = { ...status, state: lifecycleState === "paused" ? "paused" : taskState };
+      const sessionRow = evolutionList.querySelector(`tr[data-research-id="${CSS.escape(researchId)}"]`);
+      if (sessionRow) {
+        sessionRow.cells[3].replaceChildren(badge(...stateBadgeArgs(displayStatus)));
+        sessionRow.cells[4].textContent = `${status.phase || "等待执行"} · 第 ${status.iteration || 0} 轮 · ${fmtPct(status.progress, 1)}`;
+      }
       const exposure = (data.locked_test_exposures || [])[0] || {};
       const box = el("article", "card evolution-progress");
       const head = el("div", "detail-card__head");
@@ -241,20 +286,23 @@ export async function mount(root, ctx) {
         generalization.classification;
       const aiModels = data.ai_models || {};
       const candidateAI = aiModels.candidate
-        ? `${aiModels.candidate}${aiModels.candidate_source === "current_route" ? "（自动选择）" : ""}`
+        ? `${aiModels.candidate}${aiModels.candidate_source === "current_route" && !data.config?.model_name ? "（自动选择）" : ""}`
         : null;
       const reviewAI = aiModels.review
-        ? `${aiModels.review}${aiModels.review_source === "current_route" ? "（自动选择）" : ""}`
+        ? `${aiModels.review}${aiModels.review_source === "current_route" && !data.config?.model_name ? "（自动选择）" : ""}`
         : null;
       box.append(
         kvEl(
           [
+            ["研究规则", data.profile_display_name || evolutionItems.find(item => item.research_id === researchId)?.profile_display_name || data.config?.profile_name],
             ["候选生成模型", candidateAI],
             ["复盘模型", reviewAI],
-            ["当前阶段", status.state === "running" ? status.phase : null],
+            ["当前阶段", displayStatus.state === "running" ? status.phase : null, { wide: true }],
             ["轮次", `${status.iteration}（成功 ${status.successful_rounds} / 失败 ${status.failed_rounds}）`],
             ["连续无改善", status.no_improvement_count > 0 ? `${status.no_improvement_count} 轮` : null],
-            ["运行时间", `${fmtNum(status.elapsed_seconds)} 秒`],
+            ["运行时间", `${fmtNum(displayStatus.state === "running" && status.started_at
+              ? Math.max(status.elapsed_seconds || 0, (new Date(data.task?.finished_at || Date.now()) - new Date(status.started_at)) / 1000)
+              : status.elapsed_seconds)} 秒`],
             ["最佳方案", status.best_version_id || null],
             ["泛化结论", finalClassification ? CLASSIFICATION_LABEL[finalClassification] || finalClassification : null],
             ["训练收益中位数", pctNode(generalization.train_median_excess_return)],
@@ -262,11 +310,19 @@ export async function mount(root, ctx) {
             ["泛化落差", pctNode(generalization.generalization_gap)],
             ["锁定测试回测", runLink(exposure.run_id)],
             ["结束原因", status.terminal_reason || null],
-            ["错误", friendlyEvolutionError(status.error)],
+            ["错误", friendlyEvolutionError(data.task?.error || status.error)],
           ].filter(([, value]) => value !== null && value !== undefined && value !== ""),
         ),
       );
       const folds = evaluated?.payload?.folds || [];
+      const windows = (data.events || []).filter(event => event.event_type === "window_completed");
+      if (!folds.length && windows.length) {
+        box.append(el("h4", "evolution-progress__title", "已完成的窗口回测"), tableEl([
+          { key: "fold_id", label: "窗口" },
+          { key: "window_name", label: "区间", format: value => value === "train" ? "训练" : "验证" },
+          { key: "run_id", label: "回测", format: runLink },
+        ], windows.map(event => event.payload)));
+      }
       if (folds.length) {
         box.append(
           el("h4", "evolution-progress__title", "滚动验证"),
@@ -374,7 +430,16 @@ export async function mount(root, ctx) {
       }
       if (sessionFilter?.researchId !== researchId) return;
       const restoreScroll = captureLogScroll(retainedLog);
-      evolutionDetail.replaceChildren(...[box, retainedLog].filter(Boolean));
+      const eventLines = (data.events || []).map(event => {
+        const payload = event.payload || {};
+        return `${fmtTime(event.created_at)}  ${payload.message || EVO_EVENT_LABEL[event.event_type] || event.event_type}${payload.run_id ? ` · ${payload.run_id}` : ""}`;
+      });
+      const lines = data.task?.log?.length ? data.task.log : eventLines;
+      const log = updateTaskLog(retainedLog, lines.length ? lines : [status.phase || "等待研究任务执行"], {
+        limit: 200, subject: researchId,
+      });
+      if (log && !retainedLog) log.open = true;
+      evolutionDetail.replaceChildren(...[box, log].filter(Boolean));
       restoreScroll();
       if (schedule && status.state === "running" && !polledResearchIds.has(researchId)) {
         if (detailPoll) clearTimeout(detailPoll);
@@ -545,9 +610,9 @@ export async function mount(root, ctx) {
     tick();
   }
 
-  async function load() {
+  async function load(quiet = false) {
     chainItems = null;
-    await renderState(listHost, { kind: "loading", title: "加载实验…" });
+    if (!quiet) await renderState(listHost, { kind: "loading", title: "加载实验…" });
     try {
       const data = await ctx.api.experiments({ improved: filterSelect.value });
       lastItems = data.items;
@@ -571,11 +636,13 @@ export async function mount(root, ctx) {
   function renderList(items) {
     listHost.innerHTML = "";
     if (!items.length) {
+      const running = ["created", "running", "queued"].includes(sessionFilter?.state);
+      const filtered = Boolean(filterSelect.value);
       renderState(listHost, {
-        kind: "empty",
-        title: sessionFilter ? "该会话暂无实验记录" : "暂无实验",
-        detail: sessionFilter
-          ? "会话可能在登记基线前失败或已中止。"
+        kind: running && !filtered ? "loading" : "empty",
+        title: filtered ? "没有符合筛选条件的实验" : running ? "研究进行中，等待基线实验登记" : sessionFilter ? "该会话尚无实验记录" : "暂无实验",
+        detail: filtered ? "可切换为「全部实验」查看基线与待评价实验。" : sessionFilter
+          ? sessionFilter.error || (running ? sessionFilter.phase || "任务正在执行，运行日志见上方。" : sessionFilter.state === "paused" ? "研究已暂停，可在上方查看日志并继续研究。" : "运行阶段和结束原因见上方会话详情。")
           : "点击右上角「新建实验」启动后，系统会自动写入完整记录。",
       });
       detailHost.innerHTML = "";
@@ -661,7 +728,7 @@ export async function mount(root, ctx) {
     const expId = record.exp_id;
 
     // ---- 基本信息卡
-    const card = el("article", "card detail-card");
+    const card = el("article", "card detail-card experiments__record");
     const head = el("div", "detail-card__head");
     head.append(el("h3", "", record.display_name || "研究实验"));
     const status = deriveStatus(events);
@@ -678,14 +745,14 @@ export async function mount(root, ctx) {
           portfolio_policy: "组合政策",
         }[record.subject_type] || "实验主体", record.subject_display_name || record.subject_name],
         ["研究编号", expId],
-        ["前次实验", record.parent_exp_id],
+        ["前次实验", record.parent_exp_id || "基线实验"],
         ["采用策略", record.profile_display_name || record.profile_name],
-        ["变更摘要", record.change_summary],
-        ["变更原因", record.change_reason],
-        ["训练窗口", record.train_window],
-        ["验证窗口", record.valid_window],
-        ["测试窗口", record.test_window],
+        ["训练窗口", windowNode(record.train_window)],
+        ["验证窗口", windowNode(record.valid_window)],
+        ["测试窗口", windowNode(record.test_window)],
         ["登记时间", fmtTime(record.created_at)],
+        ["变更摘要", record.change_summary, { wide: true }],
+        ["变更原因", record.change_reason, { wide: true }],
       ]),
     );
 
@@ -706,6 +773,15 @@ export async function mount(root, ctx) {
     if (events.some((e) => e.event_type === "conclusion")) return "concluded";
     if (events.some((e) => e.event_type === "result")) return "attached";
     return "registered";
+  }
+
+  function windowNode(value) {
+    if (!value) return "未设置";
+    const dates = String(value).split("..");
+    if (dates.length !== 2) return value;
+    const range = el("span", "experiments__date-range");
+    range.append(el("span", "", dates[0]), el("span", "experiments__date-separator", "至"), el("span", "", dates[1]));
+    return range;
   }
 
   function latestPayload(events, type) {
@@ -795,6 +871,7 @@ export async function mount(root, ctx) {
   }
 
   function stateText(state, decision) {
+    if (state === "queued") return "排队中";
     if (state === "running") return "运行中";
     if (state === "created") return "待启动";
     if (state === "failed") return "失败";
@@ -805,7 +882,9 @@ export async function mount(root, ctx) {
   }
 
   function stateBadgeArgs(status) {
+    if (status.decision === "cancelled") return ["已中止", "muted"];
     const state = status.state || "";
+    if (state === "queued" || state === "created") return [stateText(state), "warn"];
     if (state === "running") return ["运行中", "accent"];
     if (state === "failed") return ["失败", "danger"];
     if (state === "cancelled") return ["已中止", "muted"];
@@ -882,14 +961,15 @@ export async function mount(root, ctx) {
   }
 
   function eventsCard(events) {
-    const card = el("article", "card detail-card");
+    const card = el("article", "card detail-card experiments__operations");
     const head = el("div", "detail-card__head");
     head.append(el("h4", "", `操作记录（${events.length}）`));
     const filterWrap = el("div", "select experiments__event-filter");
     filterWrap.innerHTML = selectMarkup("全部事件");
+    head.append(filterWrap);
     card.append(head);
     const timeline = el("div", "experiments__timeline");
-    card.append(filterWrap, timeline);
+    card.append(timeline);
 
     const eventTypes = [...new Set(events.map((e) => e.event_type))];
     const options = [{ value: "", label: "全部事件" }].concat(
@@ -930,6 +1010,7 @@ export async function mount(root, ctx) {
         break;
       case "note":
         item.append(el("p", "event__text", payload.text || "—"));
+        if (payload.run_id) item.append(resultBody(payload));
         break;
       case "abort":
         item.append(el("p", "event__text", payload.reason || "—"));
@@ -944,13 +1025,29 @@ export async function mount(root, ctx) {
     const metrics = payload.metrics || {};
     const returns = metrics.returns || {};
     const risk = metrics.risk || {};
-    return kvEl([
-      ["回测运行", runLink(payload.run_id)],
+    const body = el("div", "event__result");
+    if (payload.run_id) {
+      const reference = el("div", "event__run-reference");
+      reference.append(el("span", "item-row__meta", "回测运行"), runLink(payload.run_id));
+      body.append(reference);
+    }
+    const pairs = [
       ["年化收益", pctNode(returns.annualized_return)],
       ["年化超额", pctNode(returns.annualized_excess_return)],
       ["夏普", risk.sharpe != null ? fmtNum(risk.sharpe, 3) : null],
       ["最大回撤", risk.max_drawdown != null ? fmtPct(risk.max_drawdown) : null],
-    ]);
+    ].filter(([, value]) => value !== null && value !== undefined);
+    if (pairs.length) {
+      const metricsRow = el("div", "event__metrics");
+      for (const [label, value] of pairs) {
+        const metric = el("span", "event__metric");
+        metric.append(el("span", "item-row__meta", label));
+        metric.append(value instanceof Node ? value : el("span", "", value));
+        metricsRow.append(metric);
+      }
+      body.append(metricsRow);
+    }
+    return body;
   }
 
   function pctNode(value) {

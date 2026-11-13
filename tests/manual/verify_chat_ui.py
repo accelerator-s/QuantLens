@@ -124,6 +124,7 @@ window.chatTest={calls:[],final:[],errors:[]};
 window.testBus={on(){},emit(name,data){if(name==='toast')chatTest.errors.push(data)}};
 window.longReply=('先把现象整理成可验证的假设。财报披露后，市场可能分批消化新信息。\\n\\n').repeat(35);
 window.testApi={
+ jobs:async()=>({items:[]}),
  aiModels:async()=>({items:[{name:'deepseek-cyber',enabled:true,kind:'api_model'}]}),
  factors:async()=>({statuses:[],items:[]}),
  factorEvolutionModelRecommendations:async()=>({recommended:'deepseek-cyber',items:[{name:'deepseek-cyber',selectable:true,recommended:true,reason:'具备深度推理、结构化输出、代码生成、长上下文与风险识别能力。'}]}),
@@ -141,7 +142,9 @@ for kind in ['strategy', 'factor']:
         js('''window.factorHost=document.createElement('section');document.body.append(factorHost);
         factorHost.innerHTML=await (await fetch('/components/factors/factors.html')).text();
         await (await import('/components/factors/factors.js')).mount(factorHost,{api:testApi,bus:testBus});
-        factorHost.querySelector('[data-ai-research]').click();''')
+        factorHost.querySelector('#factors-tab-research').click();''')
+        wait("factorHost.querySelector('#factors-panel-research [data-ai-research]:not(:disabled)')")
+        js("factorHost.querySelector('#factors-panel-research [data-ai-research]').click()")
     wait("document.querySelector('.chat-dialog') && !document.querySelector('.chat__input').disabled")
     assert js("document.querySelector('.chat__welcome')!==null")
     assert js("document.querySelector('.chat__send').disabled")
@@ -239,7 +242,7 @@ for kind in ['strategy', 'factor']:
     if kind == 'strategy':
         js("await (await import('/components/strategy/strategy-chat.js')).openStrategyChat({api:testApi,bus:testBus},{onYaml(){}})")
     else:
-        js("factorHost.querySelector('[data-ai-research]').click()")
+        js("factorHost.querySelector('#factors-panel-research [data-ai-research]').click()")
     wait("document.querySelector('.chat-dialog') && !document.querySelector('.chat__input').disabled")
     assert js("document.querySelectorAll('.chat__item').length") == 6
     assert js("document.querySelector('.chat__input').value") == '尚未发出的草稿'

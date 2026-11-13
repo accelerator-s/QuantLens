@@ -160,14 +160,16 @@ class FactorResearchIndex:
         }
         returns = validation_metrics.get("returns") or {}
         costs = validation_metrics.get("costs") or {}
+        trading = validation_metrics.get("trading") or {}
         result.update(
             {
                 "annualized_excess_return": returns.get("annualized_excess_return"),
-                "annualized_turnover": costs.get("annualized_turnover"),
-                "cost_total": costs.get("total_cost"),
+                "annualized_turnover": trading.get("annualized_turnover_oneside", costs.get("annualized_turnover")),
+                "cost_total": trading.get("total_cost_paid", costs.get("total_cost")),
             }
         )
-        return result
+        # Walk-forward aggregates may omit costs. Missing evidence is not zero.
+        return {key: value for key, value in result.items() if value is not None}
 
     @staticmethod
     def _source(factor: FactorVersion) -> str:

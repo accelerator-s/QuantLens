@@ -395,6 +395,228 @@ factors:
   decay_history: []
   created_at: '2026-08-19T00:00:00Z'
   updated_at: '2026-08-19T00:00:00Z'
+- name: smooth_uptrend_efficiency_60d
+  display_name: 60日温和上涨效率
+  assumption: 金融假设：过去约60个交易日（约三个月）价格沿路径平滑上行、日间波动较小，可能反映资金分批进入、持股者分歧低、获利抛压不急，因而未来约20个交易日趋势延续概率较高。因子用60日累计收益除以同期日收益绝对值之和（趋势效率/路径平滑度），既要求净涨幅为正，也惩罚大涨大跌路径；低波动但无上涨趋势的股票该值接近零。失效条件：①相对“低波动但无趋势”对照组无额外超额收益；②扣除交易成本后优势消失；③优势仅集中在流动性差的少数股票；④市场快速上攻、情绪亢奋阶段温和上涨股票明显落后于大涨股票。计算仅使用截至t日及以前的收盘价，不使用未来数据。
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - adj_close_nd
+  - adj_close_wd
+  - close
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
+  output_frequency: daily
+  direction: positive
+  parameters:
+    lookback_days: 60
+    min_obs: 45
+    eps: 1.0e-08
+    holding_days: 20
+    price_field_priority:
+    - adj_close_nd
+    - adj_close_wd
+    - close
+  standardization:
+  - winsorize_1_99
+  - cross_sectional_rank
+  missing_handling: drop
+  ai_generated: true
+  production_permission: false
+  risk_notes: 该因子由 AI 根据金融现象生成，尚未获得实盘权限。模型自评：用60日累计收益除以同期日收益绝对值之和，直接刻画平滑上行路径；低波动但无趋势的股票该值接近0，便于检验“温和上涨”相对纯低波动的增量解释力。
+  evaluation_metrics:
+  - rank_ic
+  - long_short_return
+  - excess_return_vs_equal_weight
+  - excess_return_vs_low_vol_no_trend
+  - turnover
+  - net_of_cost_return
+  - liquidity_bucket_consistency
+  status: draft
+  version: v1
+  code_hash: f05c413fd1e83e66
+  plugin_path: factors/smooth_uptrend_efficiency_60d.py
+  last_evaluated_at: null
+  decay_history: []
+  created_at: '2026-11-13T13:26:15.207708Z'
+  updated_at: '2026-11-13T13:26:15.223525Z'
+- name: smooth_uptrend_efficiency_60d_r_44280e1e32ff
+  display_name: 60日温和上涨效率
+  assumption: 金融假设：过去约60个交易日（约三个月）价格沿路径平滑上行、日间波动较小，可能反映资金分批进入、持股者分歧低、获利抛压不急，因而未来约20个交易日趋势延续概率较高。因子用60日累计收益除以同期日收益绝对值之和（趋势效率/路径平滑度），既要求净涨幅为正，也惩罚大涨大跌路径；低波动但无上涨趋势的股票该值接近零。失效条件：①相对“低波动但无趋势”对照组无额外超额收益；②扣除交易成本后优势消失；③优势仅集中在流动性差的少数股票；④市场快速上攻、情绪亢奋阶段温和上涨股票明显落后于大涨股票。计算仅使用截至t日及以前的收盘价，不使用未来数据。
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - adj_close_nd
+  - adj_close_wd
+  - close
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
+  output_frequency: daily
+  direction: positive
+  parameters:
+    eps: 1.0e-08
+    holding_days: 20
+    lookback_days: 60
+    min_obs: 45
+    price_field_priority:
+    - adj_close_nd
+    - adj_close_wd
+    - close
+    _evolution_change_type: direction
+    _change_summary: 仅将方向枚举从父版本的 long_only_positive 规范为评测契约要求的 positive，保持同一金融假设与因子公式；回看期、标准化、缺失处理和代码均不变。
+    _expected_impact: 本次为契约格式修复，不改变因子排序与收益来源；若父版本的平滑上行趋势延续假设成立，高分股票未来约20个交易日应获得超额收益，失效条件同
+      assumption。
+  standardization:
+  - winsorize:0.01:0.99
+  - zscore
+  missing_handling: drop
+  ai_generated: true
+  production_permission: false
+  risk_notes: 该因子由 AI 根据金融现象生成，尚未获得实盘权限。模型自评：用60日累计收益除以同期日收益绝对值之和，直接刻画平滑上行路径；低波动但无趋势的股票该值接近0，便于检验“温和上涨”相对纯低波动的增量解释力。
+  evaluation_metrics:
+  - rank_ic
+  - long_short_return
+  - excess_return_vs_equal_weight
+  - excess_return_vs_low_vol_no_trend
+  - turnover
+  - net_of_cost_return
+  - liquidity_bucket_consistency
+  status: draft
+  version: v001-f05c413f
+  code_hash: f05c413fd1e83e66
+  plugin_path: factors/smooth_uptrend_efficiency_60d_r_44280e1e32ff.py
+  last_evaluated_at: null
+  decay_history: []
+  created_at: '2026-11-13T13:26:15.207708Z'
+  updated_at: '2026-11-13T14:01:15.669295Z'
+- name: smooth_uptrend_efficiency_60d_r_9e7b23b2fad5
+  display_name: 60日温和上涨效率
+  assumption: 金融假设：过去约60个交易日（约三个月）价格沿路径平滑上行、日间波动较小，可能反映资金分批进入、持股者分歧低、获利抛压不急，因而未来约20个交易日趋势延续概率较高。因子用60日累计收益除以同期日收益绝对值之和（趋势效率/路径平滑度），既要求净涨幅为正，也惩罚大涨大跌路径；低波动但无上涨趋势的股票该值接近零。失效条件：①相对“低波动但无趋势”对照组无额外超额收益；②扣除交易成本后优势消失；③优势仅集中在流动性差的少数股票；④市场快速上攻、情绪亢奋阶段温和上涨股票明显落后于大涨股票。计算仅使用截至t日及以前的收盘价，不使用未来数据。
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - adj_close_nd
+  - adj_close_wd
+  - close
+  eligibility: {}
+  min_history: 310
+  window_days: 60
+  scope: stock
+  engine: pandas
+  output_frequency: daily
+  direction: negative
+  parameters:
+    _evolution_change_type: market_regime
+    _change_summary: 仅增加市场状态调节维度：保留60日平滑趋势效率的原始计算和negative方向不变，用面板内等权市场收益构造趋势强度状态分数，在单边强趋势状态按个股对等权市场的60日Beta截面zscore对因子值做倾斜，高Beta低效率股被相对看空，震荡状态则几乎不调节；其余维度不动。
+    _expected_impact: 原反向排序在验证折仍为负且稳定性为0，可能因为低效率股中的高Beta个股在单边强趋势阶段承担方向性拖累，侵蚀了低波反转收益。引入趋势态Beta倾斜后，强趋势期把排序重心移到低Beta低效率股，可减少趋势行情中的反向拖累，同时在震荡期保留原始低效率反转暴露。可证伪预测：调节后多数滚动验证折的多空收益转正、最新折不再显著为负。失效条件：若强趋势中低Beta低效率股同样跑输，或低效率股的超额主要来自基本面恶化与流动性折价而非风险补偿，则调节无效。
+    eps: 1.0e-08
+    holding_days: 20
+    lookback_days: 60
+    min_obs: 45
+    price_field_priority:
+    - adj_close_nd
+    - adj_close_wd
+    - close
+    beta_lookback: 60
+    beta_min_obs: 45
+    regime_lookback: 20
+    regime_vol_lookback: 60
+    regime_vol_min_obs: 40
+    regime_scale_lookback: 250
+    regime_scale_min_obs: 120
+    regime_weight: 0.15
+  standardization:
+  - winsorize:0.01:0.99
+  - zscore
+  missing_handling: drop
+  ai_generated: true
+  production_permission: false
+  risk_notes: 该因子由 AI 根据金融现象生成，尚未获得实盘权限。模型自评：用60日累计收益除以同期日收益绝对值之和，直接刻画平滑上行路径；低波动但无趋势的股票该值接近0，便于检验“温和上涨”相对纯低波动的增量解释力。
+  evaluation_metrics:
+  - rank_ic
+  - long_short_return
+  - excess_return_vs_equal_weight
+  - excess_return_vs_low_vol_no_trend
+  - turnover
+  - net_of_cost_return
+  - liquidity_bucket_consistency
+  status: draft
+  version: v003-52ed6092
+  code_hash: 9164625774d66fa4
+  plugin_path: factors/smooth_uptrend_efficiency_60d_r_9e7b23b2fad5.py
+  last_evaluated_at: null
+  decay_history: []
+  created_at: '2026-11-13T13:26:15.207708Z'
+  updated_at: '2026-11-13T14:31:13.411929Z'
+- name: smooth_uptrend_efficiency_60d_r_f2395724d4b1
+  display_name: 60日温和上涨效率
+  assumption: 金融假设：过去约60个交易日（约三个月）价格沿路径平滑上行、日间波动较小，可能反映资金分批进入、持股者分歧低、获利抛压不急，因而未来约20个交易日趋势延续概率较高。因子用60日累计收益除以同期日收益绝对值之和（趋势效率/路径平滑度），既要求净涨幅为正，也惩罚大涨大跌路径；低波动但无上涨趋势的股票该值接近零。失效条件：①相对“低波动但无趋势”对照组无额外超额收益；②扣除交易成本后优势消失；③优势仅集中在流动性差的少数股票；④市场快速上攻、情绪亢奋阶段温和上涨股票明显落后于大涨股票。计算仅使用截至t日及以前的收盘价，不使用未来数据。
+  applicable_markets:
+  - CN-A
+  applicable_instruments:
+  - stock
+  timescale: daily
+  dependencies:
+  - adj_close_nd
+  - adj_close_wd
+  - close
+  eligibility: {}
+  min_history: 120
+  window_days: 60
+  scope: stock
+  engine: pandas
+  output_frequency: daily
+  direction: negative
+  parameters:
+    eps: 1.0e-08
+    holding_days: 20
+    lookback_days: 60
+    min_obs: 45
+    price_field_priority:
+    - adj_close_nd
+    - adj_close_wd
+    - close
+    _evolution_change_type: direction
+    _change_summary: 将方向字段由 positive 改为 negative，因子计算保持不变，从而在组合构建中做多低平滑趋势效率股票、做空高平滑趋势效率股票。
+    _expected_impact: 基线在训练集与验证集的年化超额均为负且验证折全部未通过，说明高平滑上涨股在样本期可能存在拥挤反转；方向反转可直接翻转排序符号，并检验低波与低趋势效率的风险补偿及反转收益。预期多数滚动折的因子多空收益转正、最新折不再显著为负；若强趋势行情中低效率股持续落后，或低效率主要来自基本面恶化与流动性折价，则改善失效。
+  standardization:
+  - winsorize:0.01:0.99
+  - zscore
+  missing_handling: drop
+  ai_generated: true
+  production_permission: false
+  risk_notes: 该因子由 AI 根据金融现象生成，尚未获得实盘权限。模型自评：用60日累计收益除以同期日收益绝对值之和，直接刻画平滑上行路径；低波动但无趋势的股票该值接近0，便于检验“温和上涨”相对纯低波动的增量解释力。
+  evaluation_metrics:
+  - rank_ic
+  - long_short_return
+  - excess_return_vs_equal_weight
+  - excess_return_vs_low_vol_no_trend
+  - turnover
+  - net_of_cost_return
+  - liquidity_bucket_consistency
+  status: draft
+  version: v001-f05c413f
+  code_hash: f05c413fd1e83e66
+  plugin_path: factors/smooth_uptrend_efficiency_60d_r_f2395724d4b1.py
+  last_evaluated_at: null
+  decay_history: []
+  created_at: '2026-11-13T13:26:15.207708Z'
+  updated_at: '2026-11-13T14:05:47.375199Z'
 - name: value_defensive_quality_v2
   display_name: 价值盈利防御
   assumption: 金融现象假设：当期盈利相对购买价格较高、资产使用效率较好且价格波动较低的公司，可能同时受益于价值重估、经营质量和防御性需求；若溢价只来自低波动风格拥挤或周期顶点的会计盈利，则该传导链应在后续样本失效

@@ -1,6 +1,7 @@
 """Docker/YARN is the sole cluster runtime."""
 import json
 import os
+import re
 from storage.hdfs import compose
 from exceptions import ContractViolation
 
@@ -65,7 +66,24 @@ def submit(module, *arguments, reporter=None):
         import subprocess,sys
         result = subprocess.run([sys.executable,'-m','quantlens.'+name,*map(str,arguments)],check=True)
         return result.returncode
+    last_scheduler_state = None
+
     def stage_log(line):
+        nonlocal last_scheduler_state
+        scheduler = re.search(r'Application report for (application_\d+_\d+) \(state: (\w+)\)', line)
+        if reporter and scheduler:
+            application, state = scheduler.groups()
+            if (application, state) != last_scheduler_state:
+                last_scheduler_state = (application, state)
+                if state in {'SUBMITTED', 'ACCEPTED'}:
+                    reporter(f'集群任务 {application} 正在排队等待计算资源。')
+                    if hasattr(reporter, 'progress'):
+                        reporter.progress({'state': 'queued', 'step': '等待集群计算资源'})
+                elif state == 'RUNNING':
+                    reporter(f'集群任务 {application} 已获得资源，开始运行。')
+                    if hasattr(reporter, 'progress'):
+                        reporter.progress({'state': 'running', 'step': '集群计算中'})
+            return
         if reporter and line.startswith('QUANTLENS_PROGRESS='):
             if hasattr(reporter, 'progress'):
                 reporter.progress(json.loads(line.partition('=')[2]))

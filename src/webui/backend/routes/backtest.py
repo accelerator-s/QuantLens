@@ -38,7 +38,8 @@ def list_runs(profile: str = '') -> dict:
 def get_run(run_id: str) -> dict:
     rows=ads.query('backtest_summary','backtest_run=?',[run_id],limit=1)
     if not rows:raise HTTPException(404,'回测结果尚未发布')
-    return json_safe({**_record(rows[0]),**ads.provenance('backtest_summary')})
+    provenance = ads.provenance('backtest_summary')
+    return json_safe({**provenance, 'publication_run_id': provenance.get('run_id'), **_record(rows[0])})
 
 
 @router.get('/backtest/runs/{run_id}/nav')

@@ -1,6 +1,7 @@
-import {badge,fmtTime} from "../../core/fmt.js";
+import {badge,fmtTime,compactRunId} from "../../core/fmt.js";
 import {selectMarkup} from "../../core/dom.js";
 import {createSelect} from "../../core/select.js";
+import {attachStockPicker} from "../../core/stock-picker.js";
 import {captureLogScroll,updateTaskLog} from '../../core/task-log.js';
 import {fetchApi} from '../../core/page-cache.js';
 import { labelText, displayText } from "../../core/labels.js";
@@ -22,7 +23,9 @@ async function request(path,body){
 
 function table(rows,cols){
   if(!rows.length)return '<div class="ql-empty">暂无记录</div>';
-  return `<div class="ql-table-wrap"><table class="ql-table"><thead><tr>${cols.map(c=>`<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[0]],r):esc(labelText(r[c[0]]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const value = raw => compactRunId(raw) !== String(raw ?? '')
+    ? `<span class="run-id" title="${esc(raw)}" aria-label="${esc(raw)}">${esc(compactRunId(raw))}</span>` : esc(labelText(raw));
+  return `<div class="ql-table-wrap"><table class="ql-table"><thead><tr>${cols.map(c=>`<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[0]],r):value(r[c[0]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 function card(title,content,className=''){return `<section class="ql-card${className?` ${className}`:''}"><header><h3>${title}</h3></header>${content}</section>`;}
@@ -36,6 +39,11 @@ export async function mount(root,ctx) {
   const page=root.dataset.pane;
   let coverage={};let loading=false;let screenRequest=0;
   let taskDialog=null;
+  let stockPickers=[];
+  function bindStockPickers(){
+    stockPickers.forEach(picker=>picker.destroy());
+    stockPickers=[...root.querySelectorAll('input[name="code"], input[name="instrument_id"]')].map(input=>attachStockPicker(input));
+  }
   let refreshClusterStatus=null;
   ctx.bus.on('health',()=>{
     if(refreshClusterStatus&&!root.hidden&&!root.closest('.view')?.hidden)refreshClusterStatus();
@@ -95,6 +103,7 @@ export async function mount(root,ctx) {
   async function stocks(){
     const code=ctx.stock||'000001';
     root.innerHTML='<button data-back>返回上一页</button>'+card('股票研究档案',`<form data-stock-form class="ql-form">${field('证券代码','code','text',code,'pattern="[0-9]{6}" required')}${field('历史日期','as_of','date',day(coverage.end))}<button type="submit">查看档案</button></form>`)+ '<div data-detail></div>';
+    bindStockPickers();
     form('[data-stock-form]',async f=>{ctx.stock=f.code;await showStock(f.code,f.as_of);});
     bind('[data-back]',()=>history.back());
     if(coverage.end) await showStock(code,day(coverage.end));
@@ -140,24 +149,9 @@ export async function mount(root,ctx) {
     root.querySelector('[data-results]').innerHTML=`<p>${d.items.length} 个结果</p>`+table(d.items,[['instrument_id','证券',v=>`<button class="ql-link" data-stock="${esc(v)}">${esc(v)}</button>`],['industry_name','行业'],['close','收盘价',num],['momentum_20','20日涨幅',pct],['position_60','60日价格位置',pct],['roe_ttm',"净资产收益率",pct],['debt_ratio','负债率',pct],['amount','成交额',num]]);stockLinks();
   }
 
-  async function candidates(){const d=await request('/watch');root.innerHTML=banner()+card('我的观察列表',table(d.items,[['body','证券',v=>`<button data-stock="${esc(v.instrument_id)}">${esc(v.instrument_id)}</button>`],['body','关注依据',v=>esc(v.thesis)],['body','失效条件',v=>esc(v.invalidation)],['body','观察日期',v=>esc(v.as_of)],['body','操作',v=>`<button data-remove="${esc(v.instrument_id)}">移出</button>`]]));stockLinks();bind('[data-remove]',async el=>{await request('/watch',{instrument_id:el.dataset.remove,action:'remove',as_of:day(coverage.end),thesis:'用户移出观察列表'});await candidates();});}
-
-  async function attribution() {
-    const [strategies,runs]=await Promise.all([request('/strategies'),request('/backtest/runs')]);
-    const options=new Map(strategies.items.filter(s=>!s.is_template).map(s=>[s.profile_name,s.display_name||s.profile_name]));
-    for(const run of runs.items)if(!options.has(run.profile))options.set(run.profile,run.profile_display_name||run.profile);
-    root.innerHTML=card('组合归因',`<form data-attribution class="toolbar"><label for="attribution-strategy" class="item-row__meta">策略</label><div class="select" data-attribution-select>${selectMarkup('选择策略')}</div><input type="hidden" name="strategy"><button type="submit" class="btn btn--primary">查询</button></form><div data-attribution-result hidden></div>`);
-    const selectRoot=root.querySelector('[data-attribution-select]');
-    selectRoot.querySelector('[data-select-trigger]').id='attribution-strategy';
-    const strategyInput=root.querySelector('[data-attribution] [name=strategy]');
-    const strategySelect=createSelect(selectRoot,{onChange:value=>{strategyInput.value=value;}});
-    strategySelect.setOptions([...options].map(([value,label])=>({value,label})));
-    strategyInput.value=strategySelect.value;
-    root.querySelector('[data-attribution] [type=submit]').disabled=!options.size;
-    form('[data-attribution]',async values=>{const data=await request(`/portfolio/${encodeURIComponent(values.strategy)}/attribution`);const result=root.querySelector('[data-attribution-result]');result.hidden=false;result.innerHTML=table(data.items,[['date','日期',day],['factor','因子/残差'],['contribution','当期贡献',pct],['cumulative_contribution','累计贡献',pct],['portfolio_return','组合收益',pct],['run_id','批次']]);});
-  }
   async function assistant(){
     root.innerHTML=banner()+card('研究助手',`<form data-assistant class="ql-form ql-assistant-form">${field('证券代码（可选）','instrument_id')}${field('实验编号（可选）','run_id')}<label class="field ql-wide"><span class="field__label">问题</span><textarea class="textarea" name="question" required rows="4" placeholder="这家公司的经营情况有哪些变化？哪些依据还不充分？"></textarea></label><button type="submit" class="btn btn--primary">分析</button></form><div data-answer></div>`);
+    bindStockPickers();
     form('[data-assistant]',async f=>{root.querySelector('[data-answer]').textContent='正在分析…';const a=await request('/assistant',f);root.querySelector('[data-answer]').innerHTML=`<h3>模型解读</h3><pre class="ql-log">${esc(a.body.answer)}</pre><p>模型 ${esc(a.body.model)} · 证据 ${esc(a.body.evidence_id)}</p><button type="button" class="btn btn--ghost" data-evidence="${a.body.evidence_id}">查看原始依据</button>`;bind('[data-evidence]',async el=>{const e=await request(`/records/${el.dataset.evidence}`);root.querySelector('[data-answer]').insertAdjacentHTML('beforeend',`<pre class="ql-log">${esc(JSON.stringify(e.body,null,2))}</pre>`);});});
   }
 
@@ -209,8 +203,8 @@ export async function mount(root,ctx) {
   }
 
   async function load(){
-    if(loading)return;loading=true;root.querySelectorAll('.chart--interactive').forEach(chart=>chart.dispose?.());root.innerHTML='<div class="ql-loading">正在读取数据…</div>';
-    try {if(!['tasks','cluster','assistant'].includes(page))coverage=(await request('/datasets')).coverage;await ({dashboard,stocks,screen,candidates,attribution,assistant,tasks,cluster})[page]();}
+    if(loading)return;loading=true;stockPickers.forEach(picker=>picker.destroy());stockPickers=[];root.querySelectorAll('.chart--interactive').forEach(chart=>chart.dispose?.());root.innerHTML='<div class="ql-loading">正在读取数据…</div>';
+    try {if(!['tasks','cluster','assistant'].includes(page))coverage=(await request('/datasets')).coverage;await ({dashboard,stocks,screen,assistant,tasks,cluster})[page]();}
     catch(error){root.innerHTML=card('读取失败',`<p class="ql-error">${esc(error.message)}</p><button type="button" class="btn" data-retry>重试</button>`);bind('[data-retry]',load);}
     finally{loading=false;}
   }

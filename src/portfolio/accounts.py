@@ -25,11 +25,13 @@ class AccountRegistry:
     def __init__(self, ws: Workspace | None = None) -> None:
         self.ws = ws or workspace()
 
-    def ensure_default(self) -> Account:
+    def ensure_default(self) -> Account | None:
         from .transaction import lock
         with lock:
             if DEFAULT_ACCOUNT_ID in self._read_index():
                 return self.get(DEFAULT_ACCOUNT_ID)
+            if self._read_index_data().get("default_account_deleted"):
+                return None
             path = self.ws.portfolio_account('CN-A', 'stock', DEFAULT_ACCOUNT_ID) / 'account.yaml'
             if path.exists():
                 # Preserve account balances if only the index write was interrupted.
@@ -46,20 +48,26 @@ class AccountRegistry:
 
     # 索引
 
-    def _read_index(self) -> dict[str, dict[str, str]]:
+    def _read_index_data(self) -> dict:
         idx = self.ws.portfolio_index
         if not idx.exists():
             return {}
-        raw = yaml.safe_load(idx.read_text(encoding="utf-8")) or {}
-        return dict(raw.get("accounts") or {})
+        return yaml.safe_load(idx.read_text(encoding="utf-8")) or {}
 
-    def _write_index(self, accounts: dict[str, dict[str, str]]) -> None:
+    def _read_index(self) -> dict[str, dict[str, str]]:
+        return dict(self._read_index_data().get("accounts") or {})
+
+    def _write_index(self, accounts: dict[str, dict[str, str]], *, default_account_deleted: bool | None = None) -> None:
         idx = self.ws.portfolio_index
         idx.parent.mkdir(parents=True, exist_ok=True)
+        data = self._read_index_data()
+        data["accounts"] = accounts
+        if default_account_deleted is not None:
+            data["default_account_deleted"] = default_account_deleted
         tmp = idx.with_suffix(".tmp")
         tmp.write_text(
             yaml.safe_dump(
-                {"accounts": accounts},
+                data,
                 allow_unicode=True,
                 sort_keys=True,
             ),
@@ -119,6 +127,19 @@ class AccountRegistry:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         return Account.model_validate(raw)
 
+    def resolve(self, account_id: str = "") -> Account:
+        if account_id:
+            return self.get(account_id)
+        accounts = self.list()
+        if accounts:
+            return accounts[0]
+        raise PortfolioAccountNotFoundError(
+            code="portfolio.account_not_found",
+            message="尚未添加账户。",
+            blocking=True,
+            suggested_action="请先在组合跟踪中创建账户。",
+        )
+
     def create(self, account: Account) -> None:
         
         index = self._read_index()
@@ -128,7 +149,7 @@ class AccountRegistry:
                 message=f"account_id 已存在：{account.account_id}",
                 context={"account_id": account.account_id},
                 blocking=True,
-                suggested_action="改用其它 account_id，或先 `account archive` 旧账户",
+                suggested_action="请使用其他账户编号，或删除原账户。",
             )
 
         if not account.created_at.tzinfo:
@@ -161,7 +182,7 @@ class AccountRegistry:
                     f"{(account.market, account.instrument_class)}"
                 ),
                 blocking=True,
-                suggested_action="如确需迁移，请先 archive 旧账户再以新 account_id 创建",
+                suggested_action="请创建新账户。",
             )
 
         self._dump_account(account, self._account_path(account))
@@ -175,27 +196,27 @@ class AccountRegistry:
         }
         self._write_index(index)
 
-    def archive(self, account_id: str, *, confirm: bool, deleted_by: str = "user") -> None:
-        
-        if not confirm:
-            raise PortfolioContractError(
-                code="portfolio.archive_requires_confirm",
-                message="归档账户为破坏性操作，必须显式 confirm=True",
-                blocking=True,
-                suggested_action="CLI 加 `--confirm`，编程接口传 confirm=True",
-            )
-        market, instrument_class = self._locate(account_id)
-        account_dir = self.ws.portfolio_account(market, instrument_class, account_id)
-        if account_dir.exists():
-            TrashStore(self.ws).move(
-                account_dir,
-                category="portfolio_account",
-                deleted_by=deleted_by,
-                reason=f"archive account {account_id}",
-            )
-        index = self._read_index()
-        index.pop(account_id, None)
-        self._write_index(index)
+    def delete(self, account_id: str, *, confirm: bool, deleted_by: str = "user") -> None:
+        from .transaction import lock
+        with lock:
+            if not confirm:
+                raise PortfolioContractError(
+                    code="portfolio.delete_requires_confirm",
+                    message="删除账户必须显式 confirm=True。",
+                    blocking=True,
+                )
+            account = self.get(account_id)
+            account_dir = self.ws.portfolio_account(account.market, account.instrument_class, account_id)
+            trash = TrashStore(self.ws)
+            entry = trash.move(account_dir, category="portfolio_account", deleted_by=deleted_by,
+                               reason=f"delete account {account_id}")
+            index = self._read_index()
+            index.pop(account_id)
+            try:
+                self._write_index(index, default_account_deleted=True if account_id == DEFAULT_ACCOUNT_ID else None)
+            except Exception:
+                trash.restore(entry.bucket_dir.name, confirm=True)
+                raise
 
     def choose(
         self,

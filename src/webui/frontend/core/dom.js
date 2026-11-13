@@ -1,10 +1,25 @@
 import { labelText, displayText } from "./labels.js";
+import { compactRunId } from "./fmt.js";
+
+function setDisplayValue(node, value) {
+  const full = displayText(value);
+  const compact = compactRunId(full);
+  node.textContent = compact;
+  if (compact !== full) {
+    node.title = full;
+    node.setAttribute("aria-label", full);
+    node.classList.add("run-id");
+  }
+}
 
 
 export function el(tag, className = "", text = "") {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== "") node.textContent = displayText(text);
+  if (text !== "") {
+    if (["pre", "code", "textarea"].includes(tag)) node.textContent = displayText(text);
+    else setDisplayValue(node, text);
+  }
   return node;
 }
 
@@ -16,7 +31,7 @@ export function kvEl(pairs) {
     const dt = el("dt", "kv__key", labelText(label));
     const dd = el("dd", "kv__val");
     if (value instanceof Node) dd.append(value);
-    else dd.textContent = value === null || value === undefined || value === "" ? "—" : displayText(value);
+    else setDisplayValue(dd, value === null || value === undefined || value === "" ? "—" : value);
     const row = el("div", "kv__row");
     if (options.wide) row.classList.add("kv__row--wide");
     if (options.scroll) dd.classList.add("kv__val--scroll");
@@ -50,7 +65,7 @@ export function tableEl(columns, rows, { onRowClick } = {}) {
       const raw = row[col.key];
       const value = col.format ? col.format(raw, row) : raw;
       if (value instanceof Node) td.append(value);
-      else td.textContent = value === null || value === undefined || value === "" ? "—" : displayText(value);
+      else setDisplayValue(td, value === null || value === undefined || value === "" ? "—" : value);
       tr.append(td);
     }
     tbody.append(tr);

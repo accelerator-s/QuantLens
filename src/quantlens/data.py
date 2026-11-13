@@ -1,5 +1,8 @@
 """Serving data is extracted ADS; no product query reads staged or ODS."""
 from datetime import datetime,date
+from functools import lru_cache
+from pathlib import Path
+from threading import RLock
 from zoneinfo import ZoneInfo
 from quantlens import ads,store
 from exceptions import ContractViolation
@@ -42,3 +45,34 @@ def stock(code,as_of=None):
     for row in prices:row['instrument_id']=row['code'];row['adj_close_wd']=row['adj_close']
     timeline=[r for r in store.records('watch_event',2000) if r['body']['instrument_id']==code]
     return {'instrument_id':code,'as_of':end,'prices':prices[::-1],'fundamentals':fundamentals,'industry':industry,'factors':values,'signals':signals,'timeline':timeline,'events':events,'pit_note':'DWD 实际可见日对齐；数据来自已发布的 ADS 批次。',**ads.provenance('stock_prices')}
+
+
+_stock_index_lock = RLock()
+
+
+@lru_cache(maxsize=4)
+def _stock_candidate_index(signature: tuple) -> tuple:
+    import duckdb
+    import re
+    files = [entry[0] for entry in signature]
+    with duckdb.connect() as db:
+        db.execute('SET threads=2')
+        db.execute("SET memory_limit='256MB'")
+        columns = {row[0] for row in db.execute('DESCRIBE SELECT * FROM read_parquet(?, hive_partitioning=false)', [files]).fetchall()}
+        name_column = next((name for name in ('name', 'stock_name', 'short_name', 'security_name') if name in columns), None)
+        name_sql = f'coalesce(max(CAST("{name_column}" AS VARCHAR)), \'\')' if name_column else "''"
+        rows = db.execute(f'SELECT lpad(CAST(code AS VARCHAR), 6, \'0\') AS code, {name_sql} AS name FROM read_parquet(?, hive_partitioning=false) GROUP BY 1 ORDER BY 1', [files]).fetchall()
+    return tuple((code, name) for code, name in rows if re.fullmatch(r'[036489]\d{5}', code))
+
+
+def stock_candidates(query: str, limit: int = 20) -> list[dict]:
+    files = ads.paths('stock_prices') or ads.paths('screen')
+    if not files:
+        return []
+    signature = tuple((file, Path(file).stat().st_mtime_ns, Path(file).stat().st_size) for file in files)
+    needle = query.strip().casefold()
+    with _stock_index_lock:
+        index = _stock_candidate_index(signature)
+    rows = [item for item in index if not needle or item[0].startswith(needle) or needle in item[1].casefold()]
+    rows.sort(key=lambda item: (item[0] != needle, not item[0].startswith(needle), not item[1].casefold().startswith(needle), item[0]))
+    return [{'code': code, 'name': name} for code, name in rows[:limit]]

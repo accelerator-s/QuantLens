@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
@@ -76,7 +77,7 @@ def _start_task(research_id: str, base_factor: str) -> str:
             append_log.progress(
                 {"state": "running", "step": "执行因子研究循环", "percent": 0.01}
             )
-            engine = EvolutionEngine(EvolutionStore(), ProductionEvolutionServices())
+            engine = EvolutionEngine(EvolutionStore(), ProductionEvolutionServices(on_progress=append_log))
             try:
                 detail = engine.run(research_id, on_progress=append_log)
                 lifecycle = bridge.ingest(research_id)
@@ -243,6 +244,15 @@ def list_evolution(include_archived: bool = False) -> dict:
     for item in items:
         item["base_factor_display_name"] = factor_display_name(item["base_factor"])
         item["profile_display_name"] = strategy_display_name(item["profile_name"])
+        task = manager.latest(name=f"factor-evolution:{item['research_id']}")
+        if task:
+            item["task_id"] = task["task_id"]
+            if task["status"] == "interrupted":
+                item["state"] = "paused"
+            elif task["status"] == "failed" and item["state"] != "cancelled":
+                item["state"] = "failed"
+            elif task["progress"].get("state") == "queued":
+                item["state"] = "queued"
     return json_safe({"items": items})
 
 @router.get("/factor-evolution/locked-tests")
@@ -281,6 +291,16 @@ def get_evolution(research_id: str) -> dict:
     from lifecycle.store import LifecycleStore
 
     detail = EvolutionStore().detail(research_id)
+    task = manager.latest(name=f"factor-evolution:{research_id}")
+    detail["task"] = ({key: task.get(key) for key in
+                       ("task_id", "status", "progress", "log", "error")} if task else None)
+    detail["experiment_ids"] = _session_experiment_ids(research_id, detail)
+    status = detail["status"]
+    if status.get("started_at") and status.get("state") == "running":
+        endpoint = status.get("finished_at") or (task or {}).get("finished_at")
+        now = datetime.fromisoformat(endpoint) if endpoint else datetime.now(tz=UTC)
+        status["elapsed_seconds"] = max(status.get("elapsed_seconds", 0),
+                                         (now - datetime.fromisoformat(status["started_at"])).total_seconds())
     config_model = str((detail.get("config") or {}).get("model_name") or "")
     candidate_model = next(
         (
@@ -382,3 +402,38 @@ def get_evolution(research_id: str) -> dict:
             "message": exc.message,
         }
     return json_safe(detail)
+
+
+def _session_experiment_ids(research_id: str, detail: dict) -> list[str]:
+    """Include registered baselines before the first completed evaluation."""
+    events = detail.get("events") or []
+    ids = {event["payload"]["experiment_id"] for event in events
+           if (event.get("payload") or {}).get("experiment_id")}
+    for event in events:
+        nested = (event.get("payload") or {}).get("result") or {}
+        if nested.get("experiment_id"):
+            ids.add(nested["experiment_id"])
+    if any(event["event_type"] == "baseline_started" for event in events):
+        return sorted(ids)
+    # Older sessions did not store the baseline ID until evaluation finished.
+    # Recover only an unambiguous root experiment inside this factor's session.
+    from experiments.store import ExperimentStore
+
+    config = detail["config"]
+    start = next((event["created_at"] for event in events if event["event_type"] == "session_created"),
+                 detail["status"].get("started_at"))
+    if not start:
+        return sorted(ids)
+    boundaries = [row["started_at"] for row in EvolutionStore().list()
+                  if row["research_id"] != research_id and row["base_factor"] == config["base_factor"]
+                  and row.get("started_at") and row["started_at"] > start]
+    if detail["status"].get("finished_at"):
+        boundaries.append(detail["status"]["finished_at"])
+    end = min(boundaries) if boundaries else None
+    rows = ExperimentStore().list_experiments(subject_type="factor", subject_name=config["base_factor"])
+    roots = [row for row in rows if not row.get("parent_exp_id")
+             and row.get("profile_name") == config["profile_name"]
+             and row["created_at"] >= start and (end is None or row["created_at"] < end)]
+    if len(roots) == 1:
+        ids.add(roots[0]["exp_id"])
+    return sorted(ids)

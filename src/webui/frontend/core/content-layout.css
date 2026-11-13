@@ -85,6 +85,9 @@
 .table td .badge, .ql-table td .badge { white-space: nowrap; overflow-wrap: normal; }
 .ql-table { white-space: normal; }
 .table td button, .ql-table td button { white-space: nowrap; }
+.run-id { white-space: nowrap; overflow-wrap: normal; }
+.is-positive { color: var(--up); }
+.is-negative { color: var(--down); }
 
 .content-scroll,
 .experiments__timeline,

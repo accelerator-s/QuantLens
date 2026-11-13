@@ -57,10 +57,17 @@ class EvolutionStore:
         )
 
     def save_status(self, status: EvolutionStatus) -> None:
-        status.updated_at = _now()
-        self._write_json(
-            self.run_dir(status.research_id) / "status.json", status.model_dump(mode="json")
-        )
+        import fcntl
+
+        run_dir = self.run_dir(status.research_id)
+        path = run_dir / "status.json"
+        with (run_dir / "status.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            # A worker's older in-memory status must never erase cancellation.
+            if path.exists() and self._read_json(path).get("cancel_requested"):
+                status.cancel_requested = True
+            status.updated_at = _now()
+            self._write_json(path, status.model_dump(mode="json"))
 
     def append_event(self, research_id: str, event_type: str, payload: dict[str, Any]) -> None:
         record = {"created_at": _now(), "event_type": event_type, "payload": payload}

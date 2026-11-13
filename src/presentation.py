@@ -84,7 +84,13 @@ def factor_display_name(name: str) -> str:
 
         return FactorRegistry().get(name).display_name or name
     except QuantTrainingError:
-        
+        from quantlens.research_candidate import research_base_name
+        base = research_base_name(name)
+        if base:
+            try:
+                return FactorRegistry().get(base).display_name or base
+            except QuantTrainingError:
+                pass
         return name
 
 def strategy_display_name(name: str | None) -> str:

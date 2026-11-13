@@ -20,8 +20,8 @@ class Criteria(BaseModel):
 def execute(c):
     from quantlens import ads
     from exceptions import ContractViolation
-    from portfolio.accounts import AccountRegistry, DEFAULT_ACCOUNT_ID
-    account = AccountRegistry().get(c.account_id or DEFAULT_ACCOUNT_ID)
+    from portfolio.accounts import AccountRegistry
+    account = AccountRegistry().resolve(c.account_id)
     c = c.model_copy(update={'account_id': account.account_id})
     calendar=ads.query('market','date<=CAST(? AS DATE)',[str(c.as_of)],limit=1,order='date DESC')
     if not calendar:

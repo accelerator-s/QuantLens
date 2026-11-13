@@ -93,7 +93,7 @@ export function renderStrategyConfig(data) {
     ['选股说明', universe.notes], ['成交说明', execution.notes], ['风控说明', risk.notes],
   ].filter(([,value]) => present(value));
   const details = el('details', 'strategy-summary__notes');
-  details.append(el('summary', '', '说明与来源'));
+  details.append(el('summary', '', '补充说明与配置来源'));
   const body = el('div', 'content-scroll');
   for (const [title, value] of notes) {
     const paragraph = el('p');

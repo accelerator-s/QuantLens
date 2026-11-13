@@ -43,18 +43,18 @@ class DeliveryChecks(unittest.TestCase):
 
     def trade(self,**changes):
         payload={'account':'qa','instrument_id':'000001','side':'long','action':'open','qty':'100','price':'10',
-                 'fee':'5','executed_at':'2024-01-02T10:00:00+08:00','request_id':'buy1','confirm':True}
+                 'executed_at':'2024-01-02T10:00:00+08:00','request_id':'buy1','confirm':True}
         return self.client.post('/api/portfolio/trades/add',json={**payload,**changes})
 
     def test_cash_holdings_and_idempotency(self):
         self.account()
         first=self.trade();self.assertEqual(first.status_code,200,first.text)
-        self.assertEqual(float(first.json()['cash_after']),98995)
+        self.assertEqual(float(first.json()['cash_after']),98994.99)
         second=self.trade();self.assertEqual(second.status_code,200,second.text)
         self.assertTrue(second.json()['duplicate'])
-        sell=self.trade(action='close',price='11',tax='.55',executed_at='2024-01-03T10:00:00+08:00',request_id='sell1')
+        sell=self.trade(action='close',price='11',executed_at='2024-01-03T10:00:00+08:00',request_id='sell1')
         self.assertEqual(sell.status_code,200,sell.text)
-        self.assertAlmostEqual(float(sell.json()['cash_after']),100089.45)
+        self.assertAlmostEqual(float(sell.json()['cash_after']),100089.43)
         self.assertEqual(self.client.get('/api/portfolio/qa/holdings').json()['total_rows'],0)
         self.assertEqual(self.client.get('/api/portfolio/qa/trades').json()['total_rows'],2)
 
@@ -131,7 +131,7 @@ class DeliveryChecks(unittest.TestCase):
         self.assertTrue(all(r.status_code==200 for r in results))
         self.assertEqual(sum(bool(r.json().get('duplicate')) for r in results),3)
         from portfolio import AccountRegistry
-        self.assertEqual(str(AccountRegistry().get('qa').cash[0].total),'98995')
+        self.assertEqual(str(AccountRegistry().get('qa').cash[0].total),'98994.99')
 
 
     def test_interrupted_trade_recovers(self):

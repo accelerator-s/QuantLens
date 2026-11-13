@@ -1,10 +1,16 @@
 """Publish research candidates once; evaluations only consume DWS values."""
 import hashlib,json
+import re
 from factors.registry import FactorRegistry,hash_code
 from factors.plugins import FactorPlugin
 
 
-def publish_candidate(base_name,version):
+def research_base_name(name):
+    match = re.fullmatch(r'(.+)_r_[0-9a-f]{12}', name)
+    return match.group(1) if match else None
+
+
+def publish_candidate(base_name,version,*,reporter=None):
     from quantlens.compute import submit
     registry=FactorRegistry();base=registry.get(base_name)
     payload={key:getattr(version,key) for key in ['code','parameters','dependencies','standardization','missing_handling','direction']}
@@ -20,7 +26,7 @@ def publish_candidate(base_name,version):
             'plugin_path':f'factors/{name}.py','parameters':version.parameters,'standardization':version.standardization,
             'missing_handling':version.missing_handling,'direction':version.direction,'dependencies':version.dependencies,'production_permission':False})
         registry.upsert(meta)
-    submit('spark_factor_values','--factor',name)
+    submit('spark_factor_values','--factor',name,reporter=reporter)
     return name
 
 

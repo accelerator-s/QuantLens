@@ -34,8 +34,11 @@ def run(spark,context,profile_name,start,end,capital=1000000,run_id=None,profile
     profile=ResolvedStrategyProfile.model_validate(profile_payload) if profile_payload else resolve_and_check(config,protocol)
     from backtest.config import _profile_protocol_diffs
     if _profile_protocol_diffs(profile,protocol):raise ValueError('Profile conflicts with frozen protocol')
+    print(f'QUANTLENS_BACKTEST=读取回测数据 {start} 至 {end}', flush=True)
     payload=inputs(profile,start,end,spark)
+    print('QUANTLENS_BACKTEST=执行逐日撮合', flush=True)
     outcome=run_backtest(config,protocol=protocol,profile=profile,warehouse_inputs=payload,run_id=run_id)
+    print(f'QUANTLENS_BACKTEST=回测完成 {outcome.run_id}，保存归因与结果', flush=True)
     store=BacktestRunStore.open_run(outcome.run_id)
     nav=store.read_daily('nav');positions=store.read_daily('positions')
     factor_returns={};weights={}
@@ -88,13 +91,54 @@ def run(spark,context,profile_name,start,end,capital=1000000,run_id=None,profile
     save('backtest_summary',summary)
     return outcome
 
+def run_windows(spark, context, windows, profile_payload, protocol_payload, *, deadline=None, control_path=None):
+    """Share one Spark session while keeping each window's portfolio independent."""
+    import json
+    import time
+    from pathlib import Path
+
+    outcomes = []
+    for item in windows:
+        if deadline is not None and time.time() >= deadline:
+            print('QUANTLENS_WINDOWS_STOPPED=timeout', flush=True)
+            break
+        if control_path and json.loads(Path(control_path).read_text()).get('cancel_requested'):
+            print('QUANTLENS_WINDOWS_STOPPED=cancelled', flush=True)
+            break
+        print('QUANTLENS_WINDOW_STARTED=' + json.dumps({'window': item['window']}), flush=True)
+        config = item['config']
+        outcome = run(spark, context, config['profile_name'], config['start'], config['end'],
+                      config['initial_capital'], item['run_id'], profile_payload, protocol_payload, config)
+        outcomes.append(outcome)
+        print('QUANTLENS_WINDOW_COMPLETED=' + json.dumps({'window': item['window'], 'run_id': outcome.run_id}), flush=True)
+    return outcomes
+
+
 if __name__=='__main__':
     import argparse
     import json
-    parser=argparse.ArgumentParser();parser.add_argument('--strategy',required=True);parser.add_argument('--start',required=True);parser.add_argument('--end',required=True);parser.add_argument('--capital',type=float,default=1000000);parser.add_argument('--run-id');parser.add_argument('--batch');parser.add_argument('--profile');parser.add_argument('--protocol')
+    parser=argparse.ArgumentParser();parser.add_argument('--strategy');parser.add_argument('--start');parser.add_argument('--end');parser.add_argument('--capital',type=float,default=1000000);parser.add_argument('--run-id');parser.add_argument('--batch');parser.add_argument('--profile');parser.add_argument('--protocol')
+    parser.add_argument('--windows');parser.add_argument('--deadline',type=float);parser.add_argument('--research-id')
     parser.add_argument('--config');args=parser.parse_args()
     with job('backtest') as (spark,context):
-        run(spark,context,args.strategy,args.start,args.end,args.capital,args.run_id,json.loads(args.profile) if args.profile else None,json.loads(args.protocol) if args.protocol else None,json.loads(args.config) if args.config else None)
-        if args.batch:
-            from quantlens.spark_ads import export
-            export(spark,context,args.batch)
+        if args.windows:
+            import re
+            from paths import workspace
+            windows = json.loads(args.windows)
+            if not windows or len(windows) > 40:
+                raise ValueError('Invalid research windows')
+            if args.research_id and not re.fullmatch(r'EVO-[A-Za-z0-9-]+', args.research_id):
+                raise ValueError('Invalid research ID')
+            control = workspace().runs / 'factor_evolution' / args.research_id / 'status.json' if args.research_id else None
+            outcomes = run_windows(spark, context, windows, json.loads(args.profile), json.loads(args.protocol),
+                                   deadline=args.deadline, control_path=control)
+            export_end = max(item['config']['end'] for item in windows)
+        else:
+            if not all((args.strategy, args.start, args.end)):
+                parser.error('--strategy, --start and --end are required for a single window')
+            outcomes = [run(spark,context,args.strategy,args.start,args.end,args.capital,args.run_id,json.loads(args.profile) if args.profile else None,json.loads(args.protocol) if args.protocol else None,json.loads(args.config) if args.config else None)]
+            export_end = args.end
+        if args.batch and outcomes:
+            from quantlens.spark_ads import export_backtests
+            print('QUANTLENS_BACKTEST=导出回测结果', flush=True)
+            export_backtests(spark,context,args.batch,export_end)

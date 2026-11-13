@@ -1,12 +1,9 @@
 import {mountTabs} from '../../core/tabs.js';
 import { renderState } from "../state-card/state-card.js";
 import { runWithConfirm } from "../confirm-dialog/confirm-dialog.js";
-import { createChat } from "../chat-stream/chat-stream.js";
-import { createChatDialog } from "../chat-stream/chat-dialog.js";
 import { hydrateIcons } from "../../core/icons.js";
 import { createSelect } from "../../core/select.js";
 import { toastError } from "../../core/toast.js";
-import { captureLogScroll, updateTaskLog } from "../../core/task-log.js";
 import { badge, fmtNum, fmtPct, fmtTime } from "../../core/fmt.js";
 import { el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
 
@@ -26,12 +23,6 @@ const TIMESCALE_LABEL = {
   quarterly: "中期（季频）",
   event_driven: "事件驱动",
 };
-const TASK_STATUS_LABEL = {
-  running: "进行中",
-  completed: "已完成",
-  failed: "失败",
-  interrupted: "已中断",
-};
 const EVAL_STATE_LABEL = { running: "评价中", completed: "已完成", failed: "失败" };
 const EVAL_STATE_TONE = { running: "accent", completed: "safe", failed: "danger", interrupted: "warn", queued: "warn" };
 
@@ -44,14 +35,12 @@ async function mountContent(root, ctx) {
   await hydrateIcons(root);
 
   const statusSelect = createSelect(statusRoot, { onChange: () => load() });
-  const candidateTaskHost = root.querySelector("[data-candidate-task]");
-  const aiResearchBtn = root.querySelector("[data-ai-research]");
-  aiResearchBtn.addEventListener("click", () => openAIResearchDialog());
+  const researchOpenBtn = root.querySelector("[data-research-open]");
+  researchOpenBtn.addEventListener("click", () => ctx.bus.emit("route", "factors/research"));
 
   let optionsReady = false;
   let currentName = "";
   let statuses = [];
-  let pollTimer = null;
   let evalRefreshTimer = null;
 
   ctx.bus.on("route", (id) => {
@@ -243,132 +232,6 @@ async function mountContent(root, ctx) {
   }
 
   
-  async function openAIResearchDialog() {
-    let recommendationData;
-    try {
-      aiResearchBtn.disabled = true;
-      recommendationData = await ctx.api.factorEvolutionModelRecommendations();
-    } catch (err) {
-      toastError(ctx.bus, err, "模型匹配加载失败");
-      return;
-    } finally {
-      aiResearchBtn.disabled = false;
-    }
-    const modelItems = (recommendationData.items || []).filter((item) => item.selectable);
-    if (!modelItems.length) {
-      ctx.bus.emit("toast", {
-        kind: "error",
-        title: "没有可执行因子研究的模型",
-        detail: "请在“模型连接”配置密钥和模型能力。",
-      });
-      return;
-    }
-    let chat, modelSelect;
-    const { toolbar, chatHost, historyHost, actions, close } = createChatDialog({
-      title: "研究新因子",
-      history: true,
-      onClose: () => { chat?.destroy(); modelSelect?.destroy(); },
-    });
-    const modelField = el("div", "chat-dialog__model");
-    const modelLabel = el("span", "", "研究模型");
-    modelLabel.id = "factor-research-model-label";
-    const modelSelectRoot = el("div", "select");
-    modelSelectRoot.innerHTML = selectMarkup("研究模型");
-    modelSelectRoot
-      .querySelector("[data-select-trigger]")
-      ?.setAttribute("aria-labelledby", modelLabel.id);
-    const modelTrigger = modelSelectRoot.querySelector("[data-select-trigger]");
-    modelSelect = createSelect(modelSelectRoot, {});
-    const modelOptions = modelItems.map(item => ({
-      value: item.name,
-      label: `${item.name}${item.recommended ? "（自动匹配）" : ""}`,
-    }));
-    modelSelect.setOptions(
-      modelOptions,
-      recommendationData.recommended,
-      "研究模型",
-    );
-    modelField.append(modelLabel, modelSelectRoot);
-    toolbar.append(modelField);
-    const start = el("button", "btn btn--primary", "开始自动研究");
-    start.type = "button";
-    actions.append(start);
-    start.disabled = true;
-    chat = createChat(chatHost, {
-      historyHost,
-      historyKey: "factor-research",
-      getMetadata: () => ({ model: modelSelect.value }),
-      onRestore: metadata => modelSelect.setOptions(modelOptions, metadata.model || recommendationData.recommended),
-      title: "研究假设",
-      onStateChange: (state) => {
-        start.disabled = state.busy || state.disabled || state.loading || !state.hasUserMessages;
-        modelTrigger.disabled = state.busy || state.disabled || state.loading;
-      },
-      greeting:
-        "填写研究假设、作用周期和失效条件。",
-      placeholder: "输入研究假设…",
-      send: async (history) => {
-        const res = await ctx.api.factorResearchChat({
-          model: modelSelect.value,
-          messages: history,
-        }, options);
-        return { text: res.reply, reasoning: res.reasoning || "", model: res.model || modelSelect.value };
-      },
-    });
-
-    start.addEventListener("click", async () => {
-      if (chat.busy) return;
-      if (!chat.history.some((item) => item.role === "user")) {
-        ctx.bus.emit("toast", { kind: "info", title: "请先填写研究想法" });
-        return;
-      }
-      start.disabled = true;
-      start.textContent = "正在启动…";
-      chat.setDisabled(true);
-      modelTrigger.disabled = true;
-      try {
-        const result = await ctx.api.factorResearchStart({
-          model: modelSelect.value,
-          messages: chat.context,
-        });
-        close();
-        ctx.bus.emit("toast", { kind: "info", title: "自动研究已启动" });
-        pollTask(result.task_id, {
-          host: candidateTaskHost,
-          buttons: [aiResearchBtn],
-          onResult: renderAIResearchResult,
-          onComplete: load,
-        });
-      } catch (err) {
-        start.textContent = "开始自动研究";
-        chat.setDisabled(false);
-        modelTrigger.disabled = false;
-        toastError(ctx.bus, err, "自动研究启动失败");
-      }
-    });
-  }
-
-  function renderAIResearchResult(result) {
-    const target = candidateTaskHost.querySelector(".card") || candidateTaskHost;
-    const summary = el("section", "factors__research-result");
-    const head = el("div", "detail-card__head");
-    head.append(el("h4", "", result.display_name || "新因子"), badge("已进入自动迭代", "safe"));
-    summary.append(head);
-    summary.append(el("p", "", result.assumption || "金融假设已登记。"));
-    summary.append(
-      el(
-        "p",
-        "item-row__meta",
-        "语法检查和数据试运行已通过，正在评价并比较研究结果。正式使用仍需人工批准。",
-      ),
-    );
-    const open = el("button", "btn btn--ghost", "查看自动研究进展");
-    open.type = "button";
-    open.addEventListener("click", () => ctx.bus.emit("route", "factors/experiments"));
-    summary.append(open);
-    target.append(summary);
-  }
-
   async function loadEvalRuns(name, host) {
     try {
       const data = await ctx.api.factorEvalRuns(name);
@@ -466,67 +329,14 @@ async function mountContent(root, ctx) {
   }
 
   
-  function pollTask(taskId, { host, buttons = [], onComplete, onResult }) {
-    if (pollTimer) clearTimeout(pollTimer);
-    for (const b of buttons) b.disabled = true;
 
-    async function tick() {
-      try {
-        const task = await ctx.api.task(taskId);
-        renderTaskCard(host, task);
-        if (task.status === "running") {
-          pollTimer = setTimeout(tick, 2000);
-          return;
-        }
-        for (const b of buttons) b.disabled = false;
-        if (task.status === "completed") {
-          ctx.bus.emit("toast", { kind: "success", title: `${task.name} 完成` });
-          if (onResult) onResult(task.result || {});
-          if (onComplete) await onComplete();
-        } else {
-          ctx.bus.emit("toast", { kind: "error", title: `${task.name} 失败`, detail: task.error });
-        }
-      } catch (err) {
-        for (const b of buttons) b.disabled = false;
-        toastError(ctx.bus, err, "任务状态查询失败");
-      }
-    }
-    tick();
-  }
-
-  function renderTaskCard(host, task) {
-    const previousLog = host.querySelector("[data-task-log]");
-    const restoreScroll = captureLogScroll(previousLog);
-    const card = el("article", "card detail-card");
-    const head = el("div", "detail-card__head");
-    head.append(el("h4", "", task.name));
-    head.append(
-      badge(
-        TASK_STATUS_LABEL[task.status] || task.status,
-        task.status === "completed" ? "safe" : task.status === "failed" ? "danger" : "accent",
-      ),
-    );
-    card.append(head);
-    const progress = task.progress || {};
-    if (progress.step) {
-      const pct = Number(progress.percent);
-      card.append(
-        el(
-          "p",
-          "factors__task-step",
-          `${progress.step}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ""}`,
-        ),
-      );
-    }
-    if (task.error) card.append(el("p", "factors__task-error", task.error));
-    const taskLog = updateTaskLog(previousLog, task.log, {
-      limit: 8,
-      subject: task.task_id || task.name,
-    });
-    if (taskLog) card.append(taskLog);
-    host.replaceChildren(card);
-    restoreScroll();
-  }
 }
 
-export async function mount(root,ctx) { const html=root.innerHTML; await mountTabs(root,ctx,'factors',[{id:'list',label:'因子列表',html,mount:mountContent},{id:'experiments',label:'迭代实验',component:'experiments'}]); }
+export async function mount(root, ctx) {
+  const html = root.innerHTML;
+  await mountTabs(root, ctx, 'factors', [
+    {id: 'list', label: '因子列表', html, mount: mountContent},
+    {id: 'research', label: '新因子研究', component: 'factor-research'},
+    {id: 'experiments', label: '迭代实验', component: 'experiments'},
+  ]);
+}
