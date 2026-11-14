@@ -222,6 +222,37 @@ class ManualPortfolio(unittest.TestCase):
         self.assertEqual(self.positions(), [])
         self.assertEqual(self.history()['total_rows'], 2)
 
+    def test_board_buy_lots_match_the_rules_used_by_the_form(self):
+        from portfolio import AccountRegistry
+        registry = AccountRegistry()
+        account = registry.get('manual')
+        registry.update(account.model_copy(update={'star_market_enabled': True}))
+        cases = [
+            ('000001', '99', False), ('000001', '150', False), ('000001', '200', True),
+            ('300001', '101', False), ('300001', '200', True),
+            ('688001', '199', False), ('688001', '200', True), ('688001', '201', True),
+            ('920001', '99', False), ('920001', '100', True), ('920001', '101', True),
+        ]
+        for code, qty, valid in cases:
+            with self.subTest(code=code, qty=qty):
+                result = self.trade(instrument_id=code, qty=qty, confirm=False)
+                self.assertEqual(result.status_code, 200 if valid else 400, result.text)
+                if not valid:
+                    self.assertEqual(result.json()['detail']['code'], 'portfolio.trade_lot_invalid')
+        self.assertEqual(self.balance(), Decimal('100000'))
+        self.assertEqual(self.positions(), [])
+        self.assertEqual(self.history()['total_rows'], 0)
+
+    def test_existing_holding_allows_odd_lots_but_not_fractional_or_negative_shares(self):
+        for qty in ['-1', '0.5', '100.5']:
+            with self.subTest(qty=qty):
+                self.assertEqual(self.holding(qty=qty).status_code, 422)
+        self.assertEqual(self.holding(qty='105').status_code, 200)
+        self.assertEqual(self.positions()[0]['qty'], '105')
+        self.assertEqual(self.balance(), Decimal('100000'))
+        self.assertEqual(self.holding(qty='0').status_code, 200)
+        self.assertEqual(self.positions(), [])
+
     def test_fees_and_stamp_duty_are_computed_by_trade_rules(self):
         from market_rules import MarketRuleRegistry, RuleEngine
         engine = RuleEngine(MarketRuleRegistry().get('CN-A-stock'))
@@ -276,6 +307,22 @@ class ManualPortfolio(unittest.TestCase):
         self.assertEqual(response.json()['items'], [])
         self.assertEqual(self.client.get('/api/stocks/suggestions', params={'q': 'x' * 33}).status_code, 422)
         self.assertEqual(self.client.get('/api/stocks/suggestions', params={'limit': 0}).status_code, 422)
+
+    def test_stock_names_are_available_when_price_data_has_no_name_column(self):
+        import json
+        import pandas as pd
+        directory = self.root / 'data/ads'
+        directory.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({'code': ['000001', '600000']}).to_parquet(directory / 'stocks.parquet', index=False)
+        (self.root / 'data/ads_manifest.json').write_text(json.dumps({
+            'tables': {'stock_prices': {'files': [{'path': 'stocks.parquet'}]}}}))
+        self.assertEqual(self.client.get('/api/stocks/suggestions', params={'q': '000001'}).json()['items'],
+                         [{'code': '000001', 'name': '平安银行'}])
+        self.assertEqual(self.client.get('/api/stocks/suggestions', params={'q': '浦发'}).json()['items'],
+                         [{'code': '600000', 'name': '浦发银行'}])
+        # Updating the directory must invalidate the cached candidate index too.
+        (self.root / 'config/stock_names.json').write_text(json.dumps({'names': {'000001': '名称更新', '600000': '浦发银行'}}))
+        self.assertEqual(self.client.get('/api/stocks/suggestions', params={'q': '000001'}).json()['items'][0]['name'], '名称更新')
 
 
 if __name__ == '__main__':

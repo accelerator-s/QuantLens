@@ -4,6 +4,8 @@
    ========================================================================== */
 
 :root {
+  --viewport-width: 100vw;
+  --viewport-height: 100dvh;
   /* ------------------------------------------------------------------------
      第一层：基础原子令牌 (Primitive Tokens)
      ------------------------------------------------------------------------ */
@@ -54,14 +56,14 @@
   --font-mono: var(--font-sans);
   --font-code: "Cascadia Mono", "Consolas", "Liberation Mono", monospace;
 
-  /* 字号随浏览器设置缩放，辅助文字不低于 14px。 */
-  --fs-xs: .875rem;
-  --fs-sm: .9375rem;
-  --fs-base: 1rem;
-  --fs-md: 1.125rem;
-  --fs-lg: 1.25rem;
-  --fs-xl: 1.5rem;
-  --fs-2xl: 1.875rem;
+  /* 直接控制紧凑排版，rem 保留浏览器字体偏好，不缩放整个页面。 */
+  --fs-xs: .75rem;
+  --fs-sm: .8125rem;
+  --fs-base: .875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.25rem;
+  --fs-2xl: 1.5rem;
 
   --text-page: var(--fs-lg);
   --text-section: var(--fs-md);
@@ -69,9 +71,12 @@
   --text-metric: var(--fs-xl);
   --text-body: var(--fs-sm);
   --text-caption: var(--fs-xs);
+  --caption-line-height: 1.5;
+  --text-table: .8125rem;
   --weight-body: 400;
   --weight-label: 500;
   --weight-heading: 600;
+  --weight-button: 700;
 
   /* 间距尺度 (4px 基准网格) */
   --space-1: 4px;
@@ -80,9 +85,9 @@
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
-  --page-pad: clamp(12px, 1.35vw, 20px);
-  --layout-gap: clamp(10px, 1vw, 16px);
-  --panel-gap: 12px;
+  --page-pad: clamp(12px, 1vw, 16px);
+  --layout-gap: 12px;
+  --panel-gap: 10px;
 
   /* 圆角尺度 (克制、利落的金融终端圆角) */
   --radius-xs: 4px;
@@ -90,10 +95,10 @@
   --radius-md: 8px;
   --radius-lg: 10px;
   --radius: var(--radius-md);
-  --border-width: 1.5px;
-  --icon-sm: 18px;
-  --icon-md: 22px;
-  --icon-lg: 28px;
+  --border-width: 1px;
+  --icon-sm: 16px;
+  --icon-md: 18px;
+  --icon-lg: 24px;
   --icon-stroke: 1.8;
 
   /* 动效节奏 */
@@ -124,7 +129,7 @@
   --module-amber: #8c5b20;
 
   --line-0: var(--p-slate-200);
-  --line-1: #7c8da5;
+  --line-1: #d1d5db;
 
   --accent: #4c7dc2;
   --accent-hover: #3f6cae;
@@ -169,12 +174,12 @@
   /* ------------------------------------------------------------------------
      第三层：组件令牌 (Component Tokens)
      ------------------------------------------------------------------------ */
-  --rail-w: clamp(208px, 15vw, 232px);
-  --topbar-h: 60px;
-  --control-h: 40px;
-  --control-sm-h: 36px;
-  --card-pad: clamp(12px, .95vw, 16px) clamp(14px, 1.15vw, 18px);
-  --table-cell-pad: 9px 12px;
+  --rail-w: 192px;
+  --topbar-h: 48px;
+  --control-h: 32px;
+  --control-sm-h: 28px;
+  --card-pad: 12px 14px;
+  --table-cell-pad: 6px 10px;
 
   /* 滚动条：淡色中性滑块，避免使用强调色造成视觉抢眼 */
   --scroll-thumb: var(--p-slate-300);
@@ -200,7 +205,7 @@
   --module-amber: #e6c38d;
 
   --line-0: var(--p-slate-800);
-  --line-1: var(--p-slate-500);
+  --line-1: var(--p-slate-600);
 
   --accent: #93c5fd;
   --accent-hover: #bfdbfe;

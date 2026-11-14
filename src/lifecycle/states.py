@@ -16,7 +16,7 @@ class ActorType(StrEnum):
 INITIAL_STATES: dict[ObjectType, str] = {
     ObjectType.DATA_SNAPSHOT: "ready",
     ObjectType.RESEARCH_PROGRAM: "draft",
-    ObjectType.FACTOR_VERSION: "proposed",
+    ObjectType.FACTOR_VERSION: "draft",
     ObjectType.FACTOR_EVALUATION: "recorded",
     ObjectType.STRATEGY_VERSION: "proposed",
     ObjectType.EVALUATION_RUN: "planned",
@@ -40,16 +40,6 @@ TRANSITIONS: dict[ObjectType, dict[str, set[str]]] = {
         "running": {"paused", "frozen", "completed", "failed", "cancelled"},
         "paused": {"queued", "cancelled"},
         "frozen": {"completed", "failed"},
-    },
-    ObjectType.FACTOR_VERSION: {
-        "proposed": {"validating", "invalid", "eliminated"},
-        "validating": {"evaluated", "invalid"},
-        "evaluated": {"frozen", "eliminated"},
-        "frozen": {"shadow", "eliminated"},
-        "shadow": {"production", "watching", "eliminated"},
-        "production": {"watching", "disabled"},
-        "watching": {"shadow", "production", "disabled", "eliminated"},
-        "disabled": {"watching", "eliminated"},
     },
     ObjectType.FACTOR_EVALUATION: {
         "recorded": {"reviewed", "invalidated"},
@@ -102,7 +92,6 @@ TRANSITIONS: dict[ObjectType, dict[str, set[str]]] = {
 }
 
 HUMAN_GATED_TARGETS: set[tuple[ObjectType, str]] = {
-    (ObjectType.FACTOR_VERSION, "production"),
     (ObjectType.STRATEGY_VERSION, "champion"),
     (ObjectType.CHAMPION_DECISION, "approved"),
     (ObjectType.PORTFOLIO_PLAN, "confirmed"),

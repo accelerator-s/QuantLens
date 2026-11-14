@@ -18,6 +18,15 @@ export function fmtTime(iso) {
   );
 }
 
+export function fmtLogTime(iso) {
+  const date = iso ? new Date(iso) : null;
+  if (!date || Number.isNaN(date.getTime())) return '时间未记录';
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(date) + '+08:00';
+}
+
 export function fmtDate(iso) {
   if (!iso) return "—";
   const s = String(iso);

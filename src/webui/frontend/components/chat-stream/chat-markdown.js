@@ -89,10 +89,10 @@ function strongToken(source) {
   }
 }
 
-export function renderMarkdown(host, source) {
+export function renderMarkdown(host, source, { breaks = true } = {}) {
   const formulas = [];
   const markdown = new Marked({
-    gfm: true, breaks: true,
+    gfm: true, breaks,
     renderer: { html: ({ text }) => escapeHtml(text) },
     extensions: [{
       name: "chatStrong", level: "inline",

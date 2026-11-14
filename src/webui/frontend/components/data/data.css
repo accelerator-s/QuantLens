@@ -44,7 +44,7 @@
 .data [data-tables] :is(th, td):nth-child(3) { white-space: nowrap; overflow-wrap: normal; }
 .data [data-tables] :is(th, td):nth-child(5) { text-align: right; font-variant-numeric: tabular-nums; }
 .data [data-tables] :is(th, td):last-child { text-align: center; white-space: nowrap; }
-.data [data-tables] .table-wrap { max-height: min(64vh, 680px); scrollbar-gutter: stable; }
+.data [data-tables] .table-wrap { max-height: min(calc(var(--viewport-height) * .64), 680px); scrollbar-gutter: stable; }
 
 .sync-progress {
   margin-top: 4px;
@@ -118,15 +118,4 @@
 
 .sync-progress__log {
   margin-top: 10px;
-}
-
-.sync-progress__log summary {
-  cursor: pointer;
-  color: var(--ink-2);
-  font-size: var(--fs-xs);
-}
-
-.sync-progress__log .codeblock {
-  max-height: 260px;
-  overflow: auto;
 }

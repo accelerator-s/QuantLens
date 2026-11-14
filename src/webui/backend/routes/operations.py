@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from exceptions import LifecycleError, QuantTrainingError
 from automation import AutomationConfig, AutomationStore
-from lifecycle.champion import ChampionService
 from lifecycle.attribution import AttributionService
 from lifecycle.daily import DailyOperationsService
 from lifecycle.decay import DecayMonitor
@@ -204,18 +203,13 @@ def decay_scan() -> dict:
             ObjectType.STRATEGY_VERSION, attribution.strategy_version_id
         )
         try:
-            from .strategy_evolution import StartPayload, start_strategy_evolution
+            from strategy.research import start_research
 
-            started = start_strategy_evolution(
-                StartPayload(
-                    profile_name=strategy.strategy_name,
-                    trigger_learning_event_id=event.learning_event_id,
-                )
-            )
+            started = start_research(strategy.strategy_name)
             triggered.append(
                 {
                     "learning_event_id": event.learning_event_id,
-                    "program_id": started["program_id"],
+                    "profile_name": started["profile_name"],
                     "task_id": started["task_id"],
                 }
             )
@@ -409,68 +403,3 @@ def reject_plan(plan_id: str, payload: ConfirmPayload) -> dict:
         reason=payload.reason.strip() or "用户拒绝本次调仓建议",
     )
     return {"plan_id": plan_id, "state": "rejected"}
-
-@router.get("/operations/champion-slots")
-def champion_slots() -> dict:
-    from lifecycle.governance import load_champion_policy
-
-    return json_safe(
-        {
-            "items": ChampionService().slots(),
-            "policy": load_champion_policy(),
-        }
-    )
-
-@router.post("/operations/strategies/{strategy_id}/bootstrap-champion")
-def bootstrap_champion(strategy_id: str, payload: ConfirmPayload) -> dict:
-    if not payload.confirm:
-        from lifecycle.governance import load_champion_policy
-
-        required = load_champion_policy().min_shadow_observations
-        return confirm_preview(
-            {
-                "操作": "建立首个 champion",
-                "策略版本": strategy_id,
-                "说明": f"必须已完成唯一锁定测试和至少 {required} 个到期影子观察。",
-            }
-        )
-    actor = _confirmed_actor(payload)
-    ChampionService().bootstrap(
-        strategy_id,
-        reason=payload.reason.strip() or "用户核验锁定测试与影子证据后建立首个 champion",
-        decided_by=actor,
-    )
-    return {"strategy_version_id": strategy_id, "state": "champion"}
-
-@router.post("/operations/strategies/{strategy_id}/propose-promotion")
-def propose_promotion(strategy_id: str) -> dict:
-    return json_safe({"decision": ChampionService().propose(strategy_id)})
-
-@router.post("/operations/strategies/{strategy_id}/propose-rollback")
-def propose_rollback(strategy_id: str, payload: RollbackPayload) -> dict:
-    decision = ChampionService().propose_rollback(
-        strategy_id,
-        payload.rollback_strategy_version_id,
-        rationale=payload.rationale.strip() or "实盘归因或风险证据触发人工回滚审阅",
-    )
-    return json_safe({"decision": decision})
-
-@router.post("/operations/champion-decisions/{decision_id}/approve")
-def approve_promotion(decision_id: str, payload: ConfirmPayload) -> dict:
-    if not payload.confirm:
-        return confirm_preview(
-            {
-                "操作": "批准 champion/challenger 切换",
-                "决策": decision_id,
-                "说明": "批准后新版本成为 champion，旧版本保留为 watching 回滚目标。",
-            }
-        )
-    actor = _confirmed_actor(payload)
-    ChampionService().approve(
-        decision_id,
-        reason=payload.reason.strip() or "用户核验同口径影子证据后批准晋升",
-        decided_by=actor,
-    )
-    return {"decision_id": decision_id, "state": "applied"}
-
-__all__ = ["router"]

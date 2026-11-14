@@ -63,14 +63,19 @@ def use_gpu():
         raise ValueError('QUANTLENS_TRAIN_DEVICE must be auto, cuda or cpu')
     available = bool(worker_status().get('cuda'))
     if os.environ.get('QUANTLENS_COMPUTE_LOCAL') == '1' and preference != 'cpu':
-        try:
-            import torch
-            available = torch.cuda.is_available()
-        except ImportError:
-            available = False
-    if preference == 'cuda' and not available:
-        raise ContractViolation(code='CUDA_UNAVAILABLE', message='独立显卡不可用，已停止本次训练', suggested_action='检查训练进程与 CUDA 驱动')
+        from quantlens.device_runtime import gpu_inventory
+        available = bool(gpu_inventory())
     return preference != 'cpu' and available
+
+
+def release_local_inputs(directory):
+    """Release acknowledged temporary inputs; keep models and prediction outputs."""
+    import shutil
+    for kind in ('train', 'predict'):
+        path = directory / kind
+        if path.exists():
+            shutil.rmtree(path)
+        (directory / f'{kind}.ready').unlink(missing_ok=True)
 
 
 def request(operation, *, train=None, features=(), label=None, predict=None, **parameters):
@@ -86,6 +91,7 @@ def request(operation, *, train=None, features=(), label=None, predict=None, **p
         os.chown(directory, owner.st_uid, owner.st_gid)
     uri = f'hdfs://nn-rm:9000/quantlens/_tmp/training/{ident}'
     payload = {'id': ident, 'operation': operation, 'features': list(features), 'label': label, 'device': 'cuda' if use_gpu() else 'cpu', 'parameters': parameters}
+    payload['device_policy'] = os.environ.get('QUANTLENS_TRAIN_DEVICE', 'auto')
     if train is not None:
         columns = list(features) + ([label] if label else [])
         if local:
@@ -103,12 +109,13 @@ def request(operation, *, train=None, features=(), label=None, predict=None, **p
         payload['predict'] = uri + '/predict'
     payload['output'] = uri + '/output'
     if local:
-        from quantlens.gpu_worker import execute
+        from quantlens.device_runtime import execute_resilient
         payload['local'] = True
-        started = time.monotonic()
-        result = execute(payload, directory)
-        result.update(device=payload['device'], seconds=round(time.monotonic()-started,3))
+        result = execute_resilient(payload, directory)
         atomic_json(directory / 'response.json', result)
+        if result.get('error'):
+            raise ContractViolation(code='TRAINING_FAILED', message=result['error'])
+        release_local_inputs(directory)
         return result
     atomic_json(directory / 'request.json', payload)
     print(f'QUANTLENS_TRAINING={operation} device={payload["device"]} request={ident}', flush=True)
@@ -125,13 +132,12 @@ def request(operation, *, train=None, features=(), label=None, predict=None, **p
         raise ContractViolation(code='TRAINING_FAILED', message=response['error'], suggested_action='检查训练进程日志；不会静默改用其他算法')
     print(f'QUANTLENS_TRAINED={operation} device={response["device"]} seconds={response["seconds"]}', flush=True)
     # Training exports are temporary inputs, not the immutable warehouse evidence.
-    import shutil
     spark = (train if train is not None else predict).sparkSession
     for kind in ('train', 'predict'):
         if kind in payload:
             path = spark._jvm.org.apache.hadoop.fs.Path(payload[kind])
             path.getFileSystem(spark._jsc.hadoopConfiguration()).delete(path, True)
-            shutil.rmtree(directory / kind)
+    release_local_inputs(directory)
     (directory / 'predictions.parquet').unlink(missing_ok=True)
     return response
 
@@ -185,3 +191,24 @@ class PCAModel:
         coefficients = self.pc.toArray()
         columns = [sum(F.col(name) * float(coefficients[i, j]) for i, name in enumerate(self.names)) for j in range(coefficients.shape[1])]
         return frame.withColumn('pca', array_to_vector(F.array(*columns)))
+
+
+def standardize_panel(frame, *, device_policy=None):
+    """Trusted numeric stage; generated factor code stays in the CPU sandbox."""
+    import tempfile
+    import pandas as pd
+    from quantlens.device_runtime import execute_resilient
+    ident = uuid.uuid4().hex
+    with tempfile.TemporaryDirectory(prefix='quantlens-standardize-') as temporary:
+        directory = Path(temporary)
+        (directory / 'train').mkdir()
+        frame.to_parquet(directory / 'train/part.parquet')
+        payload = {'id': ident, 'operation': 'standardize', 'local': True,
+                   'features': list(frame.columns), 'parameters': {},
+                   'train': f'hdfs://nn-rm:9000/quantlens/_tmp/training/{ident}/train',
+                   'device_policy': device_policy or os.environ.get('QUANTLENS_TRAIN_DEVICE', 'auto')}
+        result = execute_resilient(payload, directory)
+        if result.get('error'):
+            raise ContractViolation(code='TRAINING_FAILED', message=result['error'])
+        output = pd.read_parquet(result.pop('output'))
+        return output, result

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from exceptions import QuantTrainingError
 from paths import Workspace, workspace
+from security import confined_path
 
 @dataclass
 class FactorPlugin:
@@ -20,7 +21,7 @@ class FactorPlugin:
         return self.ws.root / "factors"
 
     def path_for(self, name: str) -> Path:
-        return self.root / f"{name}.py"
+        return confined_path(self.root, name, ".py")
 
     def write(self, name: str, source: str, *, override: bool = False) -> Path:
         path = self.path_for(name)

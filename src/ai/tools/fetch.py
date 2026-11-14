@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import ipaddress
+import http.client
 from typing import Any
-from urllib.parse import urlparse
 
 from exceptions import ModelRouteError
 
 from ..deps import ensure_module
+from .public_http import fetch_public, is_public_url
 
 SPEC: dict[str, Any] = {
     "name": "web_fetch",
@@ -41,20 +41,7 @@ _UA = (
 )
 
 def _is_public_http_url(url: str) -> bool:
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    if parsed.scheme not in {"http", "https"}:
-        return False
-    host = parsed.hostname or ""
-    if not host or host == "localhost" or host.endswith(".local"):
-        return False
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return True
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved)
+    return is_public_url(url)
 
 def _truncate(text: str, max_chars: int) -> tuple[str, bool]:
     if len(text) <= max_chars:
@@ -80,43 +67,29 @@ def run(arguments: dict[str, Any]) -> dict[str, Any]:
     max_chars = int(arguments.get("max_chars") or 6000)
     max_chars = max(200, min(max_chars, 20000))
 
-    try:
-        import httpx
-    except ImportError as exc:
-        raise ModelRouteError(
-            code="AI_TOOL_DEPENDENCY_MISSING",
-            message="未安装 httpx，无法 fetch URL。",
-            blocking=True,
-            suggested_action="pip install httpx",
-        ) from exc
-
     trafilatura = ensure_module("trafilatura")
-
-    from net import create_http_client
 
     headers = {
         "User-Agent": _UA,
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
     try:
-        with create_http_client(timeout=_DEFAULT_TIMEOUT, follow_redirects=True) as client:
-            resp = client.get(url, headers=headers)
-    except httpx.HTTPError as exc:
+        status, html_text, url = fetch_public(url, headers=headers, timeout=_DEFAULT_TIMEOUT)
+    except (OSError, http.client.HTTPException) as exc:
         raise ModelRouteError(
             code="AI_TOOL_FETCH_TRANSPORT",
             message=f"web_fetch 传输失败：{exc}",
             context={"url": url},
             blocking=True,
         ) from exc
-    if resp.status_code >= 400:
+    if status >= 400:
         raise ModelRouteError(
             code="AI_TOOL_FETCH_STATUS",
-            message=f"web_fetch HTTP {resp.status_code}",
-            context={"url": url, "status": resp.status_code},
+            message=f"web_fetch HTTP {status}",
+            context={"url": url, "status": status},
             blocking=True,
         )
 
-    html_text = resp.text
     extracted = trafilatura.extract(
         html_text,
         url=url,
@@ -129,7 +102,7 @@ def run(arguments: dict[str, Any]) -> dict[str, Any]:
         raise ModelRouteError(
             code="AI_TOOL_FETCH_EMPTY",
             message=f"trafilatura 未能从 {url} 提取出可读正文。",
-            context={"url": url, "status": resp.status_code, "bytes": len(html_text)},
+            context={"url": url, "status": status, "bytes": len(html_text)},
             blocking=True,
             suggested_action="换一个链接重试；不允许靠记忆推断页面内容。",
         )
@@ -149,7 +122,7 @@ def run(arguments: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "content_markdown": truncated_text,
         "truncated": truncated,
-        "backend": "httpx+trafilatura",
+        "backend": "http.client+trafilatura",
     }
 
 __all__ = ["SPEC", "run"]

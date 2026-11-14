@@ -44,10 +44,10 @@ def run(spark,context,profile_name,start,end,capital=1000000,run_id=None,profile
     factor_returns={};weights={}
     fitted=[]
     strategy_id=profile.extra.get('weight_strategy_id',profile.profile_name)
-    if profile.factors.weighting.value!='equal':
+    if profile.factors.weighting.value!='equal' and any(ref.weight_override is None for ref in profile.factors.items):
         fitted=spark.table('dws.factor_weights').where((F.col('strategy_id')==strategy_id)&(F.col('method')==profile.factors.weighting.value)&(F.col('train_end')<F.col('as_of'))).orderBy('as_of').collect()
     from factors.registry import FactorRegistry
-    versions={ref.name:FactorRegistry().get(ref.name).version for ref in profile.factors.items}
+    versions={ref.name:profile.extra.get('factor_versions',{}).get(ref.name,FactorRegistry().get(ref.name).version) for ref in profile.factors.items}
     trading_dates=payload['market']['ret_wd'].index.sort_values()
     signal_dates=pd.Series(trading_dates,index=trading_dates).shift(2)
     for date in pd.to_datetime(nav.date):
@@ -62,7 +62,7 @@ def run(spark,context,profile_name,start,end,capital=1000000,run_id=None,profile
     from factors.registry import FactorRegistry
     for ref in profile.factors.items:
         meta=FactorRegistry().get(ref.name)
-        values=spark.table('dws.factor_values').where((F.col('factor')==ref.name)&(F.col('version')==meta.version)&(F.col('date')>=str(trading_dates.min())[:10])&(F.col('date')<=end)).select('code','date','std_value').toPandas()
+        values=spark.table('dws.factor_values').where((F.col('factor')==ref.name)&(F.col('version')==versions[ref.name])&(F.col('date')>=str(trading_dates.min())[:10])&(F.col('date')<=end)).select('code','date','std_value').toPandas()
         values.date=pd.to_datetime(values.date)
         from backtest.signal import _resolve_direction
         score=values.pivot(index='date',columns='code',values='std_value').sort_index()*_resolve_direction(ref.name,ref.direction_override,meta.direction)
@@ -91,14 +91,14 @@ def run(spark,context,profile_name,start,end,capital=1000000,run_id=None,profile
     save('backtest_summary',summary)
     return outcome
 
-def run_windows(spark, context, windows, profile_payload, protocol_payload, *, deadline=None, control_path=None):
+def run_windows(spark, context, windows, profile_payload, protocol_payload, *, deadline=None, control_path=None, batch_id=None):
     """Share one Spark session while keeping each window's portfolio independent."""
     import json
     import time
     from pathlib import Path
 
     outcomes = []
-    for item in windows:
+    for index, item in enumerate(windows):
         if deadline is not None and time.time() >= deadline:
             print('QUANTLENS_WINDOWS_STOPPED=timeout', flush=True)
             break
@@ -110,7 +110,15 @@ def run_windows(spark, context, windows, profile_payload, protocol_payload, *, d
         outcome = run(spark, context, config['profile_name'], config['start'], config['end'],
                       config['initial_capital'], item['run_id'], profile_payload, protocol_payload, config)
         outcomes.append(outcome)
-        print('QUANTLENS_WINDOW_COMPLETED=' + json.dumps({'window': item['window'], 'run_id': outcome.run_id}), flush=True)
+        completed = {'window': item['window'], 'run_id': outcome.run_id}
+        if batch_id:
+            from quantlens.spark_ads import export_backtests
+            completed['batch'] = f'{batch_id}-{index:02d}'
+            export_backtests(spark, context, completed['batch'], config['end'])
+        print('QUANTLENS_WINDOW_COMPLETED=' + json.dumps(completed), flush=True)
+        if not outcome.metrics.get('input_quality', {}).get('passed', False):
+            print('QUANTLENS_WINDOWS_STOPPED=input_quality', flush=True)
+            break
     return outcomes
 
 
@@ -127,18 +135,20 @@ if __name__=='__main__':
             windows = json.loads(args.windows)
             if not windows or len(windows) > 40:
                 raise ValueError('Invalid research windows')
+            if not args.batch:
+                parser.error('--batch is required for research windows')
             if args.research_id and not re.fullmatch(r'EVO-[A-Za-z0-9-]+', args.research_id):
                 raise ValueError('Invalid research ID')
             control = workspace().runs / 'factor_evolution' / args.research_id / 'status.json' if args.research_id else None
             outcomes = run_windows(spark, context, windows, json.loads(args.profile), json.loads(args.protocol),
-                                   deadline=args.deadline, control_path=control)
+                                   deadline=args.deadline, control_path=control, batch_id=args.batch)
             export_end = max(item['config']['end'] for item in windows)
         else:
             if not all((args.strategy, args.start, args.end)):
                 parser.error('--strategy, --start and --end are required for a single window')
             outcomes = [run(spark,context,args.strategy,args.start,args.end,args.capital,args.run_id,json.loads(args.profile) if args.profile else None,json.loads(args.protocol) if args.protocol else None,json.loads(args.config) if args.config else None)]
             export_end = args.end
-        if args.batch and outcomes:
+        if args.batch and outcomes and not args.windows:
             from quantlens.spark_ads import export_backtests
             print('QUANTLENS_BACKTEST=导出回测结果', flush=True)
             export_backtests(spark,context,args.batch,export_end)

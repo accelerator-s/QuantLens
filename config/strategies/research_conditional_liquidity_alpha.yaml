@@ -1,0 +1,11 @@
+profile_name: research_conditional_liquidity_alpha
+display_name: 条件流动性Alpha研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items:
+  - name: conditional_liquidity_alpha
+extra:
+  purpose: factor_research_only
+  internal_only: true

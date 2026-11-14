@@ -25,7 +25,6 @@ _FACTOR_NAMES = {
 
 _STRATEGY_NAMES = {
     "a_share_research_base": "A股研究基础规则",
-    "candidate_value_quality_defensive": "价值盈利防御候选策略",
     "research_analyst_fy1_revision": "分析师盈利预测研究",
     "research_earnings_announcement_drift": "业绩公告后延续研究",
     "research_external_lower_shadow_volskew_30d": "下影线量能交互因子复现（已淘汰）",

@@ -1,0 +1,16 @@
+<section class="trash">
+  <div class="toolbar">
+    <div class="trash__heading">
+      <h2>回收站</h2>
+      <p>删除后保留 30 天</p>
+    </div>
+    <span class="toolbar__spacer"></span>
+    <button type="button" class="btn btn--danger" data-trash-empty disabled>清空回收站</button>
+  </div>
+  <div class="trash__summary" aria-label="回收站统计">
+    <div class="trash__stat"><span>全部条目</span><strong data-trash-count="all">—</strong></div>
+    <div class="trash__stat"><span>因子</span><strong data-trash-count="factor">—</strong></div>
+    <div class="trash__stat"><span>策略</span><strong data-trash-count="strategy_profile">—</strong></div>
+  </div>
+  <div data-trash-list></div>
+</section>

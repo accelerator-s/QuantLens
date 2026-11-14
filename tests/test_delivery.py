@@ -82,10 +82,13 @@ class DeliveryChecks(unittest.TestCase):
         from exceptions import FactorExecutionError,ContractViolation
         target=self.root/'local-output'
         source=f"from pathlib import Path\ndef compute(panel):\n    Path({str(target)!r}).write_text('ok')\n    return panel['extra'] * 2"
-        result=run_factor(source=source,panel_payload={'extra':pd.DataFrame([[2,3]])})
-        self.assertEqual(result.iloc[0].tolist(),[4,6]);self.assertEqual(target.read_text(),'ok')
-        with self.assertRaises(FactorExecutionError):run_factor(source='def compute(p):\n raise ValueError("失败")',panel_payload={})
-        with self.assertRaises(ContractViolation):run_factor(source='def compute(p):\n return 1',panel_payload={})
+        panel={'extra':pd.DataFrame([[2,3]])}
+        with self.assertRaises(FactorExecutionError):run_factor(source=source,panel_payload=panel)
+        self.assertFalse(target.exists())
+        result=run_factor(source="def compute(panel): return panel['extra'] * 2",panel_payload=panel)
+        self.assertEqual(result.iloc[0].tolist(),[4,6])
+        with self.assertRaises(FactorExecutionError):run_factor(source='def compute(p):\n raise ValueError("失败")',panel_payload=panel)
+        with self.assertRaises(ContractViolation):run_factor(source='def compute(p):\n return 1',panel_payload=panel)
 
     def test_commission_rate_and_five_yuan_minimum(self):
         from decimal import Decimal
@@ -157,7 +160,7 @@ class DeliveryChecks(unittest.TestCase):
         self.assertEqual(response.status_code,422)
 
     def test_validation_uses_error_contract(self):
-        response=self.client.post('/api/backtests',json={'strategy_id':'x'})
+        response=self.client.post('/api/backtest/runs',json={'strategy_id':'x'})
         self.assertEqual(response.status_code,422)
         self.assertEqual(response.json()['detail']['code'],'QL_INVALID_INPUT')
 

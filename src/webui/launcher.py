@@ -132,7 +132,7 @@ def launch(root: Path, build_app, port=None, *, open_browser=True):
             _restart_and_lock(lock, url, root, port, time.monotonic() + 60)
             app = build_app()
             config = uvicorn.Config(app, host='127.0.0.1', port=port, log_level='warning',
-                                    ws='none', timeout_graceful_shutdown=15)
+                                    ws='none', proxy_headers=False, timeout_graceful_shutdown=15)
             server = uvicorn.Server(config)
             stopped = threading.Event()
             failures = []

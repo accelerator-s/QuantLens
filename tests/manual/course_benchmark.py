@@ -16,7 +16,7 @@ def timed(arguments,name):
     return result.stdout,elapsed
 
 sql='SET hive.fetch.task.conversion=none; SET hive.compute.query.using.stats=false; SET hive.exec.mode.local.auto=false; '+QUERY
-hive,hive_seconds=timed(['exec','-T','hive','beeline','-u','jdbc:hive2://localhost:10000','-n','root','--silent=true','--showHeader=false','--outputformat=tsv2','-e',sql],'hive-mr')
+hive,hive_seconds=timed(['exec','--interactive=false','--no-TTY=false','hive','beeline','-u','jdbc:hive2://localhost:10000','-n','root','--silent=true','--showHeader=false','--outputformat=tsv2','-e',sql],'hive-mr')
 rows=[{'year':int(a),'n':int(b),'volume':int(c)} for a,b,c in re.findall(r'(?m)^(\d{4})\t(\d+)\t(\d+)\s*$',hive)]
 spark,spark_seconds=timed(['exec','-T','spark-client','spark-submit','--master','yarn','--deploy-mode','client','/workspace/tests/manual/spark_benchmark.py'],'spark-sql')
 record=json.loads(next(line.split('=',1)[1] for line in spark.splitlines() if line.startswith('QUANTLENS_BENCH=')))

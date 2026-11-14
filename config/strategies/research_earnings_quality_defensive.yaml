@@ -1,0 +1,11 @@
+profile_name: research_earnings_quality_defensive
+display_name: 盈利改善质量防御研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items:
+  - name: earnings_quality_defensive
+extra:
+  purpose: factor_research_only
+  internal_only: true

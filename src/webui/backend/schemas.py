@@ -22,10 +22,6 @@ class TransitionPayload(ConfirmPayload):
     target: str
     note: str = ""
 
-class DecideTransitionPayload(DecidePayload):
-
-    target: str
-
 def confirm_preview(preview: dict) -> dict:
     
     return {"requires_confirm": True, "preview": preview}

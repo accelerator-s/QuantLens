@@ -32,6 +32,8 @@ _console = Console()
 _DAILY_AVG_ROWS = 5500
 
 _DEFAULT_START_DATES: dict[str, str] = {
+    "index_basic": "1890-01-01",
+    "index_daily": "1990-12-19",
     "prices_daily": "2020-01-01",
     
     "returns_daily": "1990-01-01",
@@ -48,6 +50,7 @@ _DEFAULT_START_DATES: dict[str, str] = {
 _FUNDAMENTAL_DEFAULT_START = "2000-01-01"
 
 ROLLING_OVERLAP_DAYS: dict[str, int] = {
+    "index_daily": 90,
     "fs_balance": 730,
     "fs_income": 730,
     "fs_cashflow": 730,
@@ -64,6 +67,7 @@ ROLLING_OVERLAP_DAYS: dict[str, int] = {
 }
 
 FAST_REFRESH_DAYS: dict[str, int] = {
+    "index_daily": 10,
     "fs_balance": 270,
     "fs_income": 270,
     "fs_cashflow": 270,
@@ -78,6 +82,8 @@ FAST_REFRESH_DAYS: dict[str, int] = {
 }
 
 REFRESH_INTERVAL_DAYS: dict[str, int] = {
+    "index_basic": 30,
+    "index_daily": 1,
     "fs_balance": 7, "fs_income": 7, "fs_cashflow": 7, "disclosure_dates": 7,
     "top_shareholders": 14, "top_float_shareholders": 14, "inst_holdings": 14,
     "industry_classification": 30,
@@ -165,7 +171,7 @@ def csmar_latest_available_date() -> date:
 
 def _latest_available_date(table_name: str) -> date:
     
-    if table_name in {"prices_daily", "returns_daily"}:
+    if table_name in {"prices_daily", "returns_daily", "index_daily"}:
         return csmar_latest_available_date()
     return datetime.now(_CN_TZ).date()
 
@@ -183,11 +189,23 @@ def refresh_schedule(table_name: str) -> dict:
     audit = manifest.last_audit_date_for(table_name, _default_start_date(table_name))
     deep = max(manifest.last_refresh_date_for(table_name, "deep"), audit)
     checked = max(manifest.last_refresh_date_for(table_name, "fast"), deep)
+    if table_name == "index_basic":
+        checked = manifest.last_refresh_date_for(table_name, "fast")
+        return {"table": table_name, "interval_days": 30, "overlap_days": 0,
+                "deep_interval_days": None, "audit_interval_days": None,
+                "last_checked": checked or None,
+                "next_check": (date.fromisoformat(checked) + timedelta(days=30)).isoformat() if checked else None,
+                "label": "每 30 天更新完整指数目录"}
     deep_interval = 180 if table_name == "industry_classification" else DEEP_REFRESH_INTERVAL_DAYS
     rolling = table_name in ROLLING_OVERLAP_DAYS
     next_checks = [(date.fromisoformat(value) + timedelta(days=days)).isoformat()
                    for value, days in ((checked, interval), (deep, deep_interval), (audit, AUDIT_INTERVAL_DAYS))
                    if value] if rolling else []
+    if table_name == 'index_daily':
+        from market_rules.markets.cn_a.calendar import ChinaAShareCalendar
+        calendar = ChinaAShareCalendar()
+        next_checks = [(date.fromisoformat(day) if calendar.is_trading_day(date.fromisoformat(day))
+                        else calendar.next_trading_day(date.fromisoformat(day))).isoformat() for day in next_checks]
     if not rolling:
         checked = max([checked] + [rec.timestamp.astimezone(_CN_TZ).date().isoformat()
                                   for rec in manifest.downloads if rec.table_name == table_name and rec.all_market])
@@ -199,7 +217,8 @@ def refresh_schedule(table_name: str) -> dict:
         "audit_interval_days": AUDIT_INTERVAL_DAYS if rolling else None,
         "last_checked": checked or None,
         "next_check": min(next_checks) if next_checks else None,
-        "label": f"每 {interval} 天检查" if rolling else "交易日增量",
+        "label": ("交易日 18:30 更新，回查近 10 日；每 90 天回查 90 日，每年全量核查" if table_name == "index_daily"
+                  else f"每 {interval} 天检查" if rolling else "交易日增量"),
     }
 
 def audit_due(table_name: str) -> bool:
@@ -237,6 +256,11 @@ def compute_update_window(
 
     manifest = read_manifest()
     last_iso = manifest.last_date_for(table_name)
+    if table_name == "index_basic":
+        checked = manifest.last_refresh_date_for(table_name, "fast")
+        if not force_audit and checked and (today - date.fromisoformat(checked)).days < 30:
+            return None
+        return _window("refresh" if last_iso else "initial", default_start)
     if not last_iso:
         return _window("initial", default_start)
 
@@ -364,6 +388,8 @@ def _batches_for(
 ) -> list[tuple[str, str]]:
     
     freq = batch_freq or cfg.batch_freq
+    if freq == "snapshot":
+        return [(start_date, end_date)]
     if freq == "quarter":
         return _quarter_batches(start_date, end_date)
     return _year_batches(start_date, end_date)
@@ -930,6 +956,15 @@ def _merge_to_staged(df: pd.DataFrame, table_name: str) -> tuple[int, int]:
             same[:] = False
         added = ~incoming.index.isin(existing.index)
         changed = incoming.loc[~same | added]
+        if table_name == 'index_basic':
+            removed = int((~existing.index.isin(incoming.index)).sum())
+            if changed.empty and not removed:
+                return 0, 0
+            snapshot = incoming.reset_index().sort_values(pk).reset_index(drop=True)
+            pending = path.with_suffix('.pending')
+            snapshot.to_parquet(pending, index=False)
+            pending.replace(path)
+            return int(added.sum()), len(changed) + removed
         if changed.empty:
             return 0, 0
         # Preserve enrichment columns; their owner recomputes them after source changes.
@@ -943,7 +978,10 @@ def _merge_to_staged(df: pd.DataFrame, table_name: str) -> tuple[int, int]:
         changed = incoming
         new_count = len(incoming)
     combined = combined.reset_index().sort_values(pk).reset_index(drop=True)
-    combined.to_parquet(path, index=False)
+    destination = path.with_suffix('.pending') if table_name in {'index_basic', 'index_daily'} else path
+    combined.to_parquet(destination, index=False)
+    if destination != path:
+        destination.replace(path)
     return new_count, len(changed)
 
 def save_raw(raw_bytes: bytes, filename: str) -> Path:

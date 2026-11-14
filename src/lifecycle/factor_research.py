@@ -115,18 +115,17 @@ class FactorResearchIndex:
     ) -> dict[str, Any]:
         
         from quantlens.research_data import factor_matrix
-        from factors.registry import FactorRegistry
         program=self.store.get(ObjectType.RESEARCH_PROGRAM,factor.research_program_id)
         if program.validation_window is None:
             return {'signal_correlation_status':'window_missing','signal_correlation_error':'研究任务缺少验证区间'}
         validation_start=pd.Timestamp(program.validation_window.start)
         validation_end=pd.Timestamp(program.validation_window.end)
-        def scores(record):
-            name=record.factor_name
-            meta=FactorRegistry().get(name)
-            return factor_matrix(name,meta.version,validation_start.date().isoformat(),validation_end.date().isoformat())
         try:
-            left, right = scores(factor).align(scores(other), join="inner")
+            left_meta=self._published_signal_identity(factor)
+            right_meta=self._published_signal_identity(other)
+            def scores(meta):
+                return factor_matrix(meta.name,meta.version,validation_start.date().isoformat(),validation_end.date().isoformat())
+            left, right = scores(left_meta).align(scores(right_meta), join="inner")
         except LifecycleError as exc:
             return {
                 "signal_correlation_status": "failed",
@@ -148,6 +147,20 @@ class FactorResearchIndex:
             "signal_correlation_window_start": validation_start.date().isoformat(),
             "signal_correlation_window_end": validation_end.date().isoformat(),
         }
+
+    @staticmethod
+    def _published_signal_identity(record):
+        from factors.registry import FactorRegistry, hash_code, research_base_name
+        definition=json.loads((workspace().root / record.code_ref).read_text())
+        candidates=[meta for meta in FactorRegistry().list(include_research=True)
+                    if (meta.name == record.factor_name or research_base_name(meta.name) == record.factor_name)
+                    and meta.code_hash == hash_code(definition['code'])
+                    and all(getattr(meta,key) == definition[key] for key in
+                            ('parameters','dependencies','standardization','missing_handling','direction'))]
+        if not candidates:
+            raise LifecycleError(code='FACTOR_SIGNAL_VERSION_NOT_PUBLISHED',
+                message='该实验版本没有对应的已发布信号，不能用因子库版本代替。')
+        return sorted(candidates,key=lambda item:item.name)[0]
 
     @staticmethod
     def incremental_value(

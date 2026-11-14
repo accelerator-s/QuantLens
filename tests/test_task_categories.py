@@ -26,7 +26,7 @@ class TaskCategories(unittest.TestCase):
     def test_sync_lookup_ignores_research_using_same_warehouse_lock(self):
         self.manager._tasks={
             'sync':{'task_id':'sync','name':'data-sync:csmar','resource':'data','status':'running','created_at':'2026-11-13T01:00:00Z','log':[],'progress':{}},
-            'research':{'task_id':'research','name':'分层因子研究批次','resource':'data','status':'running','created_at':'2026-11-13T02:00:00Z','log':[],'progress':{}}}
+            'research':{'task_id':'research','name':'factor-evolution:EVO-test','resource':'data','status':'running','created_at':'2026-11-13T02:00:00Z','log':[],'progress':{}}}
         self.assertEqual(self.manager.latest(category='data_sync',running_only=True)['task_id'],'sync')
         self.assertEqual(self.manager.latest(category='research',running_only=True)['task_id'],'research')
         self.assertEqual(self.manager.latest(resource='data',running_only=True)['task_id'],'research')

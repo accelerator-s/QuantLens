@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-import stat
+import tempfile
 from pathlib import Path
 
 _SECRETS_DIR = Path.home() / ".config" / "quantlens"
@@ -25,7 +25,7 @@ def _read_pairs() -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         m = _LINE_RE.match(line)
-        if not m:
+        if not m or not re.fullmatch(r"QUANT_API_KEY_[A-Z0-9_]+", m.group(1)):
             continue
         out[m.group(1)] = m.group(2).strip().strip('"').strip("'")
     return out
@@ -35,11 +35,19 @@ def _write_pairs(pairs: dict[str, str]) -> None:
     body = ["# QuantLens local secrets — never commit this file."]
     for k, v in sorted(pairs.items()):
         body.append(f"{k}={v}")
-    _SECRETS_FILE.write_text("\n".join(body) + "\n", encoding="utf-8")
-    os.chmod(_SECRETS_FILE, stat.S_IRUSR | stat.S_IWUSR)
+    fd, temporary = tempfile.mkstemp(prefix=".secrets-", dir=_SECRETS_DIR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write("\n".join(body) + "\n")
+        os.replace(temporary, _SECRETS_FILE)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 def set_secret(env_name: str, value: str) -> Path:
-    
+    if not re.fullmatch(r"QUANT_API_KEY_[A-Z0-9_]+", env_name):
+        raise ValueError("Invalid QuantLens secret name")
+    if any(char in value for char in ("\r", "\n", "\x00")):
+        raise ValueError("Secret values must be a single line")
     pairs = _read_pairs()
     pairs[env_name] = value
     _write_pairs(pairs)

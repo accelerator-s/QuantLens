@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from exceptions import QuantTrainingError
+from factors.registry import FactorRegistry, FactorStatus, research_base_name
 from panel import cache_status
-from strategy.models import StrategyStatus
+from strategy.models import FactorRef, FactorSpec, StrategyProfileDoc, StrategyStatus, WeightMode
 from strategy.store import StrategyProfileStore
 
 from .models import (
@@ -45,23 +46,28 @@ def choose_recent_windows(data_start: str, data_end: str) -> tuple[ResearchWindo
 
 def _single_factor_profile(base_factor: str) -> tuple[str, int]:
     store = StrategyProfileStore()
-    matches = []
-    for doc in store.list(templates_only=False):
-        if doc.status == StrategyStatus.DISABLED:
-            continue
-        resolved = store.resolve(doc.profile_name)
-        names = [item.name for item in resolved.factors.items]
-        if names == [base_factor]:
-            matches.append(doc)
-    if not matches:
-        raise _fail(
-            "EVOLUTION_AUTO_PROFILE_NOT_FOUND",
-            f"没有找到只包含因子 {base_factor} 的策略。",
-            "先配置一个严格单因子策略，再启动自动进化。",
+    profile_name = f"research_{base_factor}"
+    profiles = {doc.profile_name: doc for doc in store.list(templates_only=False)}
+    if profile_name not in profiles:
+        factor = FactorRegistry().get(base_factor)
+        store.upsert(
+            StrategyProfileDoc(
+                profile_name=profile_name,
+                display_name=f"{factor.display_name or factor.name}自动研究",
+                inheritance_parent="a_share_research_base",
+                status=StrategyStatus.DRAFT,
+                factors=FactorSpec(weighting=WeightMode.EQUAL, items=[FactorRef(name=base_factor)]),
+                extra={"purpose": "factor_research_only", "internal_only": True},
+            ),
+            override=False,
         )
-    
-    matches.sort(key=lambda item: (item.updated_at, item.profile_name), reverse=True)
-    selected = store.resolve(matches[0].profile_name)
+    selected = store.resolve(profile_name)
+    if selected.status == StrategyStatus.DISABLED or [item.name for item in selected.factors.items] != [base_factor]:
+        raise _fail(
+            "EVOLUTION_AUTO_PROFILE_INVALID",
+            f"自动研究配置 {profile_name} 已停用或未严格引用所选因子。",
+            "修正该研究配置的数据或因子引用后重新启动。",
+        )
     return selected.profile_name, selected.holding_period
 
 def build_auto_config(base_factor: str) -> EvolutionConfig:
@@ -72,6 +78,23 @@ def build_auto_config(base_factor: str) -> EvolutionConfig:
             "EVOLUTION_AUTO_FACTOR_REQUIRED",
             "基础因子不能为空。",
             "选择一个已注册因子后启动。",
+        )
+    factor = FactorRegistry().get(base_factor)
+    if factor.status == FactorStatus.DISABLED or research_base_name(base_factor) is not None:
+        raise _fail(
+            "EVOLUTION_AUTO_FACTOR_UNAVAILABLE",
+            "只能选择因子库中未停用的正式因子开启研究。",
+            "选择一个草稿或启用中的因子。",
+        )
+    if (
+        factor.timescale != "daily"
+        or (factor.applicable_markets and "CN-A" not in factor.applicable_markets)
+        or (factor.applicable_instruments and "stock" not in factor.applicable_instruments)
+    ):
+        raise _fail(
+            "EVOLUTION_AUTO_FACTOR_MARKET_UNSUPPORTED",
+            "当前自动研究协议要求适用于 A 股股票的日频因子。",
+            "为其他市场或频率配置相应的研究协议后再启动。",
         )
     status = cache_status().get("default")
     if status is None or status.state != "fresh" or not status.meta:
@@ -96,6 +119,9 @@ def build_auto_config(base_factor: str) -> EvolutionConfig:
         start=train.start,
         end=(date.fromisoformat(train.end) - timedelta(days=embargo_days)).isoformat(),
     )
+    from backtest.protocol import verify_protocol_or_raise
+    protocol = verify_protocol_or_raise()
+    limits = protocol.objective.constraints
     return EvolutionConfig(
         base_factor=base_factor,
         profile_name=profile_name,
@@ -104,8 +130,8 @@ def build_auto_config(base_factor: str) -> EvolutionConfig:
         test_window=test,
         targets=EvolutionTargets(
             min_annualized_excess_return=0.03,
-            max_drawdown=0.25,
-            max_annualized_turnover=12.0,
+            max_drawdown=limits.max_drawdown,
+            max_annualized_turnover=limits.max_turnover,
             min_oos_stability=0.50,
         ),
         walk_forward=WalkForwardConfig(

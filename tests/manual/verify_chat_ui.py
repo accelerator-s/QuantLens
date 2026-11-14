@@ -128,28 +128,23 @@ window.testApi={
  aiModels:async()=>({items:[{name:'deepseek-cyber',enabled:true,kind:'api_model'}]}),
  factors:async()=>({statuses:[],items:[]}),
  factorEvolutionModelRecommendations:async()=>({recommended:'deepseek-cyber',items:[{name:'deepseek-cyber',selectable:true,recommended:true,reason:'具备深度推理、结构化输出、代码生成、长上下文与风险识别能力。'}]}),
- strategyChat:args=>{chatTest.calls.push(structuredClone(args));return new Promise(resolve=>chatTest.resolve=resolve)},
- strategyChatFinalize:async args=>{chatTest.final.push(structuredClone(args));throw Error('模拟生成失败')},
  factorResearchChat:args=>{chatTest.calls.push(structuredClone(args));return new Promise(resolve=>chatTest.resolve=resolve)},
  factorResearchStart:async args=>{chatTest.final.push(structuredClone(args));throw Error('模拟启动失败')}
 };''')
 report = []
-for kind in ['strategy', 'factor']:
+for kind in ['factor']:
     js("chatTest.final=[]")
-    if kind == 'strategy':
-        js("await (await import('/components/strategy/strategy-chat.js')).openStrategyChat({api:testApi,bus:testBus},{onYaml(){}})")
-    else:
-        js('''window.factorHost=document.createElement('section');document.body.append(factorHost);
-        factorHost.innerHTML=await (await fetch('/components/factors/factors.html')).text();
-        await (await import('/components/factors/factors.js')).mount(factorHost,{api:testApi,bus:testBus});
-        factorHost.querySelector('#factors-tab-research').click();''')
-        wait("factorHost.querySelector('#factors-panel-research [data-ai-research]:not(:disabled)')")
-        js("factorHost.querySelector('#factors-panel-research [data-ai-research]').click()")
+    js('''window.factorHost=document.createElement('section');document.body.append(factorHost);
+    factorHost.innerHTML=await (await fetch('/components/factors/factors.html')).text();
+    await (await import('/components/factors/factors.js')).mount(factorHost,{api:testApi,bus:testBus});
+    factorHost.querySelector('#factors-tab-research').click();''')
+    wait("factorHost.querySelector('#factors-panel-research [data-ai-research]:not(:disabled)')")
+    js("factorHost.querySelector('#factors-panel-research [data-ai-research]').click()")
     wait("document.querySelector('.chat-dialog') && !document.querySelector('.chat__input').disabled")
     assert js("document.querySelector('.chat__welcome')!==null")
     assert js("document.querySelector('.chat__send').disabled")
     assert js("document.querySelector('.chat-dialog__actions .btn--primary').disabled")
-    scope = 'strategy:new' if kind == 'strategy' else 'factor-research'
+    scope = 'factor-research'
     assert js(f"(await historyItems('{scope}')).length") == 1
     assert js(f"(await historyItems('{scope}'))[0].messages.length") == 0
     js("document.querySelector('.chat-dialog__actions .btn--primary').click()")

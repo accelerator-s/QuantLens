@@ -22,6 +22,12 @@ window.events=[];window.ctx={accountId:'manual',bus:{on(){},emit(...args){events
  recommendGenerate:async payload=>({plan:{strategy_profile_ref:payload.profile,generated_at:new Date().toISOString(),target_holdings:[{instrument_id:'000001',qty:'100',weight:'.25'}],suggested_trades:[{instrument_id:'000001',action:'open'}],caveats:[]},ai_ok:true})}};
 const root=document.querySelector('main');root.innerHTML=await(await fetch('/components/portfolio/portfolio.html')).text();await mount(root,ctx);window.ready=true;
 </script></body></html>`);
+// Production CSP requires the fixture module to be served as a separate file.
+const fixturePath=join(temporary,'fixture.html');
+const fixtureHtml=await readFile(fixturePath,'utf8');
+const fixtureModule=fixtureHtml.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+await writeFile(join(temporary,'fixture.js'),fixtureModule);
+await writeFile(fixturePath,fixtureHtml.replace(/<script type="module">[\s\S]*?<\/script>/,'<script type="module" src="/__portfolio_fixture.js"></script>'));
 const python=process.env.QUANTLENS_PYTHON || 'python3';
 const serverCode=`import os,sys,socket
 from pathlib import Path
@@ -34,7 +40,7 @@ prepare()
 import pandas as pd
 directory=Path(${JSON.stringify(temporary)})/'data/ads'
 directory.mkdir(parents=True,exist_ok=True)
-pd.DataFrame({'code':['000001','000002','000003','600000'],'name':['平安银行','万科A','测试股票','浦发银行']}).to_parquet(directory/'stocks.parquet',index=False)
+pd.DataFrame({'code':['000001','000002','000003','600000']}).to_parquet(directory/'stocks.parquet',index=False)
 (directory.parent/'ads_manifest.json').write_text(json.dumps({'tables':{'stock_prices':{'files':[{'path':'stocks.parquet'}]}}}))
 from datetime import datetime,UTC
 from decimal import Decimal
@@ -42,9 +48,11 @@ from portfolio import Account,AccountRegistry,Cash
 AccountRegistry().create(Account(account_id='manual',alias='验收账户',market='CN-A',instrument_class='stock',reporting_currency='CNY',created_at=datetime.now(UTC),cash=[Cash(currency='CNY',total=Decimal('100000'),available=Decimal('100000'),withdrawable=Decimal('100000'))]))
 from webui.backend.server import create_app
 from starlette.routing import Route
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse,Response
 app=create_app()
 async def fixture(request):return HTMLResponse(Path(${JSON.stringify(join(temporary,'fixture.html'))}).read_text())
+async def fixture_script(request):return Response(Path(${JSON.stringify(join(temporary,'fixture.js'))}).read_text(),media_type='text/javascript')
+app.router.routes.insert(0,Route('/__portfolio_fixture.js',fixture_script))
 app.router.routes.insert(0,Route('/__portfolio_test',fixture))
 sock=socket.socket();sock.bind(('127.0.0.1',0));sock.listen(128)
 print('PORT='+str(sock.getsockname()[1]),flush=True)
@@ -79,7 +87,29 @@ try{
  await click('[data-holding-add]');await wait("document.querySelector('.dialog input[name=qty]')");
  assert(await js("!document.querySelector('.dialog .select, .dialog [name=side], .dialog [name=currency]')"));
  assert(await js("!document.querySelector('.dialog .confirm__message')"));
- await js("window.stockQueries=[];window.originalFetch=window.fetch;window.fetch=(url,options)=>{if(String(url).includes('/stocks/suggestions'))stockQueries.push(new URL(url,location.origin).searchParams.get('q'));return originalFetch(url,options)};window.stockInput=document.querySelector('.dialog input[name=instrument_id]');stockInput.focus();stockInput.value=''");
+ await click('.portfolio__quantity-up');
+ assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),'100');
+ await click('.portfolio__quantity-down');
+ assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),'0');
+ await fill({instrument_id:'000001',qty:'105'});
+ assert(await js("document.querySelector('.dialog [name=qty]').checkValidity()"),'Existing dividend odd lots must remain valid');
+ await click('.portfolio__quantity-up');
+ assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),'205');
+ await js("document.querySelector('.dialog [name=qty]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))");
+ assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),'105');
+ await js("document.querySelector('.dialog [name=qty]').dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true}))");
+ assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),'205');
+ await js("document.querySelector('.dialog [name=qty]').dispatchEvent(new WheelEvent('wheel',{deltaY:100,bubbles:true,cancelable:true}))");
+ assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),'105');
+ for(const invalid of ['-1','1.5']){
+   await fill({qty:invalid});
+   assert(await js("!document.querySelector('.dialog [name=qty]').checkValidity()"));
+ }
+ await fill({instrument_id:'688001',qty:''});await click('.portfolio__quantity-up');
+ assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),'200');
+ await click('.portfolio__quantity-up');
+ assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),'201');
+ await js("(await import('/core/page-cache.js')).invalidateRequests();window.stockQueries=[];window.originalFetch=window.fetch;window.fetch=(url,options)=>{if(String(url).includes('/stocks/suggestions'))stockQueries.push(new URL(url,location.origin).searchParams.get('q'));return originalFetch(url,options)};window.stockInput=document.querySelector('.dialog input[name=instrument_id]');stockInput.focus();stockInput.value=''");
  for(const digit of '000001')await js(`stockInput.value+=${JSON.stringify(digit)};stockInput.dispatchEvent(new Event('input',{bubbles:true}))`);
  await wait("document.querySelector('.stock-picker__option[data-code=\"000001\"]') && document.querySelector('.stock-picker__name')?.textContent==='平安银行'");
  assert.deepEqual(await js('stockQueries.slice(-6)'),['0','00','000','0000','00000','000001']);
@@ -103,6 +133,11 @@ try{
  await wait("document.querySelector('#'+staleInput.getAttribute('aria-controls')+' [data-code=\"000002\"]')");
  await js("stockResolvers.get('0')({items:[{code:'000001',name:'过时结果'}]});await new Promise(r=>requestAnimationFrame(r))");
  assert(await js("document.querySelector('#'+staleInput.getAttribute('aria-controls')).innerText.includes('最新候选') && !document.querySelector('#'+staleInput.getAttribute('aria-controls')).innerText.includes('过时结果')"));
+ await js("window.stableMenu=document.querySelector('#'+staleInput.getAttribute('aria-controls'));window.stableRow=stableMenu.querySelector('[role=option]');window.stableHeight=stableMenu.getBoundingClientRect().height;window.rowReplacements=0;window.rowObserver=new MutationObserver(records=>{rowReplacements+=records.filter(r=>r.type==='childList').length});rowObserver.observe(stableMenu,{childList:true});staleInput.value='000';staleInput.dispatchEvent(new Event('input'));await new Promise(r=>setTimeout(r,220))");
+ assert(await js("!stableMenu.hidden && stableMenu.querySelector('[role=option]')===stableRow && stableMenu.getBoundingClientRect().height===stableHeight && !stableMenu.textContent.includes('正在查找') && rowReplacements===0"),'Existing candidates must stay visible without replacement during a slow query');
+ await js("stockResolvers.get('000')({items:[{code:'000002',name:'最新候选'}]});await new Promise(r=>requestAnimationFrame(r))");
+ assert(await js("stableMenu.querySelector('[role=option]')===stableRow && rowReplacements===0"),'Identical candidates must reuse their existing rows');
+ await js("rowObserver.disconnect()");
  await js("stalePicker.destroy();staleInput.remove()");
  await fill({instrument_id:'000001',qty:'1000',cost_price:'8'});await formPreview('保存持仓');await confirm();
  assert.equal(await balance(),100000);assert.equal((await positions())[0].qty,'1000');
@@ -110,6 +145,24 @@ try{
  assert.equal(await js("document.querySelectorAll('.dialog input[type=radio]').length"),2);
  assert(await js("!document.querySelector('.dialog .select, .dialog [name=side], .dialog [name=currency]')"));
  assert(await js("!document.querySelector('.dialog [name=fee], .dialog [name=tax], .dialog .confirm__message')"));
+ for(const [code,first,second] of [['000001','100','200'],['300001','100','200'],['688001','200','201'],['920001','100','101']]){
+   await fill({instrument_id:code,qty:''});await click('.portfolio__quantity-up');
+   assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),first,code);
+   await click('.portfolio__quantity-up');
+   assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),second,code);
+   await click('.portfolio__quantity-down');
+   assert.equal(await js("document.querySelector('.dialog [name=qty]').value"),first,code);
+ }
+ await fill({instrument_id:'000001',qty:'150',price:'10'});
+ assert(await js("!document.querySelector('.dialog [name=qty]').checkValidity()"));
+ await click('.dialog__actions .btn--primary');
+ assert.equal(await js("document.querySelector('.dialog__title').textContent"),'录入成交','Invalid buy quantities must not reach confirmation');
+ await fill({instrument_id:'688001',qty:'199'});
+ assert(await js("!document.querySelector('.dialog [name=qty]').checkValidity()"));
+ await click('.dialog input[value=sell]');
+ assert(await js("document.querySelector('.dialog [name=qty]').checkValidity()"),'Selling existing odd lots must stay available');
+ await click('.dialog input[value=buy]');
+ await fill({instrument_id:'000001',qty:'100'});
  const report=[];
  for(const theme of ['light','dark'])for(const width of [1440,768,390,320]){
    await call('Emulation.setDeviceMetricsOverride',{width,height:568,deviceScaleFactor:1,mobile:false});
@@ -143,7 +196,14 @@ try{
    assert(await js('document.documentElement.scrollWidth<=innerWidth'));
    await screenshot(`portfolio-${width}`);
  }
+ await js("[...document.querySelectorAll('.portfolio__account-actions button')].find(e=>e.textContent==='删除账户').click()");
+ await wait("document.querySelector('.dialog__title')?.textContent==='删除账户 验收账户'");
+ assert(await js("!document.querySelector('.dialog .confirm__message, .dialog .kv') && !document.querySelector('.dialog').textContent.includes('回收站')"));
+ await confirm();
+ const accounts=await(await fetch(base+'/api/accounts')).json();
+ assert(!accounts.items.some(account=>account.account_id==='manual'));
+ assert.equal((await(await fetch(base+'/api/trash')).json()).items.length,0);
  assert.deepEqual(exceptions,[]);
  await writeFile(join(output,'verification.json'),JSON.stringify(report,null,2));
- console.log(`PASS: stock candidates on every keystroke, real backend holdings, automatic fees/tax, T+1, buy/sell reversal, retained history, suggestions, and ${report.length} dialog layouts. ${output}`);
+ console.log(`PASS: real backend holdings, fees/tax, T+1, buy/sell reversal, suggestions, permanent account deletion without extra warnings or trash, and ${report.length} dialog layouts. ${output}`);
 }finally{socket?.close();browser?.kill();server.kill();}

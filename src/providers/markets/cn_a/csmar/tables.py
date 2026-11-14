@@ -390,6 +390,40 @@ _ANALYST_TARGET_PRICE = CSMARTableConfig(
     batch_freq="year",
 )
 
+_INDEX_BASIC = CSMARTableConfig(
+    staged_name="index_basic", table_name="指数基本信息文件", table_name_phy="IDX_Idxinfo",
+    table_id=40, code_set_field="Indexcd", time_set_field="Idxinfo11", batch_freq="snapshot",
+    fields=(
+        CSMARFieldDef("Indexcd", "交易所指数代码", 648, "Nvarchar", SIGN_CODE_KEY),
+        CSMARFieldDef("Idxinfo01", "指数名称", 649, "Nvarchar"),
+        CSMARFieldDef("Idxinfo02", "基准日期", 650, "Datetime"),
+        CSMARFieldDef("Idxinfo03", "基准点数", 651),
+        CSMARFieldDef("Idxinfo05", "加权方式", 653, "Nvarchar"),
+        CSMARFieldDef("Idxinfo06", "发布机构", 654, "Nvarchar"),
+        CSMARFieldDef("Idxinfo07", "指数类别", 655, "Nvarchar"),
+        CSMARFieldDef("Idxinfo08", "指数类型", 656),
+        CSMARFieldDef("Idxinfo09", "所属市场", 657, "Nvarchar"),
+        CSMARFieldDef("Idxinfo11", "开始日期", 659, "Datetime", SIGN_TIME_KEY),
+    ),
+)
+
+_INDEX_DAILY = CSMARTableConfig(
+    staged_name="index_daily", table_name="国内指数日行情文件", table_name_phy="IDX_Idxtrd",
+    table_id=45, code_set_field="Indexcd", time_set_field="Idxtrd01", batch_freq="year",
+    fields=(
+        CSMARFieldDef("Indexcd", "交易所指数代码", 691, "Nvarchar", SIGN_CODE_KEY),
+        CSMARFieldDef("Idxtrd01", "交易日期", 692, "Datetime", SIGN_TIME_KEY),
+        CSMARFieldDef("Idxtrd02", "开盘指数", 693),
+        CSMARFieldDef("Idxtrd03", "最高指数", 694),
+        CSMARFieldDef("Idxtrd04", "最低指数", 695),
+        CSMARFieldDef("Idxtrd05", "收盘指数", 696),
+        CSMARFieldDef("Idxtrd06", "成份证券成交量（万股）", 697),
+        CSMARFieldDef("Idxtrd07", "成份证券成交金额（万元）", 698),
+        CSMARFieldDef("Idxtrd08", "指数回报率（%）", 699),
+        CSMARFieldDef("Idxtrd09", "指数中文简称", 150943, "Nvarchar"),
+    ),
+)
+
 TABLE_REGISTRY: dict[str, CSMARTableConfig] = {
     cfg.staged_name: cfg
     for cfg in (
@@ -406,6 +440,8 @@ TABLE_REGISTRY: dict[str, CSMARTableConfig] = {
         _ANALYST_FORECAST,
         _ANALYST_RATING,
         _ANALYST_TARGET_PRICE,
+        _INDEX_BASIC,
+        _INDEX_DAILY,
     )
 }
 

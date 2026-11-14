@@ -3,7 +3,7 @@ from quantlens.warehouse import job, lineage, publish
 
 def run(spark,context,train_end='2022-12-31'):
     from pyspark.sql import functions as F
-    from pyspark.ml.feature import PCA, VectorAssembler
+    from pyspark.ml.feature import VectorAssembler
     from pyspark.ml.functions import vector_to_array
     from factors.registry import FactorRegistry
     from quantlens.spark_weight_fit import exposures
@@ -11,15 +11,9 @@ def run(spark,context,train_end='2022-12-31'):
     frame=VectorAssembler(inputCols=names,outputCol='features').transform(exposures(spark,names)).persist()
     # Complete cases only; fit strictly before the held-out comparison period.
     train=frame.where(F.col('date')<=train_end)
-    from quantlens.gpu import use_gpu, request, PCAModel
-    if use_gpu():
-        model=PCAModel(request('pca',train=train,features=names))
-        k=len(model.explainedVariance)
-    else:
-        full=PCA(k=len(names),inputCol='features',outputCol='pca').fit(train)
-        import numpy as np
-        cumulative=np.cumsum(full.explainedVariance.toArray());k=int(np.searchsorted(cumulative,.8)+1)
-        model=PCA(k=k,inputCol='features',outputCol='pca').fit(train)
+    from quantlens.gpu import request, PCAModel
+    model=PCAModel(request('pca',train=train,features=names))
+    k=len(model.explainedVariance)
     scores=model.transform(frame).select('code','date',vector_to_array('pca').alias('scores')).withColumn('year',F.year('date'))
     rows=[(name,int(component),float(model.pc.toArray()[index,component]),float(model.explainedVariance[component]),k,train_end) for index,name in enumerate(names) for component in range(k)]
     loadings=spark.createDataFrame(rows,'factor string, component int, loading double, explained_variance double, k int, train_end string').withColumn('as_of',F.current_date())

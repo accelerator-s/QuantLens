@@ -50,8 +50,22 @@ def stock(code,as_of=None):
 _stock_index_lock = RLock()
 
 
+def _stock_names_signature():
+    from paths import workspace
+    path = workspace().config / 'stock_names.json'
+    if not path.exists():
+        path = Path(__file__).resolve().parents[2] / 'config' / 'stock_names.json'
+    return (str(path), path.stat().st_mtime_ns, path.stat().st_size) if path.exists() else ()
+
+
 @lru_cache(maxsize=4)
-def _stock_candidate_index(signature: tuple) -> tuple:
+def _stock_names(signature):
+    import json
+    return json.loads(Path(signature[0]).read_text(encoding='utf-8')).get('names', {}) if signature else {}
+
+
+@lru_cache(maxsize=4)
+def _stock_candidate_index(signature: tuple, names_signature: tuple = ()) -> tuple:
     import duckdb
     import re
     files = [entry[0] for entry in signature]
@@ -62,17 +76,29 @@ def _stock_candidate_index(signature: tuple) -> tuple:
         name_column = next((name for name in ('name', 'stock_name', 'short_name', 'security_name') if name in columns), None)
         name_sql = f'coalesce(max(CAST("{name_column}" AS VARCHAR)), \'\')' if name_column else "''"
         rows = db.execute(f'SELECT lpad(CAST(code AS VARCHAR), 6, \'0\') AS code, {name_sql} AS name FROM read_parquet(?, hive_partitioning=false) GROUP BY 1 ORDER BY 1', [files]).fetchall()
-    return tuple((code, name) for code, name in rows if re.fullmatch(r'[036489]\d{5}', code))
+    names = _stock_names(names_signature)
+    return tuple((code, name or names.get(code, '')) for code, name in rows if re.fullmatch(r'[036489]\d{5}', code))
+
+
+def _stock_index():
+    files = ads.paths('stock_prices') or ads.paths('screen')
+    if not files:
+        return ()
+    signature = tuple((file, Path(file).stat().st_mtime_ns, Path(file).stat().st_size) for file in files)
+    with _stock_index_lock:
+        return _stock_candidate_index(signature, _stock_names_signature())
+
+
+def stock_names(codes) -> dict[str, str]:
+    """Resolve display names, including historical codes absent from current quotes."""
+    names = dict(_stock_names(_stock_names_signature()))
+    names.update((code, name) for code, name in _stock_index() if name)
+    return {code: names.get(code, '') for code in codes}
 
 
 def stock_candidates(query: str, limit: int = 20) -> list[dict]:
-    files = ads.paths('stock_prices') or ads.paths('screen')
-    if not files:
-        return []
-    signature = tuple((file, Path(file).stat().st_mtime_ns, Path(file).stat().st_size) for file in files)
+    index = _stock_index()
     needle = query.strip().casefold()
-    with _stock_index_lock:
-        index = _stock_candidate_index(signature)
     rows = [item for item in index if not needle or item[0].startswith(needle) or needle in item[1].casefold()]
     rows.sort(key=lambda item: (item[0] != needle, not item[0].startswith(needle), not item[1].casefold().startswith(needle), item[0]))
     return [{'code': code, 'name': name} for code, name in rows[:limit]]

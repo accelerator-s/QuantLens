@@ -1,10 +1,12 @@
-schema_version: 2
+schema_version: 3
+research_standard: cn_a_daily_v3
+historical_rules: trade_date_effective
+empty_portfolio_benchmark: benchmark_definition
 objective:
   primary: calmar
   constraints:
     max_drawdown: 0.2
     max_turnover: 6.0
-benchmark_fallback: universe_equal_weight
 execution_delay_days: 1
 price_anchor: next_close
 fill_assumption: all_or_nothing
@@ -20,14 +22,13 @@ return_field: ret_wd
 valuation_mode: mv_drift
 sell_proceeds_available: same_day
 unaffordable_lot: reject_keep_cash
-delist_force_close: true
-delist_recovery_rate: '0'
-benchmark: same_cluster_equal_weight
+delisting_action: sell_on_observed_risk_next_close
+benchmark: model_selected
 market_rule_name: CN-A-stock
 trading_days_per_year: 244
 lock:
   locked: true
-  protocol_hash: 2aca7762a38a8b1a
-  locked_at: '2026-11-12T08:15:49.932242+00:00'
-  locked_by: PLAN-refactor
-  notes: 按 PLAN.md 固定 v2 口径；历史运行保持原协议哈希。
+  protocol_hash: fda66589e777e432
+  locked_at: '2026-11-14T15:17:03.987898+00:00'
+  locked_by: user-authorized-benchmark-expansion
+  notes: 用户授权按 CFA/GIPS 原则扩展，模型在回测前选择并冻结基准；仅使用 CSMAR，不回退其他数据源。

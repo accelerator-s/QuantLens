@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import fcntl
-import gc
 import json
 import os
 from pathlib import Path
@@ -10,6 +9,8 @@ import re
 import threading
 import time
 import traceback
+import sys
+from importlib.metadata import version as package_version
 
 import numpy as np
 
@@ -28,6 +29,13 @@ def fit_linear(x, y):
     import torch
     # The small normal matrix keeps memory proportional to rows × features.
     return torch.linalg.pinv(x.T @ x, hermitian=True) @ (x.T @ y)
+
+
+def fit_ridge(x, y, penalty=.01):
+    import torch
+    covariance = x.T @ x / len(x)
+    identity = torch.eye(x.shape[1], dtype=x.dtype, device=x.device)
+    return torch.linalg.solve(covariance + penalty * identity, x.T @ y / len(x))
 
 
 def fit_logistic(x, y, reg=.01, max_iter=100):
@@ -68,14 +76,15 @@ def fit_pca(x, threshold=.8):
 
 def fit_kmeans(x, k, seed=42, max_iter=50):
     import torch
-    generator = torch.Generator(device=x.device).manual_seed(seed)
+    # Share the same seeded initialization across CPU and CUDA.
+    generator = torch.Generator(device='cpu').manual_seed(seed)
     n = len(x)
-    centers = [x[torch.randint(n, (), generator=generator, device=x.device)]]
+    centers = [x[int(torch.randint(n, (), generator=generator))]]
     minimum = (x - centers[0]).square().sum(dim=1)
     for _ in range(1, k):
         if float(minimum.sum()) == 0:
             raise ValueError('Not enough distinct observations for KMeans')
-        index = torch.multinomial(minimum, 1, generator=generator)[0]
+        index = int(torch.multinomial(minimum.cpu(), 1, generator=generator)[0])
         centers.append(x[index])
         minimum = torch.minimum(minimum, (x - centers[-1]).square().sum(dim=1))
     centers = torch.stack(centers)
@@ -105,11 +114,13 @@ def read_frame(payload, kind, directory):
     prefix = f'hdfs://nn-rm:9000/quantlens/_tmp/training/{payload["id"]}/{kind}'
     if uri != prefix:
         raise ValueError('Invalid training input path')
-    if not payload.get('local'):
+    ready = directory / f'{kind}.ready'
+    if not payload.get('local') and not ready.exists():
         import shutil
         if (directory / kind).exists():
             shutil.rmtree(directory / kind)
         HDFS().get(uri, f'/data/ads/_training/{payload["id"]}/{kind}')
+        ready.touch()
     return pq.read_table(directory / kind).to_pandas()
 
 
@@ -117,7 +128,7 @@ def execute(payload, directory):
     operation = payload['operation']
     device = payload['device']
     features = payload['features']
-    if not features or len(features) > 256:
+    if not features or len(features) > (10000 if operation == 'standardize' else 256):
         raise ValueError('Invalid training features')
     if device == 'cuda':
         import torch
@@ -136,6 +147,9 @@ def execute(payload, directory):
         model.set_param({'device': device})
         frame = read_frame(payload, 'predict', directory)
         predictions = model.predict(xgb.DMatrix(frame[features].to_numpy(dtype=np.float32)))
+        actual = json.loads(model.save_config())['learner']['generic_param']['device']
+        if device == 'cuda' and not actual.startswith('cuda'):
+            raise RuntimeError('XGBoost did not activate CUDA')
         table = pa.Table.from_pandas(frame[['code','date']], preserve_index=False).append_column('prediction', pa.array(predictions))
         target = directory / 'predictions.parquet'
         pq.write_table(table, target)
@@ -145,6 +159,22 @@ def execute(payload, directory):
         HDFS().put(f'/data/ads/_training/{payload["id"]}/predictions.parquet', payload['output'] + '/predictions.parquet')
         return {'output': payload['output']}
     frame = read_frame(payload, 'train', directory)
+    if operation == 'standardize':
+        import pandas as pd
+        import torch
+        # Match the factor pipeline: rounded raw values, linear quantiles, ddof=0.
+        raw = frame[features].replace([np.inf, -np.inf], np.nan).round(6)
+        x = torch.as_tensor(raw.to_numpy(copy=True), dtype=torch.float64, device=device)
+        lower = torch.nanquantile(x, .01, dim=1, keepdim=True)
+        upper = torch.nanquantile(x, .99, dim=1, keepdim=True)
+        clipped = torch.minimum(torch.maximum(x, lower), upper)
+        centered = clipped - torch.nanmean(clipped, dim=1, keepdim=True)
+        std = torch.nanmean(centered.square(), dim=1, keepdim=True).sqrt()
+        score = torch.where(std > 0, centered / std, clipped * 0)
+        output = pd.DataFrame(score.cpu().numpy(), index=raw.index, columns=features)
+        target = directory / 'standardized.parquet'
+        output.to_parquet(target)
+        return {'output': str(target), 'implementation': 'winsor_zscore_float64_v1'}
     if operation == 'fit_tree':
         import xgboost as xgb
         model = xgb.XGBRegressor(n_estimators=30, max_depth=3, learning_rate=.1, reg_lambda=0., objective='reg:squarederror', random_state=payload['parameters'].get('seed',42), tree_method='hist', device=device, n_jobs=4)
@@ -152,15 +182,18 @@ def execute(payload, directory):
         actual = json.loads(model.get_booster().save_config())['learner']['generic_param']['device']
         if device == 'cuda' and not actual.startswith('cuda'):
             raise RuntimeError('XGBoost did not activate CUDA')
+        if device == 'cuda':
+            import torch
+            torch.cuda.synchronize()
         model.save_model(directory / 'model.ubj')
         return {'model_id': payload['id'], 'implementation': 'xgboost_hist_v1', 'actual_device': actual}
     import torch
     x = tensor_data(frame, features, device)
-    if operation in {'linear','logistic'}:
+    if operation in {'linear','logistic','ridge'}:
         y = torch.as_tensor(frame[payload['label']].to_numpy(dtype=np.float64, copy=True), device=device)
         if not torch.isfinite(y).all():
             raise ValueError('Training labels contain non-finite values')
-        coefficients = fit_linear(x,y) if operation == 'linear' else fit_logistic(x,y)
+        coefficients = {'linear': fit_linear, 'logistic': fit_logistic, 'ridge': fit_ridge}[operation](x,y)
         return {'coefficients': coefficients.cpu().tolist()}
     if operation == 'pca':
         components, variance = fit_pca(x)
@@ -175,11 +208,23 @@ def execute(payload, directory):
     raise ValueError('Unsupported training operation: ' + operation)
 
 
-def main():
+def attempt_main(request_path, result_path):
+    from quantlens.device_runtime import device_error
+    payload = json.loads(Path(request_path).read_text())
     try:
-        import torch
-    except ImportError:
-        torch = None
+        result = execute(payload, Path(request_path).parent)
+        if payload['device'] == 'cuda':
+            import torch
+            torch.cuda.synchronize()
+    except Exception as exc:
+        traceback.print_exc()
+        result = {'error': f'{type(exc).__name__}: {exc}',
+                  'device_error': payload['device'] == 'cuda' and device_error(type(exc).__name__, str(exc))}
+    atomic_json(Path(result_path), result)
+
+
+def main():
+    from quantlens.device_runtime import execute_resilient, gpu_inventory
     root = shared_root()
     root.mkdir(parents=True,exist_ok=True)
     lock = (root/'worker.lock').open('a')
@@ -187,11 +232,13 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return
-    available = torch is not None and torch.cuda.is_available()
-    info = {'pid':os.getpid(), 'cuda':available, 'name':torch.cuda.get_device_name() if available else '', 'torch':torch.__version__ if torch else None}
+    info = {'pid': os.getpid(), 'torch': package_version('torch'), 'engine_version': 2}
     def heartbeat():
         while True:
-            atomic_json(root/'worker.json', {**info,'heartbeat':time.time()})
+            devices = gpu_inventory()
+            atomic_json(root/'worker.json', {**info, 'cuda': bool(devices),
+                        'name': devices[0]['name'] if devices else '', 'devices': devices,
+                        'heartbeat':time.time()})
             time.sleep(3)
     threading.Thread(target=heartbeat,daemon=True).start()
     print(json.dumps(info),flush=True)
@@ -205,18 +252,17 @@ def main():
                 continue
             start = time.monotonic()
             try:
-                result = execute(payload,directory)
-                if payload['device']=='cuda': torch.cuda.synchronize()
-                result.update(device=payload['device'], seconds=round(time.monotonic()-start,3))
+                result = execute_resilient(payload,directory)
                 print(f'{payload["id"]} {payload["operation"]} {result["device"]} {result["seconds"]}s',flush=True)
             except Exception as exc:
                 traceback.print_exc()
                 result = {'error':f'{type(exc).__name__}: {exc}'}
             atomic_json(directory/'response.json',result)
-            gc.collect()
-            if available: torch.cuda.empty_cache()
         time.sleep(.2)
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) == 4 and sys.argv[1] == '--attempt':
+        attempt_main(sys.argv[2], sys.argv[3])
+    else:
+        main()

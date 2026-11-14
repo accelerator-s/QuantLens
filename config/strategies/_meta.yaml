@@ -1,15 +1,22 @@
 version: 1
 profiles:
 - a_share_research_base
-- candidate_balanced_multifactor
-- candidate_value_quality_defensive
 - research_analyst_fy1_revision
+- research_anti_lottery_max_21d
+- research_conditional_liquidity_alpha
 - research_earnings_announcement_drift
+- research_earnings_change_63d
+- research_earnings_growth_defensive_conjunction
+- research_earnings_growth_quality_defensive
+- research_earnings_quality_defensive
+- research_fundamental_value_quality
 - research_growth_revenue_yoy
 - research_industry_momentum_60
 - research_institutional_holding_change
+- research_liquidity_behavior_20d
 - research_lower_shadow_volskew_30d
 - research_quality_cashflow_assets
 - research_quality_gross_margin
 - research_reversal_5
 - research_smooth_uptrend_efficiency_60d
+- strategy_b4d6d4238ecb

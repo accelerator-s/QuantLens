@@ -39,7 +39,7 @@ class StageCacheTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(json.loads(records[0].read_text())['run_id'], 'first')
 
-    def test_changed_inputs_code_snapshot_parameters_config_or_device_miss(self):
+    def test_changed_inputs_code_snapshot_parameters_config_or_policy_miss(self):
         self.run_cache()
         for field in ('data_snapshot', 'pipeline_code_hash'):
             self.assertFalse(self.run_cache({**self.context, field: 'changed'}))
@@ -50,6 +50,8 @@ class StageCacheTests(unittest.TestCase):
         with patch('quantlens.stage_cache.configuration', return_value='config-v2'):
             self.assertFalse(self.run_cache())
         with patch('quantlens.gpu.use_gpu', return_value=False):
+            self.assertTrue(self.run_cache())
+        with patch.dict(os.environ, QUANTLENS_TRAIN_DEVICE='cpu'):
             self.assertFalse(self.run_cache())
 
     def test_missing_or_replaced_output_is_recomputed(self):

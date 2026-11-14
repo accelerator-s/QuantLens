@@ -1,0 +1,4 @@
+source: csmar
+enabled: true
+timezone: Asia/Shanghai
+daily_time: '18:30'

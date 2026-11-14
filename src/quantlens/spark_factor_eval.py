@@ -89,7 +89,7 @@ def correlations(spark,context,name=None,start=None,end=None,*,exclude_model=Fal
     from itertools import combinations
     from factors.registry import FactorRegistry
     from quantlens.spark_weight_fit import safe_correlation
-    selected=[(meta.name,meta.version) for meta in FactorRegistry().list() if not (exclude_model and meta.name=='model_gbt')]
+    selected=[(meta.name,meta.version) for meta in FactorRegistry().list(include_research=bool(name)) if not (exclude_model and meta.name=='model_gbt')]
     if name and not any(item[0]==name for item in selected):return
     # Pivot once and aggregate pairs in place. A self-join multiplies each
     # stock/date observation by the square of the number of factors.
@@ -116,7 +116,7 @@ def correlations(spark,context,name=None,start=None,end=None,*,exclude_model=Fal
 def run(spark,context,name=None,start=None,end=None,*,exclude_model=False):
     from factors.registry import FactorRegistry
     present={(row.factor,row.version) for row in spark.table('dws.factor_values').select('factor','version').distinct().collect()}
-    for meta in FactorRegistry().list():
+    for meta in FactorRegistry().list(include_research=bool(name)):
         if exclude_model and meta.name=='model_gbt':continue
         if name and meta.name!=name:continue
         if (meta.name,meta.version) not in present:continue

@@ -265,20 +265,6 @@ class LifecycleStore:
                         suggested_action="先完成运行并冻结指标产物，再登记 FactorEvaluation。",
                     )
         elif isinstance(record, StrategyVersion):
-            unavailable = []
-            for factor_input in record.factor_inputs:
-                state = self._current_state_with_conn(
-                    conn, ObjectType.FACTOR_VERSION, factor_input.factor_version_id
-                )
-                if state not in {"shadow", "production"}:
-                    unavailable.append(f"{factor_input.factor_version_id}:{state}")
-            if unavailable:
-                raise LifecycleError(
-                    code="STRATEGY_FACTOR_VERSION_NOT_ELIGIBLE",
-                    message=f"策略引用了未通过锁定测试的因子版本：{'、'.join(unavailable)}",
-                    blocking=True,
-                    suggested_action="只使用 shadow 或 production 状态的 FactorVersion。",
-                )
             if record.parent_strategy_version_id:
                 parent = self._get_with_conn(
                     conn, ObjectType.STRATEGY_VERSION, record.parent_strategy_version_id
@@ -388,6 +374,58 @@ class LifecycleStore:
     def get(self, object_type: ObjectType | str, object_id: str) -> Record:
         with self._connect() as conn:
             return self._get_with_conn(conn, ObjectType(object_type), object_id)
+
+    def purge_account(self, account_id: str) -> None:
+        """Explicit account erasure is the only exception to the append-only ledger."""
+        from portfolio.deletion import _contains_account
+
+        def strings(value):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, dict):
+                for item in value.values():
+                    yield from strings(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from strings(item)
+
+        with self._connect() as conn:
+            conn.execute("PRAGMA secure_delete=ON")
+            conn.execute("BEGIN IMMEDIATE")
+            self._verify_triggers(conn)
+            rows = conn.execute("SELECT object_type, object_id, payload FROM lifecycle_objects").fetchall()
+            records = {(row['object_type'], row['object_id']): json.loads(row['payload']) for row in rows}
+            deleted = {key for key, value in records.items() if _contains_account(value, account_id)}
+            while deleted:
+                refs = {object_id for _, object_id in deleted} | {f"lifecycle://{kind}/{object_id}" for kind, object_id in deleted}
+                related = {key for key, value in records.items() if key not in deleted and any(ref in refs for ref in strings(value))}
+                if not related:
+                    break
+                deleted.update(related)
+            if not deleted:
+                conn.commit()
+                return
+            conn.execute("CREATE TEMP TABLE account_erasure (kind TEXT, id TEXT, PRIMARY KEY(kind,id))")
+            conn.executemany("INSERT INTO account_erasure VALUES (?,?)", sorted(deleted))
+            # Drop and recreate deletion guards in one transaction; ordinary writes stay immutable.
+            for name in ("trg_lifecycle_event_no_delete", "trg_lifecycle_object_no_delete"):
+                conn.execute(f"DROP TRIGGER {name}")
+            for table in ("lifecycle_events", "lifecycle_objects"):
+                conn.execute(f"DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM account_erasure WHERE kind=object_type AND id=object_id)")
+            for name in ("trg_lifecycle_event_no_delete", "trg_lifecycle_object_no_delete"):
+                conn.execute(_TRIGGERS[name])
+            conn.commit()
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+        # Account-only report artifacts are no longer reachable through the ledger.
+        retained = {ref for key, value in records.items() if key not in deleted for ref in strings(value)}
+        root = workspace().root.resolve()
+        for key in deleted:
+            for field, ref in records[key].items():
+                if field.endswith("artifact_ref") and isinstance(ref, str) and "://" not in ref and ref not in retained:
+                    path = (root / ref).resolve()
+                    if root in path.parents and path.is_file():
+                        path.unlink()
 
     def _get_with_conn(
         self, conn: sqlite3.Connection, object_type: ObjectType, object_id: str
@@ -560,7 +598,7 @@ class LifecycleStore:
                 else ObjectType.STRATEGY_VERSION
             )
             subject_state = self._current_state_with_conn(conn, subject_kind, exposure.subject_id)
-            if subject_state != "frozen":
+            if subject_kind is ObjectType.STRATEGY_VERSION and subject_state != "frozen":
                 raise LifecycleError(
                     code="LOCKED_TEST_CANDIDATE_NOT_FROZEN",
                     message=f"候选 {exposure.subject_id} 当前为 {subject_state}，不能开封锁定测试",
@@ -580,38 +618,6 @@ class LifecycleStore:
                     blocking=True,
                     suggested_action=f"先把关联 EvaluationRun 正确结束为 {required}。",
                 )
-        if kind is ObjectType.FACTOR_VERSION and target in {"shadow", "production"}:
-            if not self._has_completed_exposure(conn, object_id):
-                raise LifecycleError(
-                    code="FACTOR_LOCKED_TEST_REQUIRED",
-                    message=f"因子版本 {object_id} 尚无已完成的唯一锁定测试",
-                    blocking=True,
-                    suggested_action="冻结候选并完成 LockedTestExposure 后再进入影子或生产。",
-                )
-            if target == "production":
-                factor = self._get_with_conn(conn, kind, object_id)
-                report_rows = conn.execute(
-                    "SELECT object_id, payload FROM lifecycle_objects WHERE object_type=?",
-                    (ObjectType.RESEARCH_REPORT.value,),
-                ).fetchall()
-                approved = any(
-                    json.loads(row["payload"]).get("research_program_id")
-                    == factor.research_program_id
-                    and self._current_state_with_conn(
-                        conn,
-                        ObjectType.RESEARCH_REPORT,
-                        str(row["object_id"]),
-                    )
-                    == "approved"
-                    for row in report_rows
-                )
-                if not approved:
-                    raise LifecycleError(
-                        code="FACTOR_PRODUCTION_REPORT_APPROVAL_REQUIRED",
-                        message=f"因子版本 {object_id} 的研究报告尚未人工批准。",
-                        blocking=True,
-                        suggested_action="先核对并批准带数值引用的 ResearchReport。",
-                    )
         if kind is ObjectType.STRATEGY_VERSION and target == "challenger":
             if not self._has_completed_exposure(conn, object_id):
                 raise LifecycleError(
@@ -834,6 +840,19 @@ class LifecycleStore:
     def _current_state_with_conn(
         conn: sqlite3.Connection, object_type: ObjectType, object_id: str
     ) -> str:
+        if object_type is ObjectType.FACTOR_VERSION:
+            # Factor availability has one source of truth: the catalog's three
+            # states. Historical research events never grant usage permission.
+            row = conn.execute(
+                "SELECT payload FROM lifecycle_objects WHERE object_type=? AND object_id=?",
+                (object_type.value, object_id),
+            ).fetchone()
+            if row:
+                from factors.registry import FactorRegistry
+                name = json.loads(row["payload"])["factor_name"]
+                return next((factor.status.value for factor in FactorRegistry().list(include_research=True)
+                             if factor.name == name), "disabled")
+            return "disabled"
         row = conn.execute(
             "SELECT to_state FROM lifecycle_events WHERE object_type=? AND object_id=? "
             "ORDER BY event_id DESC LIMIT 1",
@@ -935,7 +954,7 @@ class LifecycleStore:
                 object_id = str(row["object_id"])
                 self._require(conn, kind, object_id)
                 key = (kind, object_id)
-                expected = expected_states.get(key, INITIAL_STATES[kind])
+                expected = expected_states.get(key, "proposed" if kind is ObjectType.FACTOR_VERSION else INITIAL_STATES[kind])
                 if str(row["from_state"]) != expected:
                     raise LifecycleError(
                         code="LIFECYCLE_EVENT_CHAIN_BROKEN",
@@ -949,7 +968,8 @@ class LifecycleStore:
                         suggested_action="停止写入并人工审计 lifecycle_events。",
                     )
                 actor = ActorType(str(row["actor_type"]))
-                validate_transition(kind, expected, str(row["to_state"]), actor)
+                if kind is not ObjectType.FACTOR_VERSION:
+                    validate_transition(kind, expected, str(row["to_state"]), actor)
                 if not str(row["actor_ref"]).strip() or not str(row["reason"]).strip():
                     raise LifecycleError(
                         code="LIFECYCLE_EVENT_AUDIT_MISSING",

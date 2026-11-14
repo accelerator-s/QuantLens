@@ -81,6 +81,17 @@ class BacktestRunStore:
     def write_metrics(self, metrics: dict) -> None:
         _write_yaml(self.run_dir / "metrics.yaml", metrics)
 
+    def delete(self) -> None:
+        """Remove an erroneous local attempt permanently, without a tombstone."""
+        import shutil
+        if self.run_dir.exists():
+            shutil.rmtree(self.run_dir)
+
+    def _require_valid(self) -> None:
+        if not self.run_dir.is_dir():
+            raise BacktestError(code='BACKTEST_RUN_NOT_FOUND',
+                message=f'找不到回测运行：{self.run_id}。',blocking=True)
+
     def write_chart(self, name: str, frame: pd.DataFrame) -> None:
         charts = self.run_dir / "charts"
         charts.mkdir(parents=True, exist_ok=True)
@@ -141,6 +152,7 @@ class BacktestRunStore:
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {} if path.exists() else {}
 
     def read_metrics(self) -> dict:
+        self._require_valid()
         path = self.run_dir / "metrics.yaml"
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {} if path.exists() else {}
 
@@ -149,6 +161,7 @@ class BacktestRunStore:
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {} if path.exists() else {}
 
     def read_daily(self, name: str) -> pd.DataFrame:
+        self._require_valid()
         path = self.run_dir / "daily" / f"{name}.parquet"
         if not path.exists():
             raise BacktestError(

@@ -65,7 +65,7 @@ class ResearchReportService:
     def __init__(self, store: LifecycleStore | None = None) -> None:
         self.store = store or LifecycleStore()
 
-    def generate(self, program_id: str) -> ResearchReport:
+    def generate(self, program_id: str, *, narrative_payload: dict[str, Any] | None = None) -> ResearchReport:
         program = self.store.get(ObjectType.RESEARCH_PROGRAM, program_id)
         assert isinstance(program, ResearchProgram)
         subject_type = (
@@ -129,7 +129,10 @@ class ResearchReportService:
                 blocking=True,
                 suggested_action="修复回测报告口径后重新生成。",
             )
-        narrative = self._ai_narrative(program, subject_type, subjects, runs)
+        # A supervising author can supply the same structured contract directly.
+        # Invalid supplied content raises; it never triggers another model call.
+        narrative = (self._validated_narrative(narrative_payload) if narrative_payload is not None
+                     else self._ai_narrative(program, subject_type, subjects, runs))
         report_id = f"RR-{_hash([program_id, narrative, [item.model_dump(mode='json') for item in citations]])[:20].upper()}"
         artifact = workspace().runs / "research_reports" / f"{report_id}.json"
         artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -137,8 +140,6 @@ class ResearchReportService:
             f"# 研究报告：{program.objective}",
             "",
             f"- 研究任务：`{program_id}`",
-            f"- 数据快照：`{program.data_snapshot_id}`",
-            f"- 固定协议哈希：`{program.protocol_hash}`",
             f"- 版本数：{len(subjects)}",
             f"- AI 解读模型：`{narrative['_model_name']}`",
             "",
@@ -172,11 +173,9 @@ class ResearchReportService:
             "",
             "## 局限",
             "",
-            "- 所有数值是特定数据快照、交易成本和样本切分下的历史样本外结果。",
-            "- 因子去重使用验证期横截面排名相关性；多次试验使用折级符号检验和 Bonferroni 校正，折数较少时统计功效有限。",
+            "- 所有数值均为特定数据快照、交易成本和样本切分下的历史结果；训练、验证或锁定测试以评价用途为准。",
+            "- 只有存在对应计算记录时，才可解释因子去重和多次试验的统计校正；缺少独立验证时，不作样本外有效性判断。",
             "- 锁定测试曝光后不得围绕该区间继续调参。",
-            "",
-            "本报告不承诺未来收益；“预期”仅指上述固定口径下的历史样本外统计。",
         ]
         artifact.write_text(json.dumps({"content":"\n".join(lines)},ensure_ascii=False), encoding="utf-8")
         exposure_count = len(
@@ -282,6 +281,10 @@ class ResearchReportService:
             system=_AI_REPORT_SYSTEM,
             model_name=model_name,
         )
+        return self._validated_narrative(payload)
+
+    @staticmethod
+    def _validated_narrative(payload: dict[str, Any]) -> dict[str, str]:
         if payload.get("config_kind") != "research_report_narrative":
             raise LifecycleError(
                 code="RESEARCH_REPORT_AI_KIND_INVALID",

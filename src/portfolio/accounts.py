@@ -13,7 +13,6 @@ from exceptions import (
     PortfolioContractError,
 )
 from paths import Workspace, workspace
-from trash import TrashStore
 
 from .models import Account, Cash
 
@@ -137,7 +136,7 @@ class AccountRegistry:
             code="portfolio.account_not_found",
             message="尚未添加账户。",
             blocking=True,
-            suggested_action="请先在组合跟踪中创建账户。",
+            suggested_action="请先在账户持仓中创建账户。",
         )
 
     def create(self, account: Account) -> None:
@@ -195,6 +194,8 @@ class AccountRegistry:
             "broker": account.broker,
         }
         self._write_index(index)
+        from strategy.capital_guard import on_mutation
+        on_mutation(account.account_id)
 
     def delete(self, account_id: str, *, confirm: bool, deleted_by: str = "user") -> None:
         from .transaction import lock
@@ -206,17 +207,18 @@ class AccountRegistry:
                     blocking=True,
                 )
             account = self.get(account_id)
-            account_dir = self.ws.portfolio_account(account.market, account.instrument_class, account_id)
-            trash = TrashStore(self.ws)
-            entry = trash.move(account_dir, category="portfolio_account", deleted_by=deleted_by,
-                               reason=f"delete account {account_id}")
+            from strategy import StrategyProfileStore
+            bound = [d.profile_name for d in StrategyProfileStore(self.ws.config / 'strategies').list()
+                     if d.extra.get('account_binding', {}).get('account_id') == account_id]
+            if bound:
+                raise PortfolioContractError(code='portfolio.account_has_strategies',
+                    message='该账户仍有关联策略，请先删除这些策略后再删除账户。',
+                    context={'strategies': bound}, blocking=True)
+            from .deletion import delete_account_data
+            delete_account_data(self.ws, account)
             index = self._read_index()
             index.pop(account_id)
-            try:
-                self._write_index(index, default_account_deleted=True if account_id == DEFAULT_ACCOUNT_ID else None)
-            except Exception:
-                trash.restore(entry.bucket_dir.name, confirm=True)
-                raise
+            self._write_index(index, default_account_deleted=True if account_id == DEFAULT_ACCOUNT_ID else None)
 
     def choose(
         self,

@@ -61,7 +61,8 @@
   flex-shrink: 0;
 }
 
-.topbar__health {
+.topbar__health,
+.service-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -76,24 +77,31 @@
   cursor: pointer;
 }
 .topbar__health:hover { border-color: var(--accent); }
-.topbar__health[data-state="starting"] .topbar__dot { background: var(--accent); animation: service-pulse 1.4s ease-in-out infinite; }
+.service-status { background: transparent; cursor: default; font-weight: var(--weight-button); }
+.topbar__health[data-state="starting"] .topbar__dot,
+.service-status[data-state="starting"] .service-status__dot { background: var(--accent); animation: service-pulse 1.4s ease-in-out infinite; }
 @keyframes service-pulse { 50% { opacity: .3; } }
 
-.topbar__dot {
+.topbar__dot,
+.service-status__dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--ink-2);
+  flex-shrink: 0;
 }
 
-.topbar__health[data-state="ok"] .topbar__dot {
+.topbar__health[data-state="ok"] .topbar__dot,
+.service-status[data-state="ok"] .service-status__dot {
   background: var(--safe);
 }
 
-.topbar__health[data-state="warn"] .topbar__dot {
+.topbar__health[data-state="warn"] .topbar__dot,
+.service-status[data-state="warn"] .service-status__dot {
   background: var(--warn);
 }
 
-.topbar__health[data-state="err"] .topbar__dot {
+.topbar__health[data-state="err"] .topbar__dot,
+.service-status[data-state="err"] .service-status__dot {
   background: var(--danger);
 }

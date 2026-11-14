@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from paths import workspace
+from security import confined_path
 
 from .exceptions import MarketRuleNotFoundError, MarketRuleValidationError
 from .models import MarketRuleConfig, MarketRuleStatus, validate_transition
@@ -147,7 +148,7 @@ class MarketRuleRegistry:
         return self.path / _META_FILE
 
     def _rule_path(self, name: str) -> Path:
-        return self.path / f"{name}.yaml"
+        return confined_path(self.path, name, ".yaml")
 
     def _load_all(self) -> list[MarketRuleConfig]:
         rules: list[MarketRuleConfig] = []

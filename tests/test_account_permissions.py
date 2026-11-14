@@ -108,7 +108,7 @@ class AccountPermissions(unittest.TestCase):
         from trash import TrashStore
         account = self.account('待删除账户')
         directory = workspace().portfolio_account(account.market, account.instrument_class, account.account_id)
-        for name in ['holdings', 'trades', 'snapshots', 'plans/active']:
+        for name in ['holdings', 'trades', 'trades_audit', 'snapshots', 'plans/active', 'plans/archived']:
             target = directory / name / 'fixture.txt'
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(name)
@@ -119,6 +119,8 @@ class AccountPermissions(unittest.TestCase):
         preview = self.client.request('DELETE', url, json={})
         self.assertEqual(preview.status_code, 200, preview.text)
         self.assertTrue(preview.json()['requires_confirm'])
+        self.assertNotIn('说明', preview.json()['preview'])
+        self.assertNotIn('删除范围', preview.json()['preview'])
         self.assertEqual(workspace().portfolio_index.read_bytes(), index)
         self.assertTrue(directory.exists())
         self.assertTrue(automation.load().enabled)
@@ -130,9 +132,7 @@ class AccountPermissions(unittest.TestCase):
         self.assertEqual([a.account_id for a in AccountRegistry().list()], [DEFAULT_ACCOUNT_ID])
         self.assertEqual(automation.load().account_ids, [])
         self.assertFalse(automation.load().enabled)
-        entry, = TrashStore().list(category='portfolio_account')
-        for name in ['holdings', 'trades', 'snapshots', 'plans/active']:
-            self.assertEqual((entry.content_path / name / 'fixture.txt').read_text(), name)
+        self.assertEqual(TrashStore().list(), [])
         self.assertEqual(self.client.request('DELETE', url, json={'confirm': True}).status_code, 404)
 
     def test_delete_default_selects_remaining_account_and_survives_restart(self):
@@ -161,25 +161,97 @@ class AccountPermissions(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         prepare()
         self.assertEqual(self.client.get('/api/accounts').json(), {'items': [], 'default_account_id': ''})
-        result = self.client.post('/api/backtests', json={'strategy_id': 'research_reversal_5',
+        result = self.client.post('/api/backtest/runs', json={'strategy_id': 'research_reversal_5',
             'start': '2024-01-02', 'end': '2024-01-05'})
         self.assertEqual(result.status_code, 404, result.text)
         self.assertIn('创建账户', result.json()['detail']['suggested_action'])
         created = self.account('重新创建')
         self.assertEqual(self.client.get('/api/accounts').json()['default_account_id'], created.account_id)
 
-    def test_delete_requires_confirmation_and_restores_files_on_index_failure(self):
+    def test_delete_requires_confirmation_and_does_not_restore_files_on_index_failure(self):
         from exceptions import PortfolioContractError
         from portfolio.accounts import AccountRegistry, DEFAULT_ACCOUNT_ID
         from trash import TrashStore
         registry = AccountRegistry()
+        directory = registry.ws.portfolio_account('CN-A', 'stock', DEFAULT_ACCOUNT_ID)
         with self.assertRaises(PortfolioContractError):
             registry.delete(DEFAULT_ACCOUNT_ID, confirm=False)
+        self.assertTrue(directory.exists())
         with patch.object(registry, '_write_index', side_effect=OSError('disk unavailable')):
             with self.assertRaises(OSError):
                 registry.delete(DEFAULT_ACCOUNT_ID, confirm=True)
-        self.assertEqual(registry.get(DEFAULT_ACCOUNT_ID).cash[0].available, Decimal('1000000'))
+        self.assertFalse(directory.exists())
         self.assertEqual(TrashStore().list(), [])
+
+    def test_delete_purges_old_recovery_copies_without_affecting_other_accounts(self):
+        from portfolio.accounts import AccountRegistry
+        from portfolio.transaction import recover, transaction
+        from trash import TrashStore
+        registry = AccountRegistry()
+        account = self.account('永久删除')
+        other = self.account('保留账户')
+        directory = registry.ws.portfolio_account(account.market, account.instrument_class, account.account_id)
+        other_directory = registry.ws.portfolio_account(other.market, other.instrument_class, other.account_id)
+        for current in (account, other):
+            response = self.client.post(f'/api/accounts/{current.account_id}/cash', json={'total': '123', 'confirm': True})
+            self.assertEqual(response.status_code, 200, response.text)
+        # Include a shared index copy, and an interrupted transaction that startup would restore.
+        with transaction([registry.ws.portfolio_index]):
+            pass
+        manifests = list((registry.ws.portfolio_root / '.transactions').glob('*/state.json'))
+        for manifest in manifests:
+            state = json.loads(manifest.read_text())
+            if any(account.account_id in item['path'] for item in state['files']):
+                manifest.write_text(json.dumps({**state, 'status': 'prepared'}))
+        legacy = TrashStore().move(directory, category='portfolio_account', deleted_by='legacy')
+        shutil.copytree(legacy.content_path, directory)
+        response = self.client.request('DELETE', f'/api/accounts/{account.account_id}', json={'confirm': True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(directory.exists())
+        self.assertEqual(TrashStore().list(), [])
+        remaining = list((registry.ws.portfolio_root / '.transactions').glob('*/state.json'))
+        # Cash transactions also back up the shared index, so their old copies contain this ID.
+        self.assertEqual(remaining, [])
+        recover()
+        self.assertFalse(directory.exists())
+        self.assertTrue(other_directory.exists())
+        self.assertEqual(registry.get(other.account_id).cash[0].available, Decimal('123'))
+
+    def test_delete_purges_lifecycle_plans_execution_history_and_dependents(self):
+        from lifecycle.store import LifecycleStore
+        from portfolio.accounts import AccountRegistry
+        import sqlite3
+        account = self.account('删除计划与成交')
+        other = self.account('保留计划')
+        store = LifecycleStore()
+        report = self.root / 'runs/reports/account.json'
+        report.parent.mkdir(parents=True)
+        report.write_text('account report')
+        records = [
+            ('portfolio_plan', 'plan-delete', {'account_ids': [account.account_id]}),
+            ('portfolio_plan', 'plan-keep', {'account_ids': [other.account_id]}),
+            ('execution_record', 'fill-delete', {'account_id': account.account_id, 'portfolio_plan_id': 'plan-delete'}),
+            ('attribution_record', 'attr-delete', {'execution_record_id': 'fill-delete'}),
+            ('learning_event', 'learn-delete', {'source_object_refs': [{'object_type': 'attribution_record', 'object_id': 'attr-delete'}]}),
+            ('research_report', 'report-delete', {'subject_refs': [{'object_type': 'learning_event', 'object_id': 'learn-delete'}], 'report_artifact_ref': 'runs/reports/account.json'}),
+            ('evaluation_run', 'shadow-delete', {'artifact_ref': 'lifecycle://portfolio_plan/plan-delete'}),
+        ]
+        with store._connect() as conn:
+            for kind, identity, payload in records:
+                conn.execute('INSERT INTO lifecycle_objects VALUES (?,?,?,?,?,?)',
+                             (kind, identity, datetime.now(UTC).isoformat(), 1, json.dumps(payload), 'fixture'))
+                conn.execute('INSERT INTO lifecycle_events (object_type,object_id,from_state,to_state,actor_type,actor_ref,reason,created_at,payload) VALUES (?,?,?,?,?,?,?,?,?)',
+                             (kind, identity, 'proposed', 'active', 'system', 'fixture', 'fixture', datetime.now(UTC).isoformat(), '{}'))
+            conn.commit()
+        AccountRegistry().delete(account.account_id, confirm=True)
+        with store._connect() as conn:
+            self.assertEqual([row['object_id'] for row in conn.execute('SELECT object_id FROM lifecycle_objects')], ['plan-keep'])
+            self.assertEqual([row['object_id'] for row in conn.execute('SELECT object_id FROM lifecycle_events')], ['plan-keep'])
+            store._verify_triggers(conn)
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute('DELETE FROM lifecycle_objects')
+        self.assertFalse(report.exists())
+        LifecycleStore()  # Startup still verifies all append-only guards.
 
     def test_removed_account_actions_are_not_exposed_by_backend(self):
         from portfolio.accounts import DEFAULT_ACCOUNT_ID
@@ -189,7 +261,7 @@ class AccountPermissions(unittest.TestCase):
     def test_permission_and_capital_filter_before_top_n(self):
         from portfolio.construct import construct, Constraints
         frame = pd.DataFrame({'code': ['688001', '689001', '000001', '000002'],
-                              'score': [10., 9., 8., 7.], 'close': [10., 10., 1000., 5.]})
+                              'score': [10., 9., 8., 7.], 'close': [10., 10., 1000., 5.], 'cluster_id':[0,1,2,3], 'industry_code':['a','b','c','d']})
         constraints = Constraints(max_positions=1)
         self.assertEqual(construct(frame, constraints).code.tolist(), ['688001'])
         self.assertEqual(construct(frame, constraints, star_market_enabled=False).code.tolist(), ['000001'])
@@ -276,8 +348,8 @@ class AccountPermissions(unittest.TestCase):
             jobs.append(action)
             return 'test-task'
         outcome = SimpleNamespace(run_id='BT-test', metrics={})
-        with patch('backtest.engine.run_backtest', return_value=outcome) as run, patch('quantlens.routes.manager.start', side_effect=start), patch('portfolio.capital.account_capital', return_value=Decimal('12345')):
-            result = self.client.post('/api/backtests', json={'strategy_id': 'research_reversal_5',
+        with patch('backtest.engine.run_backtest', return_value=outcome) as run, patch('webui.backend.routes.backtest.manager.start', side_effect=start), patch('portfolio.capital.account_capital', return_value=Decimal('12345')):
+            result = self.client.post('/api/backtest/runs', json={'strategy_id': 'research_reversal_5',
                 'start': '2024-01-02', 'end': '2024-01-05', 'account_id': account.account_id, 'capital': 999999})
         self.assertEqual(result.status_code, 200, result.text)
         self.client.post(f'/api/accounts/{account.account_id}/settings', json={'alias': account.alias, 'star_market_enabled': True, 'confirm': True})
@@ -295,14 +367,14 @@ class AccountPermissions(unittest.TestCase):
             return 'default-test-task'
         outcome = SimpleNamespace(run_id='BT-default', metrics={})
         with patch('backtest.engine.run_backtest', return_value=outcome) as run, \
-             patch('quantlens.routes.manager.start', side_effect=start), \
+             patch('webui.backend.routes.backtest.manager.start', side_effect=start), \
              patch('portfolio.capital.account_capital', return_value=Decimal('1000000')) as capital:
             for account_id in [None, '', DEFAULT_ACCOUNT_ID]:
                 payload = {'strategy_id': 'research_reversal_5', 'start': '2024-01-02',
                            'end': '2024-01-05', 'capital': 99}
                 if account_id is not None:
                     payload['account_id'] = account_id
-                result = self.client.post('/api/backtests', json=payload)
+                result = self.client.post('/api/backtest/runs', json=payload)
                 self.assertEqual(result.status_code, 200, result.text)
                 self.assertEqual(capital.call_args.args[0].account_id, DEFAULT_ACCOUNT_ID)
                 jobs[-1](lambda _: None)
@@ -325,7 +397,7 @@ class AccountPermissions(unittest.TestCase):
         codes = ['688001', '689001', '000001', '000002']
         close = pd.DataFrame(10., index=dates, columns=codes)
         market = {'close': close, 'high': close*1.01, 'low': close*.99, 'ret_wd': close*0,
-                  'is_trading': close.notna(), 'listed_days': close*0+500, 'trading_status': close*0+1}
+                  'is_trading': close.notna(), 'listed_days': close*0+500, 'trading_status': close*0+1, 'is_delisting': close.notna() & False}
         payload = {'market': market, 'signal': SignalResult(close, {}, {}),
                    'delisting_dates': pd.Series(pd.NaT, index=codes), 'mask': close.notna(),
                    'clusters': close*0, 'industries': close*0, 'breadth': pd.Series(.8, index=dates)}

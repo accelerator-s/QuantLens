@@ -1,13 +1,12 @@
-import {mountTabs} from '../../core/tabs.js';
+import {newestFirst} from '../../core/sort.js';
 import { renderState } from "../state-card/state-card.js";
-import { createSelect } from "../../core/select.js";
-import { areaChart, barChart, lineChart } from "../../core/charts.js";
+import { configureDatePicker } from "../../core/date-picker.js";
+import { areaChart, barChart } from "../../core/charts.js";
 import { badge, fmtDate, fmtNum, fmtPct, fmtTime, signClass } from "../../core/fmt.js";
-import { el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
-import { formDialog } from "../confirm-dialog/form-dialog.js";
-import { toastError } from "../../core/toast.js";
+import { el, kvEl, tableEl, remoteTableEl } from "../../core/dom.js";
+import { returnComparison } from "./return-comparison.js";
 
-const TRADES_PAGE = 100;
+const TRADES_PAGE = 10;
 
 
 const METRIC_DEFS = {
@@ -66,82 +65,164 @@ function runStateBadge(state) {
   return badge(RUN_STATE_LABEL[state] || state || "?", RUN_STATE_TONE[state] || "muted");
 }
 
-function bindBacktestStart(root, ctx) {
-  root.querySelector('[data-backtest-start]').addEventListener('click', async (event) => {
-    const button=event.currentTarget;
-    button.disabled=true;
-    try {
-      const [strategies,accounts]=await Promise.all([ctx.api.strategies(),ctx.api.accounts()]);
-      const values=await formDialog({title:'新建回测',submitLabel:'运行回测',
-        fields:[
-          {key:'strategy_id',label:'策略',kind:'select',required:true,options:strategies.items.filter(s=>!s.is_template).map(s=>({value:s.profile_name,label:s.display_name||s.profile_name}))},
-          {key:'account_id',label:'账户',kind:'select',required:true,value:ctx.accountId||accounts.default_account_id,options:accounts.items.map(a=>({value:a.account_id,label:a.alias||a.account_id}))},
-          {key:'start',label:'开始日期',kind:'date',required:true},
-          {key:'end',label:'结束日期',kind:'date',required:true},
-        ]});
-      if (!values) return;
-      const result=await ctx.api.backtestStart(values);
-      ctx.bus.emit('toast',{kind:'success',title:'回测已提交，可在任务列表查看进度',detail:result.task_id});
-    } catch (error) { toastError(ctx.bus,error,'回测提交失败'); }
-    finally { button.disabled=false; }
-  });
+function benchmarkSummary(run) {
+  const benchmark = run.metrics?.benchmark || {};
+  const protocol = run.config?.protocol || {};
+  const names = {
+    same_cluster_equal_weight: "同风格簇等权",
+    universe_equal_weight: "股票池等权",
+    universe_float_cap_weight: "股票池流通市值加权",
+    industry_equal_weight: "同行业等权",
+    index: "全收益指数",
+    blend: "自定义混合基准",
+    cash: "现金零收益",
+  };
+  const name = benchmark.name || protocol.benchmark;
+  const label = benchmark.label || names[name] || name || "未记录口径";
+  return { label };
 }
 
 async function mountContent(root, ctx) {
   const listHost = root.querySelector("[data-list]");
   const detailHost = root.querySelector("[data-detail]");
 
-  let currentId = ctx.backtestRun || "";
+  const viewState = ((ctx.tabState ||= {}).backtest ||= {});
+  let requestedRun = viewState.requestedRun || (!viewState.runId ? ctx.backtestRun : '') || '';
+  let currentId = requestedRun || viewState.runId || '';
+  let linkedRun = requestedRun || viewState.linkedRun || '';
   let experiments = null;
+  const curveVisibility = (ctx.tabState ||= {}).curveVisibility ||= {};
+  let comparisonChart;
+  let detailRequest = 0;
+  let renderedRunId = '';
+  let listRequest = 0;
+  let listRevision = '';
+  let refreshTimer;
+  let runItems = [];
+  let loadingRunId = '';
+  const detailCache = new Map();
+  const resourceCache = new Map();
+  const signature = id => JSON.stringify(runItems.find(item => item.run_id === id) || {});
+  function cachedResource(key, fetcher) {
+    if (!resourceCache.has(key)) {
+      const promise = fetcher().catch(error => { resourceCache.delete(key); throw error; });
+      resourceCache.set(key, promise);
+      if (resourceCache.size > 100) resourceCache.delete(resourceCache.keys().next().value);
+    }
+    return resourceCache.get(key);
+  }
 
   ctx.bus.on("route", (id) => {
-    if (id === "backtest") load();
+    if (id === "backtest") load({quiet: !!listRevision});
   });
   
   ctx.bus.on("backtest:open", (runId) => {
     currentId = runId;
+    requestedRun = runId;
+    viewState.requestedRun = runId;
+    viewState.runId = runId;
+    linkedRun = viewState.linkedRun = runId;
+    if (listRevision) renderList(runItems, false);
   });
   await load();
 
   function factorSummary(factors) {
     const items = factors?.items || [];
     if (!items.length) return "";
-    const names = items.map((f) => (f.weight_override != null ? `${f.name}（权重 ${f.weight_override}）` : f.name));
+    const names = items.map((f) => {
+      if (f.weight_override == null) return f.name;
+      const weight = fmtNum(f.weight_override, 3).replace(/\.?0+$/, "");
+      return `${f.name}（权重 ${weight}）`;
+    });
     const tail = factors.weighting === "equal" && items.length > 1 ? "，等权合成" : "";
-    return `${names.join("、")}${tail}`;
+    const preview = names.slice(0, 2).join("、") + (names.length > 2 ? `…等 ${names.length} 个因子` : "");
+    const node = el("span", "backtest__factor-summary", `${preview}${tail}`);
+    node.title = `${names.join("、")}${tail}`;
+    node.setAttribute("aria-label", node.title);
+    return node;
   }
 
-  async function load() {
-    await renderState(listHost, { kind: "loading", title: "加载回测运行…" });
-    experiments = null;
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    if (!runItems.some(item => item.state === "running")) return;
+    refreshTimer = setTimeout(() => {
+      if (root.closest('.view')?.hidden || document.hidden) scheduleRefresh();
+      else load({ quiet: true });
+    }, 5000);
+  }
+
+  async function load({ quiet = !!listRevision } = {}) {
+    clearTimeout(refreshTimer);
+    const request = ++listRequest;
+    if (!quiet) await renderState(listHost, { kind: "loading", title: "加载回测运行…" });
     try {
       const data = await ctx.api.backtestRuns();
-      renderList(data.items);
+      if (request !== listRequest) return;
+      data.items = newestFirst(data.items, ['updated_at', 'created_at']);
+      const revision = JSON.stringify(data.items);
+      const previousSignature = signature(currentId);
+      runItems = data.items;
+      const changed = previousSignature !== signature(currentId);
+      if (changed) {
+        detailCache.delete(currentId);
+        resourceCache.clear();
+        experiments = null;
+      }
+      if (!quiet || revision !== listRevision || currentId !== renderedRunId || requestedRun) renderList(data.items, changed);
+      listRevision = revision;
     } catch (err) {
+      if (request !== listRequest) return;
+      if (quiet && listRevision) {
+        ctx.bus.emit('toast', {kind: 'error', title: '回测列表更新失败', detail: err.message});
+        return;
+      }
+      listRevision = '';
       await renderState(listHost, {
         kind: "error",
         title: "回测运行加载失败",
         detail: err.message,
         retry: () => load(),
       });
+    } finally {
+      if (request === listRequest) scheduleRefresh();
     }
   }
 
-  function renderList(items) {
+  function renderList(items, refreshDetail = true) {
+    const previousId = currentId;
+    const pageState = listHost.querySelector('.table-panel')?.pageState?.() || viewState;
     listHost.innerHTML = "";
+    if (currentId === linkedRun && !items.some(item => item.run_id === currentId)) {
+      requestedRun = viewState.requestedRun = currentId;
+    }
     if (!items.length) {
       renderState(listHost, {
         kind: "empty",
-        title: "暂无回测运行",
+        title: "暂无已发布回测",
       });
-      detailHost.innerHTML = "";
+      if (requestedRun) loadDetail(requestedRun, refreshDetail);
+      else {
+        ++detailRequest;
+        comparisonChart?.dispose();
+        detailHost.innerHTML = "";
+      }
       return;
     }
     
-    if (!currentId || !items.some(item => item.run_id === currentId)) currentId = items[0].run_id;
+    if (!currentId || (!requestedRun && !items.some(item => item.run_id === currentId))) currentId = items[0].run_id;
+    viewState.runId = currentId;
+    const targetIndex = requestedRun ? items.findIndex(item => item.run_id === currentId) : -1;
     function selectRun(item) {
+      requestedRun = '';
+      viewState.requestedRun = '';
+      linkedRun = viewState.linkedRun = '';
       currentId = item.run_id;
-      listHost.querySelectorAll('tbody tr').forEach(row => row.classList.toggle('is-active', row.dataset.runId === currentId));
+      viewState.runId = currentId;
+      listHost.querySelectorAll('tbody tr').forEach(row => {
+        const active = row.dataset.runId === currentId;
+        row.classList.toggle('is-active', active);
+        row.setAttribute('aria-selected', String(active));
+      });
       loadDetail(currentId);
     }
     const table = tableEl([
@@ -150,35 +231,73 @@ async function mountContent(root, ctx) {
       { key: 'start', label: '回测区间', format: (value, row) => `${value} 至 ${row.end}` },
       { key: 'state', label: '状态', format: runStateBadge },
       { key: 'account_name', label: '账户', format: value => value || '通用研究' },
-    ], items, { onRowClick: selectRun });
-    table.querySelectorAll('tbody tr').forEach((row, index) => {
-      row.dataset.runId = items[index].run_id;
-      row.classList.toggle('is-active', items[index].run_id === currentId);
-      row.tabIndex = 0;
-      row.addEventListener('keydown', event => {
-        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectRun(items[index]); }
-      });
+    ], items, {
+      ...pageState,
+      ...(targetIndex >= 0 ? {page: Math.floor(targetIndex / (pageState.pageSize || 10)) + 1} : {}),
+      onPageChange: (page, pageSize) => Object.assign(viewState, {page, pageSize}),
+      onRowClick: selectRun,
+      onRowRender: (row, item) => {
+        row.dataset.runId = item.run_id;
+        row.classList.toggle('is-active', item.run_id === currentId);
+        row.setAttribute('aria-selected', String(item.run_id === currentId));
+      },
     });
     listHost.append(table);
-    loadDetail(currentId);
+    if (targetIndex >= 0) {
+      requestedRun = '';
+      viewState.requestedRun = '';
+    }
+    if (refreshDetail || currentId !== previousId || renderedRunId !== currentId) loadDetail(currentId, refreshDetail);
   }
 
-  async function loadDetail(runId) {
-    await renderState(detailHost, { kind: "loading", title: "加载运行详情…" });
+  async function loadDetail(runId, force = false) {
+    if (!force && (renderedRunId === runId || loadingRunId === runId)) return;
+    const request = ++detailRequest;
+    const revision = signature(runId);
+    loadingRunId = runId;
+    renderedRunId = '';
+    comparisonChart?.dispose();
+    const cached = detailCache.get(runId);
+    if (cached && cached.revision === revision && !force) {
+      renderDetail(cached.run, cached.nav);
+      renderedRunId = runId;
+      loadingRunId = '';
+      cached.reference.then(reference => {
+        if (currentId === runId && request === detailRequest) comparisonChart?.updateReference(reference);
+      });
+      return;
+    }
+    const slot = el('div');
+    detailHost.replaceChildren(slot);
+    renderState(slot, {kind: 'loading', title: '加载运行详情…'});
     try {
-      const [run, nav] = await Promise.all([
+      const reference = ctx.api.backtestReferences(runId).catch(error => {
+        detailCache.delete(runId);
+        return {status: 'error', items: [], message: error.message || '市场指数加载失败，请重试。'};
+      });
+      const [data, nav] = await Promise.all([
         ctx.api.backtestRun(runId),
         ctx.api.backtestNav(runId).catch(() => null),
       ]);
-      if (currentId !== runId) return;
-      renderDetail({ ...run, run_id: runId }, nav);
+      const run = {...data, run_id: runId};
+      detailCache.set(runId, {run, nav, reference, revision});
+      if (detailCache.size > 12) detailCache.delete(detailCache.keys().next().value);
+      if (currentId !== runId || request !== detailRequest) return;
+      renderDetail(run, nav);
+      renderedRunId = runId;
+      loadingRunId = '';
+      const marketReference = await reference;
+      if (currentId !== runId || request !== detailRequest) return;
+      if (marketReference.status === 'error') detailCache.delete(runId);
+      comparisonChart?.updateReference(marketReference);
     } catch (err) {
+      if (currentId !== runId || request !== detailRequest) return;
       await renderState(detailHost, {
-        kind: "error",
-        title: "运行详情加载失败",
-        detail: err.message,
-        retry: () => loadDetail(runId),
+        kind: 'error', title: '运行详情加载失败', detail: err.message,
+        retry: () => loadDetail(runId, true),
       });
+    } finally {
+      if (request === detailRequest) loadingRunId = '';
     }
   }
 
@@ -196,7 +315,9 @@ async function mountContent(root, ctx) {
   }
 
   function renderDetail(run, nav) {
+    comparisonChart = null;
     detailHost.innerHTML = "";
+    const benchmark = benchmarkSummary(run);
     const card = el("article", "card detail-card");
 
     // ---- 头部与运行信息
@@ -208,40 +329,45 @@ async function mountContent(root, ctx) {
     );
     if (run.archived) head.append(badge("历史归档", "muted"));
     const profile = run.config?.profile || {};
-    for (const f of profile.factors?.items || []) {
-      head.append(badge(`因子 ${run.factor_display_names?.[f.name] || f.name}`));
+    const factorNames = (profile.factors?.items || []).map(f => run.factor_display_names?.[f.name] || f.name);
+    for (const name of factorNames.slice(0, 3)) {
+      const tag = badge(`因子 ${name}`);
+      tag.classList.add("backtest__factor-badge");
+      tag.title = name;
+      head.append(tag);
+    }
+    if (factorNames.length > 3) {
+      const more = badge(`另 ${factorNames.length - 3} 个因子`);
+      more.title = factorNames.join("、");
+      head.append(more);
     }
     if (run.config && run.config.protocol_locked === false) {
       head.append(badge("协议未锁定", "warn"));
     }
     card.append(head);
-    const timescale = profile.timescale === "daily" ? "日频" : profile.timescale;
-    card.append(
-      kvEl([
-        ["采用策略", run.profile_display_name || run.profile],
-        ["使用因子", factorSummary({
-          ...profile.factors,
-          items: (profile.factors?.items || []).map((item) => ({
-            ...item,
-            name: run.factor_display_names?.[item.name] || item.name,
-          })),
-        })],
-        ["市场 / 频率", profile.market ? `${profile.market} · ${timescale || "?"}` : null],
-        ["回测区间", `${run.config?.config?.start || "?"} ~ ${run.config?.config?.end || "?"}`],
-        ["初始资金", fmtNum(run.config?.config?.initial_capital, 0)],
-        ["账户", run.config?.config?.account_name || "通用研究"],
-        ["科创板权限", run.config?.config?.star_market_enabled === false ? "未开通（已排除）" : "包含科创板"],
-        ["config_hash", run.config?.config_hash],
-        ["protocol_hash", run.config?.protocol_hash],
-        ["最近更新", fmtTime(run.status?.updated_at)],
-      ]),
-    );
+    const summary = kvEl([
+      ["采用策略", run.profile_display_name || run.profile],
+      ["使用因子", factorSummary({
+        ...profile.factors,
+        items: (profile.factors?.items || []).map((item) => ({
+          ...item,
+          name: run.factor_display_names?.[item.name] || item.name,
+        })),
+      })],
+      ["回测区间", `${run.config?.config?.start || "?"} ~ ${run.config?.config?.end || "?"}`],
+      ["初始资金", fmtNum(run.config?.config?.initial_capital, 0)],
+      ["账户", run.config?.config?.account_name || "通用研究"],
+      ["科创板权限", run.config?.config?.star_market_enabled === false ? "未开通（已排除）" : "包含科创板"],
+      ["最近更新", fmtTime(run.status?.updated_at)],
+    ]);
+    summary.classList.add("backtest__summary");
+    card.append(summary);
     detailHost.append(card);
 
     // ---- 指标卡矩阵
     const metrics = run.metrics || {};
     if (Object.keys(metrics).length) {
-      const metricsCard = el("article", "card detail-card");
+      const metricsCard = el("article", "card detail-card backtest__metrics");
       metricsCard.append(el("h3", "", "回测指标"));
       const window = metrics.window || {};
       if (window.start && window.end) metricsCard.append(el("p", "backtest__metric-window item-row__meta",
@@ -280,26 +406,10 @@ async function mountContent(root, ctx) {
 
     // ---- 净值与回撤
     if (nav && nav.items.length) {
-      const navCard = el("article", "card detail-card");
-      navCard.append(el("h3", "", `净值曲线（${nav.total_rows} 个交易日）`));
       const labels = nav.items.map((r) => fmtDate(r.date));
-      const nav0 = Number(nav.items[0].nav) || 1;
-      const series = [
-        {
-          label: "策略（归一化）",
-          color: "var(--accent)",
-          values: nav.items.map((r) => (r.nav == null ? null : Number(r.nav) / nav0)),
-        },
-      ];
-      if (nav.items[0].benchmark_nav != null) {
-        series.push({
-          label: "基准",
-          color: "var(--warn)",
-          values: nav.items.map((r) => (r.benchmark_nav == null ? null : Number(r.benchmark_nav))),
-        });
-      }
-      navCard.append(lineChart({ series, labels, height: 280 }));
-      detailHost.append(navCard);
+      comparisonChart = returnComparison({run, nav, benchmark, visibility: curveVisibility,
+        onRetry: () => loadDetail(run.run_id, true)});
+      detailHost.append(comparisonChart.node);
       const drawdownCard = el("article", "card detail-card");
       drawdownCard.append(el("h3", "", "回撤"));
       drawdownCard.append(
@@ -330,8 +440,9 @@ async function mountContent(root, ctx) {
     
     detailHost.append(buildTradesCard(run.run_id));
     detailHost.append(buildPositionsCard(run.run_id));
+    const request = detailRequest;
     buildAnalysisCard(run.run_id).then((node) => {
-      if (node && currentId === run.run_id) detailHost.append(node);
+      if (node && currentId === run.run_id && request === detailRequest) detailHost.append(node);
     });
   }
 
@@ -339,102 +450,98 @@ async function mountContent(root, ctx) {
   function buildTradesCard(runId) {
     const card = el("article", "card detail-card");
     card.append(el("h4", "", "交易明细"));
-    const host = el("div");
-    const bar = el("div", "detail-card__head");
-    const more = el("button", "btn btn--ghost", "加载更多");
-    more.type = "button";
-    const counter = el("span", "item-row__meta");
-    bar.append(more, counter);
-    card.append(host, bar);
-
-    let offset = 0;
-    let rows = [];
-    async function loadPage() {
-      more.disabled = true;
-      try {
-        const data = await ctx.api.backtestTrades(runId, { limit: TRADES_PAGE, offset });
-        rows = rows.concat(data.items);
-        offset = rows.length;
-        host.innerHTML = "";
-        if (!rows.length) {
-          host.append(el("p", "item-row__meta", "无交易记录。"));
-          bar.hidden = true;
-          return;
-        }
-        host.append(
-          tableEl(
-            [
-              { key: "date", label: "日期", format: (v) => fmtDate(v) },
-              { key: "instrument", label: "标的" },
-              {
-                key: "side",
-                label: "方向",
-                format: (v) => badge(SIDE_LABEL[v] || v, v === "buy" ? "accent" : "muted"),
-              },
-              {
-                key: "status",
-                label: "状态",
-                format: (v) => badge(ORDER_STATUS_LABEL[v] || v, v === "filled" ? "safe" : "warn"),
-              },
-              { key: "target_weight", label: "目标权重", num: true, format: (v) => fmtPct(v, 2) },
-              { key: "shares", label: "股数", num: true, format: (v) => fmtNum(v, 0) },
-              { key: "exec_price", label: "成交价", num: true, format: (v) => fmtNum(v, 3) },
-              { key: "amount", label: "金额", num: true, format: (v) => fmtNum(v, 0) },
-              { key: "note", label: "备注" },
-            ],
-            rows,
-          ),
-        );
-        counter.textContent = `已显示 ${rows.length} / ${data.total_rows} 条`;
-        more.hidden = rows.length >= data.total_rows;
-      } catch (err) {
-        host.innerHTML = "";
-        host.append(el("p", "item-row__meta", `交易明细加载失败：${err.message}`));
-      } finally {
-        more.disabled = false;
-      }
-    }
-    more.addEventListener("click", () => loadPage());
-    loadPage();
+    card.append(remoteTableEl(
+      [
+        { key: "date", label: "日期", format: (v) => fmtDate(v) },
+        { key: "instrument", label: "标的" },
+        {
+          key: "side",
+          label: "方向",
+          format: (v) => badge(SIDE_LABEL[v] || v, v === "buy" ? "accent" : "muted"),
+        },
+        {
+          key: "status",
+          label: "状态",
+          format: (v) => badge(ORDER_STATUS_LABEL[v] || v, v === "filled" ? "safe" : "warn"),
+        },
+        { key: "target_weight", label: "目标权重", num: true, format: (v) => fmtPct(v, 2) },
+        { key: "shares", label: "股数", num: true, format: (v) => fmtNum(v, 0) },
+        { key: "exec_price", label: "成交价", num: true, format: (v) => fmtNum(v, 3) },
+        { key: "amount", label: "金额", num: true, format: (v) => fmtNum(v, 0) },
+        { key: "note", label: "备注" },
+      ],
+      params => cachedResource(`trades:${runId}:${signature(runId)}:${params.limit}:${params.offset}`,
+        () => ctx.api.backtestTrades(runId, params)),
+      {pageSize: TRADES_PAGE},
+    ));
     return card;
   }
 
   
   function buildPositionsCard(runId) {
-    const card = el("article", "card detail-card");
+    const card = el("article", "card detail-card backtest__positions");
     const head = el("div", "detail-card__head");
     head.append(el("h4", "", "持仓快照"));
-    const selectHost = el("div", "select backtest__date-select");
-    selectHost.innerHTML = selectMarkup("选择日期");
-    head.append(selectHost);
+    const dateHost = el("div", "backtest__date-select");
+    const dateInput = el("input", "input");
+    dateInput.type = 'date';
+    dateInput.required = true;
+    dateInput.disabled = true;
+    dateInput.setAttribute('aria-label', '持仓快照日期');
+    dateHost.append(dateInput);
+    head.append(dateHost);
     const host = el("div");
     card.append(head, host);
 
-    const dateSelect = createSelect(selectHost, { onChange: (d) => loadDay(d) });
+    let selectedDate = '';
+    dateInput.addEventListener('change', () => {
+      const value = dateInput.value;
+      if (value && value >= dateInput.min && value <= dateInput.max) loadDay(value);
+      else dateInput.value = selectedDate;
+    });
+    let dayRequest = 0;
     async function loadDay(date) {
-      host.innerHTML = "";
+      const request = ++dayRequest;
+      // Preserve the document height across loading and shorter/empty snapshots.
+      host.style.minHeight = `${host.getBoundingClientRect().height}px`;
+      host.replaceChildren(el('p', 'item-row__meta', '正在读取持仓…'));
+      host.setAttribute('aria-busy', 'true');
       try {
-        const data = await ctx.api.backtestPositions(runId, date ? { date } : {});
-        if (!dateSelect.value && data.dates.length) {
-          dateSelect.setOptions(data.dates.slice().reverse(), data.date);
+        const params = {date, limit: 10, offset: 0};
+        const data = await cachedResource(`positions:${runId}:${signature(runId)}:${date}:10:0`,
+          () => ctx.api.backtestPositions(runId, params));
+        if (request !== dayRequest) return;
+        const dates = (data.dates || []).map(fmtDate).sort();
+        selectedDate = data.date ? fmtDate(data.date) : '';
+        dateInput.value = selectedDate;
+        dateInput.min = data.date_range?.start || dates[0] || '';
+        dateInput.max = data.date_range?.end || dates.at(-1) || '';
+        dateInput.disabled = !dates.length;
+        configureDatePicker(dateInput, {highlightedDates: data.adjustment_dates || []});
+        // The shared calendar enhances dynamically mounted inputs before data arrives.
+        dateHost.querySelector('.date-input__toggle')?.toggleAttribute('disabled', dateInput.disabled);
+        host.replaceChildren(remoteTableEl([
+          { key: "instrument", label: "标的", format: (code, row) => {
+            const stock = el('span', 'backtest__stock');
+            stock.append(el('span', '', row.stock_name || code));
+            if (row.stock_name) stock.append(el('span', 'backtest__stock-code', code));
+            return stock;
+          } },
+          { key: "weight", label: "权重", num: true, format: (v) => fmtPct(v, 2) },
+          { key: "market_value", label: "市值", num: true, format: (v) => fmtNum(v, 0) },
+          { key: "shares_nominal", label: "股数", num: true, format: (v) => fmtNum(v, 0) },
+        ], page => cachedResource(`positions:${runId}:${signature(runId)}:${data.date}:${page.limit}:${page.offset}`,
+          () => ctx.api.backtestPositions(runId, {...page, date: data.date})), {initialData: data}));
+        if (data.snapshot_date && fmtDate(data.snapshot_date) !== selectedDate) {
+          host.prepend(el('p', 'item-row__meta backtest__snapshot-note', `非交易日，显示 ${fmtDate(data.snapshot_date)} 收盘持仓`));
         }
-        if (!data.items.length) {
-          host.append(el("p", "item-row__meta", "该日无持仓。"));
-          return;
-        }
-        host.append(
-          tableEl(
-            [
-              { key: "instrument", label: "标的" },
-              { key: "weight", label: "权重", num: true, format: (v) => fmtPct(v, 2) },
-              { key: "market_value", label: "市值", num: true, format: (v) => fmtNum(v, 0) },
-              { key: "shares_nominal", label: "股数", num: true, format: (v) => fmtNum(v, 0) },
-            ],
-            data.items,
-          ),
-        );
       } catch (err) {
-        host.append(el("p", "item-row__meta", `持仓加载失败：${err.message}`));
+        if (request !== dayRequest) return;
+        const errorHost = el('div');
+        host.replaceChildren(errorHost);
+        renderState(errorHost, {kind: 'error', title: '持仓加载失败', detail: err.message, retry: () => loadDay(date)});
+      } finally {
+        if (request === dayRequest) host.setAttribute('aria-busy', 'false');
       }
     }
     loadDay("");
@@ -444,10 +551,10 @@ async function mountContent(root, ctx) {
   
   async function buildAnalysisCard(runId) {
     try {
-      if (!experiments) experiments = (await ctx.api.experiments()).items;
-      const exp = experiments.find((e) => e.run_id === runId);
+      if (!experiments) experiments = ctx.api.experiments().then(data => data.items).catch(error => { experiments = null; throw error; });
+      const exp = (await experiments).find((e) => e.run_id === runId);
       if (!exp) return null;
-      const detail = await ctx.api.experiment(exp.exp_id);
+      const detail = await cachedResource(`analysis:${exp.exp_id}`, () => ctx.api.experiment(exp.exp_id));
       const analyses = detail.events.filter((e) => e.event_type === "ai_analysis");
       const card = el("article", "card detail-card");
       const head = el("div", "detail-card__head");
@@ -491,15 +598,5 @@ async function mountContent(root, ctx) {
 }
 
 export async function mount(root, ctx) {
-  const html = root.innerHTML;
-  root.classList.add('backtest-page');
-  await mountTabs(root, ctx, 'backtest', [
-    {id: 'strategy', label: '策略配置', component: 'strategy'},
-    {id: 'results', label: '回测结果', html, mount: mountContent},
-  ]);
-  const createButton = el('button', 'btn btn--primary', '新建回测');
-  createButton.type = 'button';
-  createButton.dataset.backtestStart = '';
-  root.append(createButton);
-  bindBacktestStart(root, ctx);
+  await mountContent(root, ctx);
 }

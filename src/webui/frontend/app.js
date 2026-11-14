@@ -3,6 +3,8 @@ import { icons } from './core/icons.js';
 import { createBus } from './core/bus.js';
 import { initHealth, createRestartDetector } from './core/health.js';
 import { initTheme } from './core/theme.js';
+import { initDatePickers } from './core/date-picker.js';
+import { initButtonTextOffset } from './core/dom.js';
 import { initToast, toastError } from './core/toast.js';
 import { mountRail } from './components/rail/rail.js';
 import { mountTopbar } from './components/topbar/topbar.js';
@@ -10,8 +12,10 @@ import { mount as mountLens } from './components/lens/lens.js';
 import { createPageCache, prefetchApi, invalidateRequests } from './core/page-cache.js';
 
 const LENS = new Set(['dashboard','stocks','screen']);
-const PAGES = new Set([...LENS,'factors','backtest','portfolio','settings']);
+const PAGES = new Set([...LENS,'factors','strategy-research','backtest','portfolio','trash','settings']);
 initTheme();
+initDatePickers();
+initButtonTextOffset();
 const bus = createBus();
 initHealth(bus);
 initToast(bus);
@@ -23,7 +27,11 @@ const pageCache = createPageCache();
 const shared = {api, icons, navigate, stock:'', backtestRun:'', tabState:{}};
 let currentRoute = '';
 let navigationVersion = 0;
-bus.on('backtest:open', id => { shared.backtestRun = id; shared.tabState.backtest='results'; bus.emit('subtab',{page:'backtest',tab:'results'}); pageCache.invalidate('backtest'); });
+bus.on('backtest:open', id => {
+  shared.backtestRun = id;
+  (shared.tabState.backtest ||= {}).requestedRun = id;
+  pageCache.invalidate('backtest');
+});
 window.addEventListener('quantlens:changed', () => pageCache.invalidate());
 document.querySelector('[data-rail-backdrop]').addEventListener('click', () => document.body.classList.remove('rail-open'));
 
@@ -100,7 +108,8 @@ async function ensureView(id) {
 }
 
 async function navigate(target, {refresh = false} = {}) {
-  const [page, tab] = String(target).split('/');
+  let [page, tab] = String(target).split('/');
+  if (page === 'backtest') tab = undefined;
   const id = PAGES.has(page) ? page : 'dashboard';
   if (tab) shared.tabState[id] = tab;
   closeAssistant();

@@ -8,6 +8,7 @@ from typing import Any
 
 from exceptions import QuantTrainingError
 from paths import Workspace, workspace
+from security import confined_path
 
 from .models import EvolutionConfig, EvolutionStatus, FactorVersion
 
@@ -36,7 +37,7 @@ class EvolutionStore:
         return status
 
     def run_dir(self, research_id: str) -> Path:
-        path = self.root / research_id
+        path = confined_path(self.root, research_id, "")
         if not path.is_dir():
             raise QuantTrainingError(
                 code="EVOLUTION_NOT_FOUND",
@@ -88,13 +89,13 @@ class EvolutionStore:
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
     def save_version(self, research_id: str, version: FactorVersion) -> Path:
-        path = self.run_dir(research_id) / "versions" / f"{version.version_id}.json"
+        path = confined_path(self.run_dir(research_id) / "versions", version.version_id, ".json")
         path.parent.mkdir(parents=True, exist_ok=True)
         self._write_json(path, version.model_dump(mode="json"))
         return path
 
     def load_version(self, research_id: str, version_id: str) -> FactorVersion:
-        path = self.run_dir(research_id) / "versions" / f"{version_id}.json"
+        path = confined_path(self.run_dir(research_id) / "versions", version_id, ".json")
         if not path.exists():
             raise QuantTrainingError(
                 code="EVOLUTION_VERSION_NOT_FOUND",

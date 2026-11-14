@@ -1,0 +1,92 @@
+/* Tables own horizontal scrolling; complete pages stay in the document flow. */
+.table-panel { display: grid; align-content: start; align-self: start; gap: 8px; width: 100%; min-width: 0; max-width: 100%; }
+.table-panel__body { min-width: 0; }
+.table-panel__status { color: var(--ink-2); font-size: var(--text-caption); overflow-wrap: anywhere; }
+.table-panel__status:empty { display: none; }
+.table-panel > .table-wrap,
+.table-panel > .ql-table-wrap {
+  max-height: none;
+  overflow: auto;
+  padding: 0;
+  scrollbar-gutter: auto;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+  overscroll-behavior-x: contain;
+}
+.table-panel :is(.table, .ql-table) { margin: 0; border-spacing: 0; }
+.table-panel :is(.table, .ql-table) thead th {
+  position: static;
+  padding: 8px 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  border-bottom: 1px solid var(--line-0);
+}
+.table-panel :is(.table, .ql-table) tbody td { padding: 9px 12px; line-height: 1.5; }
+.table-panel .table__empty { text-align: center; color: var(--ink-2); }
+.table-panel tr.is-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.table-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 12px;
+  min-width: 0;
+  font-size: var(--text-body);
+  color: var(--ink-2);
+}
+.table-pagination__summary { margin-right: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.table-pagination__controls, .table-pagination__steps, .table-pagination__jump,
+.table-pagination__size, .table-pagination__jump label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+}
+.table-pagination__controls { gap: 6px 10px; justify-content: flex-end; }
+.table-pagination__current { min-width: 60px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.table-pagination input {
+  width: 64px;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 3px 6px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--ink-0);
+  font: inherit;
+}
+.table-pagination input { width: 58px; }
+.table-pagination__size { flex-wrap: nowrap; white-space: nowrap; }
+.table-pagination__size .select { width: 64px; min-width: 64px; flex: none; }
+.table-pagination__size .select__trigger { padding: 4px 8px; font-size: inherit; }
+.table-pagination__size .select--above .select__menu { top: auto; bottom: calc(100% + 3px); }
+.table-pagination .btn { min-height: var(--control-h); padding: 4px 8px; font-size: var(--text-body); white-space: nowrap; }
+.table-pagination :is(input, .select__trigger):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Remove collection scrollbars and their reserved padding around paged tables. */
+.split > .item-list:has(.table-panel),
+.strategy .item-list:has(.table-panel),
+.content-scroll:has(.table-panel),
+.ql-dashboard-scroll:has(.table-panel),
+[data-snapshots]:has(.table-panel),
+[data-plans]:has(.table-panel),
+[data-champion-slots]:has(.table-panel),
+[data-training-list]:has(.table-panel) {
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  scrollbar-gutter: auto;
+}
+.backtest .split > .backtest__runs { display: block; border: 0; background: transparent; }
+.experiments .evolution-sessions { max-height: none; }
+@media (max-width: 600px) {
+  .table-pagination { justify-content: flex-start; }
+  .table-pagination__controls { justify-content: flex-start; }
+  .table-pagination__steps { gap: 4px; }
+  .table-pagination .btn { padding-inline: 6px; }
+  .table-pagination__current { min-width: 52px; }
+}
+@media print { .table-pagination { display: none; } }
+
+.table-pagination[hidden] { display: none; }

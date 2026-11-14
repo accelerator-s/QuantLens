@@ -15,7 +15,7 @@ body {
   background: var(--bg-0);
   color: var(--ink-0);
   font-family: var(--font-sans);
-  font-size: var(--fs-base);
+  font-size: var(--text-body);
   line-height: 1.6;
   font-feature-settings: "tnum" 1, "cv05" 1;
   font-variant-numeric: tabular-nums;
@@ -23,8 +23,12 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+html {
+  font-size: 100%;
+}
+
 body {
-  min-height: 100vh;
+  min-height: var(--viewport-height);
   overflow-x: hidden;
 }
 
@@ -44,14 +48,14 @@ body {
   grid-template-areas:
     "rail topbar"
     "rail workspace";
-  min-height: 100vh;
+  min-height: var(--viewport-height);
 }
 
 #rail-slot {
   grid-area: rail;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: var(--viewport-height);
   background: var(--bg-1);
   border-right: 1px solid var(--line-0);
   z-index: 30;
@@ -653,7 +657,7 @@ input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 68vh;
+  max-height: calc(var(--viewport-height) * .68);
   overflow-y: auto;
   padding: 6px;
 }

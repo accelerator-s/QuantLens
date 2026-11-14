@@ -4,6 +4,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  container: model-settings / inline-size;
 }
 
 .ai-config .section-title {
@@ -12,24 +13,54 @@
 
 .ai-config__models-head { margin-top: 8px; margin-bottom: 0; }
 .ai-config__models-head .section-title { margin: 0; }
-.ai-config__models-table .table { table-layout: fixed; min-width: 860px; }
+.ai-config .ai-config__models-table .table { table-layout: fixed; min-width: 0; }
 .ai-config__models-table .table :is(th, td) { padding: 10px 12px; white-space: nowrap; overflow-wrap: normal; }
-.ai-config__models-table th:nth-child(1) { width: 18%; }
-.ai-config__models-table th:nth-child(2) { width: 96px; }
-.ai-config__models-table th:nth-child(3) { width: 22%; }
-.ai-config__models-table th:nth-child(5) { width: 120px; }
-.ai-config__models-table th:nth-child(6) { width: 176px; }
+.ai-config__models-table th:nth-child(1) { width: 17%; }
+.ai-config__models-table th:nth-child(2) { width: 9%; }
+.ai-config__models-table th:nth-child(3) { width: 24%; }
+.ai-config__models-table th:nth-child(4) { width: 17%; }
+.ai-config__models-table th:nth-child(5) { width: 13%; }
+.ai-config__models-table th:nth-child(6) { width: 20%; }
 .ai-config__cell-text { display: block; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 .ai-config__model-name { font-weight: 500; }
 .ai-config__models-table .tag-badges { display: flex; flex-wrap: wrap; gap: 4px; }
 .ai-config__models-table .tag-badges .badge { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .ai-config__models-table .tag-badges .badge:last-child { flex-shrink: 0; }
-.ai-config__model-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; border: 0; background: transparent; cursor: pointer; }
+.ai-config .ai-config__model-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 4px; min-height: var(--control-h); max-width: 100%; border-color: transparent; background: transparent; cursor: pointer; }
 .ai-config__model-status:disabled { opacity: .5; cursor: wait; }
-.ai-config__model-actions { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.ai-config__model-status-cell { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-width: 100%; }
+.ai-config__model-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; }
 .ai-config__model-actions .btn { flex-shrink: 0; }
 .ai-config__model-test { min-width: 62px; }
 .ai-config__model-actions .ai-config__model-remove { color: var(--danger); }
+
+@container model-settings (max-width: 960px) {
+  .ai-config__models-table { border: 0; background: transparent; max-height: none; overflow: visible; }
+  .ai-config .ai-config__models-table > .table-wrap { overflow: visible; max-height: none; padding: 0; border: 0; scrollbar-gutter: auto; }
+  .ai-config__models-table .table { display: block; width: 100%; }
+  .ai-config__models-table thead { display: none; }
+  .ai-config__models-table tbody { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .ai-config__models-table tbody tr {
+    display: grid;
+    min-width: 0;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: 'name status' 'model model' 'api capabilities' 'actions actions';
+    gap: 10px 16px;
+    padding: 12px;
+    border: 1px solid var(--line-0);
+    border-radius: var(--radius-sm);
+    background: var(--bg-1);
+  }
+  .ai-config .ai-config__models-table .table td { display: grid; align-content: start; justify-items: start; min-width: 0; padding: 0; border: 0; white-space: normal; gap: 4px; background: transparent; }
+  .ai-config__models-table td::before { content: attr(data-label); color: var(--ink-2); font-size: var(--text-caption); }
+  .ai-config__models-table td:nth-child(1) { grid-area: name; }
+  .ai-config__models-table td:nth-child(2) { grid-area: api; }
+  .ai-config__models-table td:nth-child(3) { grid-area: model; }
+  .ai-config__models-table td:nth-child(4) { grid-area: capabilities; }
+  .ai-config__models-table td:nth-child(5) { grid-area: status; }
+  .ai-config__models-table td:nth-child(6) { grid-area: actions; }
+}
 
 .ai-config__task-select {
   min-width: 240px;

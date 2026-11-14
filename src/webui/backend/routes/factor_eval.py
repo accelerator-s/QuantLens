@@ -143,7 +143,6 @@ def candidate_register(payload: CandidateRegisterPayload) -> dict:
         standardization=list(candidate.standardization),
         missing_handling=candidate.missing_handling,
         ai_generated=True,
-        production_permission=False,
         evaluation_metrics=list(candidate.evaluation_metric_hints),
         status=FactorStatus.DRAFT,
         code_hash=hash_code(candidate.code),

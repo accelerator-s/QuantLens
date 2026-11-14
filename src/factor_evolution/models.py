@@ -86,6 +86,16 @@ class EvolutionConfig(BaseModel):
     lookback_buffer_days: int = Field(default=250, ge=0, le=2000)
     model_name: str = ""
     random_seed: int = 42
+    run_locked_test: bool = True
+    analysis_max_turns: int = Field(default=8, ge=1, le=20)
+    prediction_horizons: list[int] = Field(default_factory=lambda: [1, 5, 10, 20], min_length=1)
+
+    @field_validator('prediction_horizons')
+    @classmethod
+    def _horizons(cls, value):
+        if len(set(value)) != len(value) or any(h not in {1, 5, 10, 20} for h in value):
+            raise ValueError('预测期限必须是不重复的已注册 v1 标签期限：1、5、10、20')
+        return sorted(value)
 
     @field_validator("base_factor", "profile_name")
     @classmethod
@@ -128,6 +138,7 @@ class FactorVersion(BaseModel):
     model_name: str = ""
     generation_attempts: int = Field(default=1, ge=1, le=10)
     proposal_id: str = ""
+    research_plan: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def code_hash(self) -> str:

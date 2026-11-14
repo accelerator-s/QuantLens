@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import io
+import base64
+import hashlib
+import os
 import json
 import math
 from collections.abc import Callable
@@ -110,14 +113,9 @@ _NUMBER_PATTERN = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?")
 _DATE_PATTERN = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T].*)?")
 
 _VERIFICATION_SUGGESTED_ACTION = (
-    "CSMAR 风控要求手机验证，CLI 已停止且不会自动重试；需要外部人工介入解锁。\n"
-    "请按以下步骤处理：\n"
-    "1. 在浏览器打开 https://data.csmar.com 并登录（校园网环境）；\n"
-    "2. 任选一张数据表发起一次下载，按站内提示完成图形验证码与手机短信验证；\n"
-    "3. 验证通过后回到本控制台重新执行本命令。\n"
-    "本框架不会采集、显示或保存手机号、短信验证码与登录凭据。\n"
-    "若网页验证通过后 CLI 仍被拦截，说明放行未同步到 API 会话；"
-    "请暂停下载并交由外部维护流程处理会话级验证，不要反复重试打包。"
+    "CSMAR 要求手机验证，本次下载已停止且不会自动重试。"
+    "请在当前 CSMAR 会话中完成机构登录验证，再继续更新。"
+    "验证码仅用于当次校验；已验证会话保存在仅当前用户可读的本地凭据文件中。"
 )
 
 class CSMARClient:
@@ -187,7 +185,25 @@ class CSMARClient:
             return False
 
     def login(self) -> str:
-        
+        from paths import workspace
+        cached = workspace().experience / '.csmar-session.json'
+        if cached.exists():
+            if cached.is_symlink() or cached.stat().st_mode & 0o077:
+                raise ProviderAuthError(code='PROVIDER_SESSION_PERMISSIONS', message='CSMAR 会话文件必须仅当前用户可读写。', blocking=True)
+            try:
+                saved = json.loads(cached.read_text())
+                if not isinstance(saved['token'], str) or not saved['token'] or not isinstance(saved['cookies'], dict):
+                    raise ValueError('invalid session')
+            except (ValueError, KeyError, TypeError):
+                raise ProviderAuthError(code='PROVIDER_SESSION_INVALID', message='CSMAR 本地会话无效，须重新验证。', blocking=True) from None
+            self._token = saved['token']
+            self._headers['Token'] = self._token
+            self._cookies = saved['cookies']
+            response = self.client.get(f'{BASE_MAIN}/isLoggedIn', headers=self._headers, cookies=self._cookies)
+            state = response.json() if response.status_code == 200 else {}
+            if state.get('code') == 0 and state.get('data'):
+                return self._token
+            raise ProviderAuthError(code='PROVIDER_SESSION_EXPIRED', message='CSMAR 已验证会话已过期，须重新完成手机号验证。', blocking=True)
         if not self.check_network():
             raise ProviderNetworkError(
                 code="PROVIDER_NETWORK_UNAVAILABLE",
@@ -226,11 +242,43 @@ class CSMARClient:
         self._token = data["data"]["token"]
         self._headers["Token"] = self._token
 
+        # The official web client binds its domain cookie to the token and user.
+        # Persist credentials only after a verified download or phone verification.
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        identity = str(data['data']['id'])
+        key = hashlib.sha256((self._token + '|csmar.domain-cookie.v1').encode()).digest()[:16]
+        nonce = os.urandom(12)
+        encrypted = AESGCM(key).encrypt(nonce, f'v1|data.csmar.com|{identity}'.encode(), None)
+        self._cookies['D'] = base64.urlsafe_b64encode(b'\x01' + nonce + encrypted).decode().rstrip('=')
+
         for sc in resp.headers.get_list("set-cookie"):
             if sc.startswith("U="):
                 self._cookies["U"] = sc.split(";")[0].split("=", 1)[1]
 
         return self._token
+
+    def save_verified_session(self) -> None:
+        from paths import workspace
+        path = workspace().experience / '.csmar-session.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        import uuid
+        temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.pending')
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, 'w') as stream:
+            json.dump({'token': self._token, 'cookies': self._cookies}, stream)
+        os.chmod(temporary, 0o600)
+        temporary.replace(path)
+
+    def verify_phone(self, phone: str, code: str) -> None:
+        if not re.fullmatch(r'1[3-9]\d{9}', phone) or not re.fullmatch(r'\d{6}', code):
+            raise ProviderAuthError(code='PROVIDER_VERIFICATION_FORMAT', message='手机号或验证码格式不正确。')
+        response = self.client.post(f'{BASE_MAIN}/home/orgPhone/verify',
+            json={'phone': phone, 'verifyCode': code, 'type': '0'}, headers=self._headers, cookies=self._cookies)
+        response.raise_for_status()
+        result = response.json()
+        if result.get('code') != 0:
+            raise ProviderAuthError(code='PROVIDER_PHONE_VERIFICATION_FAILED', message=result.get('msg', '验证失败。'))
+        self.save_verified_session()
 
     def cancel(self, outline_id: str) -> bool:
         
@@ -474,6 +522,7 @@ class CSMARClient:
             )
 
         record_id = result.get("data")
+        self.save_verified_session()
         return str(record_id) if record_id else None
 
     def _find_record_file_path(self, outline_id: str) -> str | None:
@@ -650,12 +699,10 @@ class CSMARClient:
                 blocking=True,
             ) from e
 
-        data_file = None
-        for name in zf.namelist():
-            if name.startswith(table_name_phy) and not name.endswith("[DES][txt].txt"):
-                if name.endswith(".txt"):
-                    data_file = name
-                    break
+        data_files = [name for name in zf.namelist()
+                      if name.startswith(table_name_phy) and name.endswith(".txt")
+                      and not name.endswith("[DES][txt].txt")]
+        data_file = data_files[0] if data_files else None
 
         if data_file is None:
             has_des = any(
@@ -676,6 +723,21 @@ class CSMARClient:
                 context={"zip_contents": zf.namelist()},
                 blocking=True,
             )
+
+        if table_name_phy in {"IDX_Idxinfo", "IDX_Idxtrd"}:
+            frames = []
+            for name in data_files:
+                content = zf.read(name)
+                for encoding in ("utf-8-sig", "gb18030"):
+                    try:
+                        decoded = content.decode(encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    raise ProviderDataError(code="PROVIDER_ENCODING_ERROR", message=f"无法解码 {name}。")
+                frames.append(pd.read_csv(io.StringIO(decoded), sep="\t", dtype={"Indexcd": "string"}))
+            return pd.concat(frames, ignore_index=True)
 
         content = zf.read(data_file)
         for enc in ("utf-8-sig", "gbk", "utf-8", "gb18030"):

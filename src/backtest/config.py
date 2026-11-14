@@ -74,7 +74,7 @@ def _profile_protocol_diffs(
     return diffs
 
 def resolve_and_check(
-    config: BacktestConfig, protocol: BacktestProtocol
+    config: BacktestConfig, protocol: BacktestProtocol, *, benchmark_key=None, benchmark_end=None, model_name=None
 ) -> ResolvedStrategyProfile:
     
     resolved = StrategyProfileStore().resolve(config.profile_name)
@@ -95,6 +95,10 @@ def resolve_and_check(
             ),
             related_subjects={"strategy_profile": config.profile_name},
         )
+    if protocol.benchmark == "model_selected":
+        from benchmarks.selection import freeze_profile
+        resolved = freeze_profile(resolved, config.start, benchmark_end or config.end,
+                                  key=benchmark_key or config.content_hash(), model_name=model_name)
     return resolved
 
 __all__ = ["BacktestConfig", "resolve_and_check"]

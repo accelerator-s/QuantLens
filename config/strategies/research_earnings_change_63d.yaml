@@ -1,0 +1,11 @@
+profile_name: research_earnings_change_63d
+display_name: 披露盈利改善研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items:
+  - name: earnings_change_63d
+extra:
+  purpose: factor_research_only
+  internal_only: true

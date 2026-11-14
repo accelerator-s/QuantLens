@@ -48,9 +48,6 @@ def exposures(spark, names, directions=None,versions=None):
 
 def fit(spark, train, names, method):
     from pyspark.sql import functions as F, Window
-    from pyspark.ml.feature import VectorAssembler
-    from pyspark.ml.regression import LinearRegression
-    from pyspark.ml.classification import LogisticRegression
     if method=='equal': return normalize(np.ones(len(names)))
     if method in {'ic','icir'}:
         result=[]
@@ -65,31 +62,25 @@ def fit(spark, train, names, method):
             row = daily.agg(F.avg('ic').alias('mean'),F.stddev('ic').alias('std')).first()
             result.append((row.mean or 0)/(row.std if method=='icir' and row.std else 1))
         return normalize(result)
-    if method=='model_linear':
+    if method in {'model_linear', 'model_ridge'}:
         window = Window.partitionBy('date')
         train = train.withColumn('_label',F.col('ret')-F.avg('ret').over(window))
         columns=[]
         for i,name in enumerate(names):
             column=f'_demeaned_{i}'
             train=train.withColumn(column,F.col(name)-F.avg(name).over(window));columns.append(column)
-        transformed=VectorAssembler(inputCols=columns,outputCol='_features').transform(train)
-        from quantlens.gpu import use_gpu, request
-        if use_gpu():
-            return normalize(request('linear',train=train,features=columns,label='_label')['coefficients'])
-        model=LinearRegression(featuresCol='_features',labelCol='_label',fitIntercept=False,regParam=0.0).fit(transformed)
+        from quantlens.gpu import request
+        return normalize(request('ridge' if method == 'model_ridge' else 'linear',
+                                 train=train,features=columns,label='_label')['coefficients'])
     elif method=='model_logistic':
         medians=train.groupBy('date').agg(F.percentile_approx('ret',.5,10000).alias('_median'))
         train=train.join(medians,'date').withColumn('_label',(F.col('ret')>F.col('_median')).cast('double'))
-        transformed=VectorAssembler(inputCols=names,outputCol='_features').transform(train)
-        from quantlens.gpu import use_gpu, request
-        if use_gpu():
-            return normalize(request('logistic',train=train,features=names,label='_label')['coefficients'])
-        model=LogisticRegression(featuresCol='_features',labelCol='_label',regParam=.01,maxIter=100).fit(transformed)
+        from quantlens.gpu import request
+        return normalize(request('logistic',train=train,features=names,label='_label')['coefficients'])
     else: raise ValueError(method)
-    return normalize(model.coefficients.toArray())
 
 
-def run(spark, context, strategy_id='candidate_balanced_multifactor', train_years=3,profile_payload=None,test_year=None):
+def run(spark, context, strategy_id, train_years=3,profile_payload=None,test_year=None):
     from pyspark.sql import functions as F
     from strategy import StrategyProfileStore,ResolvedStrategyProfile
     profile=ResolvedStrategyProfile.model_validate(profile_payload) if profile_payload else StrategyProfileStore().resolve(strategy_id)
@@ -138,7 +129,7 @@ def run(spark, context, strategy_id='candidate_balanced_multifactor', train_year
 
 if __name__=='__main__':
     import argparse
-    parser=argparse.ArgumentParser();parser.add_argument('--strategy',default='candidate_balanced_multifactor');parser.add_argument('--train-years',type=int,default=3);parser.add_argument('--profile');parser.add_argument('--test-year',type=int)
+    parser=argparse.ArgumentParser();parser.add_argument('--strategy',required=True);parser.add_argument('--train-years',type=int,default=3);parser.add_argument('--profile');parser.add_argument('--test-year',type=int)
     args=parser.parse_args()
     with job('weight_fit') as (spark,context):
         result=run(spark,context,args.strategy,args.train_years,json.loads(args.profile) if args.profile else None,args.test_year)

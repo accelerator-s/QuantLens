@@ -16,16 +16,14 @@ with httpx.Client(base_url=base,trust_env=False,timeout=30) as client:
             response.raise_for_status();samples.append(time.perf_counter()-start)
             assert {'data_as_of','run_id','layer','source_uri'}<=response.json().keys(),(name,response.json().keys())
         p95=float(np.percentile(samples,95));report['latency'][name]={'p95_seconds':p95,'samples':len(samples),'limit_seconds':limit,'passed':p95<limit}
-    nonempty=['/api/factors/reversal_5/values','/api/factors/reversal_5/evaluation','/api/strategies/candidate_balanced_multifactor/weights','/api/portfolio/candidate_balanced_multifactor/candidates','/api/portfolio/candidate_balanced_multifactor/holdings','/api/portfolio/research_reversal_5/attribution','/api/backtest/runs']
+    nonempty=['/api/factors/reversal_5/values','/api/factors/reversal_5/evaluation','/api/backtest/runs']
     for path in nonempty+['/api/settings/data','/api/settings/cluster','/api/settings/audit']:
         response=client.get(path);response.raise_for_status();report['contracts'][path]=response.status_code
         if path in nonempty:assert response.json()['items'],path
     point=client.get('/api/factors/reversal_5/values',params={'as_of':end,'code':'000001','version':'v1'})
     point.raise_for_status();assert point.json()['layer']=='hbase',point.json()
-    holdings=client.get('/api/portfolio/candidate_balanced_multifactor/holdings').json()
-    assert holdings['layer']=='hbase',holdings
     run_id=client.get('/api/backtest/runs').json()['items'][0]['run_id']
-    for suffix in ['', '/nav', '/trades', '/positions']:
+    for suffix in ['', '/nav', '/trades', '/positions', '/attribution']:
         path='/api/backtest/runs/'+run_id+suffix
         response=client.get(path);response.raise_for_status()
         if suffix:assert response.json()['items'],path

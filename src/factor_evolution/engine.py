@@ -135,6 +135,13 @@ class EvolutionEngine:
                     "保留本会话记录；新建研究时把旧测试区间降级为训练或验证，并指定新锁定区间。"
                 ),
             )
+        if any(event["event_type"] in {"finalist_frozen", "version_evaluated"} for event in prior_events):
+            raise QuantTrainingError(
+                code="EVOLUTION_VALIDATION_TERMINAL",
+                message="该会话已冻结候选或读取验证结果，禁止恢复搜索。",
+                blocking=True,
+                suggested_action="核对已有结果；新的研究必须重新登记搜索预算，不能把验证结果反馈给模型。",
+            )
         latest_iteration_event = next((event for event in reversed(prior_events)
                                        if event["event_type"] in {"candidate_created", "candidate_invalidated", "round_completed", "round_failed"}
                                        and event["payload"].get("iteration") == status.iteration), None)
@@ -156,19 +163,23 @@ class EvolutionEngine:
         status.state = EvolutionState.RUNNING
         status.decision = EvolutionDecision.CONTINUE
         status.error = ""
+        status.finished_at = None
+        status.terminal_reason = ""
         self._save(status, started, prior_elapsed)
 
         try:
             if not status.best_version_id:
                 self._phase(status, "读取基础因子", 0.01, emit)
                 base = self.services.load_base(config)
+                self.services.check_candidate(config, base,
+                                              timeout_seconds=self._remaining(config, started, prior_elapsed))
                 self.store.save_version(research_id, base)
                 baseline_exp = self.services.begin_experiment(config, base, "")
                 self.store.append_event(
                     research_id, "baseline_started",
                     {"version_id": base.version_id, "experiment_id": baseline_exp},
                 )
-                result = self._evaluate_version(
+                result = self._evaluate_training(
                     config,
                     status,
                     base,
@@ -194,15 +205,18 @@ class EvolutionEngine:
                         "outcome": "baseline",
                         "diagnosis": "作为后续候选的固定比较基线",
                         "failure_reason": "",
-                        "next_step": "仅修改一个维度并改善滚动验证结果",
+                        "next_step": "仅根据训练指标提出可证伪的改进；验证结果在候选冻结前不可见",
                         "metrics": self._metric_digest(result),
                     },
                 )
                 self._save(status, started, prior_elapsed)
 
             best = self.store.load_version(research_id, status.best_version_id)
-            best_result = self._latest_result(research_id, status.best_version_id)
+            best_result = self._latest_training_result(research_id, status.best_version_id)
             parent_exp = best_result.experiment_id
+            baseline_id = next(event["payload"]["version_id"] for event in self.store.detail(research_id)["events"]
+                               if event["event_type"] == "baseline_started")
+            baseline = self.store.load_version(research_id, baseline_id)
 
             while status.iteration < config.max_iterations:
                 self._guard(config, status, started, prior_elapsed)
@@ -223,7 +237,7 @@ class EvolutionEngine:
                         {
                             "iteration": iteration,
                             "task": "factor_candidate",
-                            "visible_data": ["train", "validation", "session_memory"],
+                            "visible_data": ["train", "session_memory"],
                             "locked_test_visible": False,
                         },
                     )
@@ -234,7 +248,25 @@ class EvolutionEngine:
                         iteration=iteration,
                         timeout_seconds=self._remaining(config, started, prior_elapsed),
                     )
+                    from .selection import definition_key
+                    prior_versions = [FactorVersion.model_validate(item)
+                                      for item in self.store.detail(research_id)['versions']]
+                    if any(definition_key(candidate) == definition_key(prior) for prior in prior_versions):
+                        raise QuantTrainingError(code='EVOLUTION_DUPLICATE_CANDIDATE',
+                            message='该公式和处理链在本会话已评价，停止重复计算；更名和注释不构成新候选。',
+                            blocking=False)
                     status.current_version_id = candidate.version_id
+                    self._phase(
+                        status,
+                        f"第 {iteration} 轮：代码试运行",
+                        self._progress(config, iteration, 0.18),
+                        emit,
+                    )
+                    self.services.check_candidate(
+                        config,
+                        candidate,
+                        timeout_seconds=self._remaining(config, started, prior_elapsed),
+                    )
                     self.store.save_version(research_id, candidate)
                     experiment_id = self.services.begin_experiment(config, candidate, parent_exp)
                     self.store.append_event(
@@ -252,18 +284,7 @@ class EvolutionEngine:
                             "generation_attempts": candidate.generation_attempts,
                         },
                     )
-                    self._phase(
-                        status,
-                        f"第 {iteration} 轮：代码试运行",
-                        self._progress(config, iteration, 0.18),
-                        emit,
-                    )
-                    self.services.check_candidate(
-                        config,
-                        candidate,
-                        timeout_seconds=self._remaining(config, started, prior_elapsed),
-                    )
-                    result = self._evaluate_version(
+                    result = self._evaluate_training(
                         config,
                         status,
                         candidate,
@@ -275,6 +296,14 @@ class EvolutionEngine:
                 except _StopRequested:
                     raise
                 except QuantTrainingError as exc:
+                    if exc.code == 'EVOLUTION_ANALYST_STOP':
+                        return self._finish(status, EvolutionDecision.STOPPED,
+                                            '证据分析停止：' + exc.message, started, prior_elapsed, emit)
+                    if exc.code == 'EVOLUTION_ANALYSIS_TIMEOUT':
+                        raise
+                    if exc.code == 'EVOLUTION_INPUT_QUALITY_INVALID' or exc.code.startswith(('RESEARCH_', 'BACKTEST_', 'ADS_')):
+                        # A bad shared input cannot be repaired by trying another formula.
+                        raise
                     status.failed_rounds += 1
                     status.no_improvement_count += 1
                     if experiment_id:
@@ -306,19 +335,12 @@ class EvolutionEngine:
                     emit(f"第 {iteration} 轮失败，已完整留档：[{exc.code}] {exc.message}")
                     self._save(status, started, prior_elapsed)
                     if status.no_improvement_count >= config.no_improvement_rounds:
-                        return self._finish(
-                            status,
-                            EvolutionDecision.STOPPED,
-                            "连续无改善轮数达到上限",
-                            started,
-                            prior_elapsed,
-                            emit,
-                        )
+                        break
                     continue
 
                 assert candidate is not None
                 comparison_result = best_result
-                improved = self._is_improved(result, best_result)
+                improved = self._training_is_improved(result, best_result)
                 self.services.record_result(experiment_id, result, improved=improved)
                 status.successful_rounds += 1
                 if improved:
@@ -342,52 +364,14 @@ class EvolutionEngine:
                     {
                         "iteration": iteration,
                         "task": "structured_config",
-                        "visible_data": ["train", "validation"],
+                        "visible_data": ["train"],
                         "locked_test_visible": False,
                     },
                 )
-                try:
-                    review = self.services.review(
-                        config,
-                        candidate,
-                        result,
-                        comparison_result,
-                        timeout_seconds=self._remaining(config, started, prior_elapsed),
-                    )
-                except QuantTrainingError as exc:
-                    if exc.code != "EVOLUTION_REVIEW_OUTPUT_RETRY_EXHAUSTED":
-                        raise
-                    model_name = str(exc.context.get("model_name") or "")
-                    attempts = int(exc.context.get("attempts") or 3)
-                    self.store.append_event(
-                        research_id,
-                        "review_generation_failed",
-                        {
-                            "iteration": iteration,
-                            "version_id": candidate.version_id,
-                            "experiment_id": experiment_id,
-                            "code": exc.code,
-                            "model_name": model_name,
-                            "generation_attempts": attempts,
-                            "message": "AI 复盘格式连续纠错失败，已保留客观评价并继续研究。",
-                        },
-                    )
-                    emit(
-                        f"第 {iteration} 轮 AI 复盘格式连续 {attempts} 次未通过；"
-                        "量化评价已保留，会话继续。"
-                    )
-                    review = ReviewResult(
-                        decision="continue",
-                        assessment=(
-                            "AI 结果复盘未通过结构化契约；"
-                            "本轮只保留可核验的训练、滚动验证和约束结果，不伪造 AI 结论。"
-                        ),
-                        failure_reason="结果复盘输出格式连续纠错失败。",
-                        next_change="后续轮次仍按客观核心指标只修改一个维度。",
-                        model_name=model_name,
-                        generation_attempts=attempts,
-                        ai_generated=False,
-                    )
+                review = self.services.review(
+                    config, candidate, result, comparison_result,
+                    timeout_seconds=self._remaining(config, started, prior_elapsed),
+                )
                 self.services.record_review(experiment_id, review, improved=improved)
                 self.store.append_memory(
                     research_id,
@@ -415,129 +399,11 @@ class EvolutionEngine:
                 )
                 self._save(status, started, prior_elapsed)
 
-                if improved and result.constraints_passed:
-                    self._phase(status, "运行锁定测试", 0.97, emit)
-                    exposure_id = self.locked_tests.reserve(
-                        base_factor=config.base_factor,
-                        research_id=research_id,
-                        version_id=candidate.version_id,
-                        code_hash=candidate.code_hash,
-                        window=config.test_window,
-                    )
-                    self.store.append_event(
-                        research_id,
-                        "locked_test_reserved",
-                        {
-                            "exposure_id": exposure_id,
-                            "version_id": candidate.version_id,
-                            "window": config.test_window.model_dump(mode="json"),
-                            "sent_to_model": False,
-                        },
-                    )
-                    try:
-                        test = self.services.evaluate(
-                            config,
-                            candidate,
-                            window_name="test",
-                            window=config.test_window,
-                            timeout_seconds=self._remaining(config, started, prior_elapsed),
-                            on_progress=emit,
-                        )
-                    except QuantTrainingError as exc:
-                        self.locked_tests.complete(exposure_id, event="failed", error_code=exc.code)
-                        self.store.append_event(
-                            research_id,
-                            "locked_test_failed",
-                            {
-                                "version_id": candidate.version_id,
-                                "code": exc.code,
-                                "message": exc.message,
-                            },
-                        )
-                        raise
-                    except Exception as exc:
-                        self.locked_tests.complete(
-                            exposure_id,
-                            event="failed",
-                            error_code=type(exc).__name__,
-                        )
-                        raise
-                    result.test = test
-                    status.locked_test_runs += 1
-                    self.services.record_result(experiment_id, result, improved=improved)
-                    test_passed, test_stability = self._test_passes(config, result)
-                    self.locked_tests.complete(
-                        exposure_id,
-                        event="completed",
-                        run_id=test.run_id,
-                        passed=test_passed,
-                    )
-                    self.services.record_locked_test(
-                        experiment_id,
-                        result,
-                        passed=test_passed,
-                        stability=test_stability,
-                    )
-                    self.store.append_event(
-                        research_id,
-                        "locked_test_completed",
-                        {
-                            "version_id": candidate.version_id,
-                            "run_id": test.run_id,
-                            "passed": test_passed,
-                            "generalization_classification": (
-                                "locked_test_effective" if test_passed else "historical_overfit"
-                            ),
-                            "stability": test_stability,
-                            "metrics": test.metrics,
-                        },
-                    )
-                    if test_passed:
-                        status.best_version_id = candidate.version_id
-                        return self._finish(
-                            status,
-                            EvolutionDecision.FROZEN,
-                            "验证与锁定测试均达到目标",
-                            started,
-                            prior_elapsed,
-                            emit,
-                        )
-                    return self._finish(
-                        status,
-                        EvolutionDecision.STOPPED,
-                        "锁定测试未达到约束，测试区间不再用于调参",
-                        started,
-                        prior_elapsed,
-                        emit,
-                    )
+                if review.decision == "stop" or status.no_improvement_count >= config.no_improvement_rounds:
+                    break
 
-                if review.decision == "stop":
-                    return self._finish(
-                        status,
-                        EvolutionDecision.STOPPED,
-                        "结果分析建议停止",
-                        started,
-                        prior_elapsed,
-                        emit,
-                    )
-                if status.no_improvement_count >= config.no_improvement_rounds:
-                    return self._finish(
-                        status,
-                        EvolutionDecision.STOPPED,
-                        "连续无改善轮数达到上限",
-                        started,
-                        prior_elapsed,
-                        emit,
-                    )
-
-            return self._finish(
-                status,
-                EvolutionDecision.STOPPED,
-                "达到最大迭代次数",
-                started,
-                prior_elapsed,
-                emit,
-            )
+            return self._finalize_candidate(config, status, baseline, best, best_result,
+                                            started, prior_elapsed, emit)
         except _StopRequested as exc:
             decision = (
                 EvolutionDecision.CANCELLED
@@ -564,6 +430,7 @@ class EvolutionEngine:
                     "model_name": str(exc.context.get("model_name") or ""),
                 },
             )
+            self._summarize(status)
             self.store.write_report(research_id)
             raise
         except Exception as exc:
@@ -585,8 +452,188 @@ class EvolutionEngine:
                 "session_failed",
                 {"code": wrapped.code, "message": wrapped.message},
             )
+            self._summarize(status)
             self.store.write_report(research_id)
             raise wrapped from exc
+
+    def _finalize_candidate(self, config, status, baseline, candidate, training_result,
+                            started, prior_elapsed, emit):
+        research_id = status.research_id
+        if candidate.version_id == baseline.version_id:
+            return self._finish(status, EvolutionDecision.STOPPED,
+                                "训练搜索未获得优于基线的候选，未运行验证和锁定测试",
+                                started, prior_elapsed, emit)
+        # This exact window is included in the final aggregate, whose risk
+        # measures take the worst fold. Later folds cannot repair this failure.
+        train_metrics = training_result.train.metrics
+        if (abs(float(train_metrics['risk']['max_drawdown'])) > config.targets.max_drawdown
+                or float(train_metrics['trading']['annualized_turnover_oneside'])
+                > config.targets.max_annualized_turnover):
+            return self._finish(status, EvolutionDecision.STOPPED,
+                                "最佳候选仍违反固定训练窗的回撤或换手约束，跳过验证和锁定测试",
+                                started, prior_elapsed, emit)
+        self.store.append_event(status.research_id, "finalist_frozen", {
+            "version_id": candidate.version_id, "code_hash": candidate.code_hash,
+            "selection_source": "training_only", "sent_to_model": False,
+        })
+        self._phase(status, "候选已冻结：评估基线与候选的滚动验证表现", .91, emit)
+        baseline_training = self._latest_training_result(status.research_id, baseline.version_id)
+        baseline_result = self._evaluate_version(config, status, baseline, baseline_training.experiment_id,
+                                                started, prior_elapsed, emit, baseline=True)
+        experiment_id = training_result.experiment_id
+        result = self._evaluate_version(config, status, candidate, experiment_id,
+                                        started, prior_elapsed, emit)
+        improved = self._is_improved(result, baseline_result)
+        self.services.record_result(experiment_id, result, improved=improved)
+        self.store.append_event(status.research_id, "finalist_validation_completed", {
+            "version_id": candidate.version_id, "improved": improved,
+            "constraints_passed": result.constraints_passed, "sent_to_model": False,
+        })
+        if improved and result.constraints_passed:
+            if not config.run_locked_test:
+                return self._finish(status, EvolutionDecision.STOPPED,
+                    '已得到通过开发期门槛的候选；本批锁定测试封存，待跨因子比较后固定唯一最终方案',
+                    started, prior_elapsed, emit)
+            self._phase(status, "运行锁定测试", 0.97, emit)
+            exposure_id = self.locked_tests.reserve(
+                base_factor=config.base_factor,
+                research_id=research_id,
+                version_id=candidate.version_id,
+                code_hash=candidate.code_hash,
+                window=config.test_window,
+            )
+            self.store.append_event(
+                research_id,
+                "locked_test_reserved",
+                {
+                    "exposure_id": exposure_id,
+                    "version_id": candidate.version_id,
+                    "window": config.test_window.model_dump(mode="json"),
+                    "sent_to_model": False,
+                },
+            )
+            try:
+                test = self.services.evaluate(
+                    config,
+                    candidate,
+                    window_name="test",
+                    window=config.test_window,
+                    timeout_seconds=self._remaining(config, started, prior_elapsed),
+                    on_progress=emit,
+                )
+            except QuantTrainingError as exc:
+                self.locked_tests.complete(exposure_id, event="failed", error_code=exc.code)
+                self.store.append_event(
+                    research_id,
+                    "locked_test_failed",
+                    {
+                        "version_id": candidate.version_id,
+                        "code": exc.code,
+                        "message": exc.message,
+                    },
+                )
+                raise
+            except Exception as exc:
+                self.locked_tests.complete(
+                    exposure_id,
+                    event="failed",
+                    error_code=type(exc).__name__,
+                )
+                raise
+            result.test = test
+            status.locked_test_runs += 1
+            self.services.record_result(experiment_id, result, improved=improved)
+            test_passed, test_stability = self._test_passes(config, result)
+            self.locked_tests.complete(
+                exposure_id,
+                event="completed",
+                run_id=test.run_id,
+                passed=test_passed,
+            )
+            self.services.record_locked_test(
+                experiment_id,
+                result,
+                passed=test_passed,
+                stability=test_stability,
+            )
+            self.store.append_event(
+                research_id,
+                "locked_test_completed",
+                {
+                    "version_id": candidate.version_id,
+                    "run_id": test.run_id,
+                    "passed": test_passed,
+                    "generalization_classification": (
+                        "locked_test_effective" if test_passed else "historical_overfit"
+                    ),
+                    "stability": test_stability,
+                    "metrics": test.metrics,
+                },
+            )
+            if test_passed:
+                status.best_version_id = candidate.version_id
+                return self._finish(
+                    status,
+                    EvolutionDecision.FROZEN,
+                    "验证与锁定测试均达到目标",
+                    started,
+                    prior_elapsed,
+                    emit,
+                )
+            return self._finish(
+                status,
+                EvolutionDecision.STOPPED,
+                "锁定测试未达到约束，测试区间不再用于调参",
+                started,
+                prior_elapsed,
+                emit,
+            )
+
+        return self._finish(status, EvolutionDecision.STOPPED,
+                            "冻结候选未通过验证改进与准入门槛，结束搜索；锁定测试未使用",
+                            started, prior_elapsed, emit)
+
+    def _evaluate_training(self, config, status, version, experiment_id, started,
+                           prior_elapsed, emit, *, baseline=False):
+        self._guard(config, status, started, prior_elapsed)
+        self.services.check_candidate(config, version,
+                                      timeout_seconds=self._remaining(config, started, prior_elapsed))
+        self._phase(status, "固定训练区间回测：" + version.version_id,
+                    self._progress(config, max(1, status.iteration), .35), emit)
+        train = self.services.evaluate(config, version, window_name="fixed_train",
+                                       window=config.train_window,
+                                       timeout_seconds=self._remaining(config, started, prior_elapsed),
+                                       on_progress=emit)
+        self._window_completed(status, experiment_id, version, train, "search", "train",
+                               started, prior_elapsed)
+        self._guard(config, status, started, prior_elapsed)
+        result = VersionResult(version_id=version.version_id, experiment_id=experiment_id,
+                               train=train, score=self._score(train.metrics))
+        from .selection import training_quality_key
+        if training_quality_key(result) is None:
+            raise QuantTrainingError(code="BACKTEST_RESEARCH_METRICS_INVALID",
+                                     message="训练结果缺少有限的实际收益、Calmar、回撤或换手指标。", blocking=True)
+        self.store.append_event(status.research_id, "training_evaluated", result.model_dump(mode="json"))
+        if baseline:
+            self.services.record_result(experiment_id, result, improved=None)
+        return result
+
+    def _latest_training_result(self, research_id, version_id):
+        for event in reversed(self.store.detail(research_id)["events"]):
+            if event["event_type"] == "training_evaluated" and event["payload"]["version_id"] == version_id:
+                return VersionResult.model_validate(event["payload"])
+        raise QuantTrainingError(code="EVOLUTION_TRAINING_RESULT_MISSING",
+                                 message=f"版本 {version_id} 缺少训练结果，不能继续搜索。", blocking=True)
+
+    @staticmethod
+    def _training_is_improved(current, best):
+        from .selection import training_quality_key
+        new, old = training_quality_key(current), training_quality_key(best)
+        if new is not None and old is not None:
+            from .selection import training_noninferiority
+            if not training_noninferiority(current.train.metrics, best.train.metrics):
+                return False
+        return new is not None and (old is None or new > old)
 
     def _evaluate_version(
         self,
@@ -603,8 +650,8 @@ class EvolutionEngine:
         prefix = "基线" if baseline else f"第 {status.iteration} 轮"
         folds = build_folds(config)
         fold_results: list[FoldResult] = []
-        progress_start = 0.01 if baseline else self._progress(config, status.iteration, 0.18)
-        progress_end = 0.05 if baseline else self._progress(config, status.iteration, 0.70)
+        progress_start = max(status.progress, 0.91)
+        progress_end = min(0.97, progress_start + 0.025)
         windows = [(f"{fold.fold_id}_{kind}", window)
                    for fold in folds
                    for kind, window in (("train", fold.train_window), ("validation", fold.validation_window))]
@@ -692,6 +739,14 @@ class EvolutionEngine:
         record_window = getattr(self.services, "record_window_result", None)
         if record_window:
             record_window(experiment_id, result, fold_id=fold_id, window_name=window_name)
+        from quantlens.research_preflight import assess_input_quality
+
+        quality = assess_input_quality(result.metrics)
+        if not quality['passed']:
+            raise QuantTrainingError(code='EVOLUTION_INPUT_QUALITY_INVALID',
+                message='研究窗口的数据质量检查未通过：' + '；'.join(quality.get('issues') or []),
+                context={'run_id': result.run_id, 'quality': quality}, blocking=True,
+                suggested_action='删除受影响回测和实验，修复输入后新建研究；停止后续窗口和调参。')
         self._save(status, started, prior_elapsed)
 
     def _latest_result(self, research_id: str, version_id: str) -> VersionResult:
@@ -732,9 +787,13 @@ class EvolutionEngine:
     ) -> bool:
         target = config.targets
         for metrics in (train, validation):
+            if not metrics.get('input_quality', {}).get('passed', False):
+                return False
             returns = metrics.get("returns") or {}
             risk = metrics.get("risk") or {}
             trading = metrics.get("trading") or {}
+            if float(returns.get("annualized_return") or 0) <= 0:
+                return False
             if (
                 float(returns.get("annualized_excess_return") or 0)
                 < target.min_annualized_excess_return
@@ -756,7 +815,9 @@ class EvolutionEngine:
         target = config.targets
         stability = cls._stability(result.validation.metrics, metrics)
         passed = (
-            cls._score(metrics) >= target.min_annualized_excess_return
+            metrics.get('input_quality', {}).get('passed', False)
+            and float((metrics.get('returns') or {}).get('annualized_return') or 0) > 0
+            and cls._score(metrics) >= target.min_annualized_excess_return
             and abs(float((metrics.get("risk") or {}).get("max_drawdown") or 0))
             <= target.max_drawdown
             and float((metrics.get("trading") or {}).get("annualized_turnover_oneside") or 0)
@@ -767,9 +828,9 @@ class EvolutionEngine:
 
     @staticmethod
     def _is_improved(result: VersionResult, best: VersionResult) -> bool:
-        return (
-            result.score is not None and best.score is not None and result.score > best.score + 1e-9
-        )
+        from .selection import quality_key
+        candidate_key, parent_key = quality_key(result), quality_key(best)
+        return candidate_key is not None and (parent_key is None or candidate_key > parent_key)
 
     @staticmethod
     def _metric_digest(result: VersionResult) -> dict:
@@ -782,6 +843,8 @@ class EvolutionEngine:
                 "annualized_excess_return": (metrics.get("returns") or {}).get(
                     "annualized_excess_return"
                 ),
+                "annualized_return": (metrics.get("returns") or {}).get("annualized_return"),
+                "calmar": (metrics.get("objective") or {}).get("value"),
                 "max_drawdown": (metrics.get("risk") or {}).get("max_drawdown"),
                 "annualized_turnover_oneside": (metrics.get("trading") or {}).get(
                     "annualized_turnover_oneside"
@@ -847,8 +910,30 @@ class EvolutionEngine:
                 "best_version_id": status.best_version_id,
             },
         )
+        self._summarize(status)
         self.store.write_report(status.research_id)
         emit(f"自动进化结束：{decision.value}；{reason}")
         return self.store.detail(status.research_id)
+
+    def _summarize(self, status):
+        summarize = getattr(self.services, 'summarize_experiment', None)
+        if summarize is None or status.state == EvolutionState.CANCELLED:
+            return
+        # Only terminal facts are sent. Validation/test metrics and the generated
+        # sentence never enter proposal memory or candidate selection.
+        try:
+            config = self.store.load_config(status.research_id)
+            events = self.store.detail(status.research_id)['events']
+            types = {event['event_type'] for event in events}
+            record = summarize(config, {'kind': 'factor', 'state': status.state.value,
+                'decision': status.decision.value, 'reason': status.terminal_reason,
+                'error': status.error, 'iterations': status.iteration,
+                'training_completed': 'training_evaluated' in types,
+                'validation_completed': 'finalist_validation_completed' in types,
+                'locked_test_completed': 'locked_test_completed' in types})
+            self.store.append_event(status.research_id, 'experiment_summary', record)
+        except Exception as exc:
+            # A presentation failure must not turn successful computation into failure.
+            self.store.append_event(status.research_id, 'experiment_summary_failed', {'error': str(exc)})
 
 __all__ = ["EvolutionEngine", "EvolutionServices"]

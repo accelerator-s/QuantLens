@@ -82,6 +82,82 @@
   color: var(--ink-0);
 }
 
+.ql-card.ql-task-records,
+.ql-card.ql-cluster-card {
+  padding: var(--space-3);
+  gap: var(--space-2);
+}
+
+.ql-task-records > .ql-empty {
+  padding: var(--space-2) var(--space-3);
+}
+
+.ql-cluster-card > header,
+.ql-cluster-heading,
+.ql-cluster-actions,
+.ql-service-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ql-cluster-heading {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.ql-cluster-actions {
+  max-width: 100%;
+}
+
+.ql-service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: var(--space-2);
+}
+.ql-service-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.ql-task-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+
+.ql-service-item,
+.ql-task-row {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+}
+
+.ql-service-item,
+.ql-service-item__labels {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ql-service-item { justify-content: space-between; }
+.ql-service-item { flex-wrap: wrap; }
+.ql-service-item strong,
+.ql-task-row strong { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.ql-service-item__labels { flex-shrink: 0; gap: 6px; }
+.ql-task-row { display: grid; grid-template-columns: minmax(0, 1fr) 6em 10em; align-items: center; gap: 6px 16px; padding: 9px 0; border: 0; border-bottom: 1px solid var(--line-0); border-radius: 0; background: transparent; }
+.ql-task-row:last-child { border-bottom: 0; }
+.ql-task-row > .badge { justify-self: start; }
+.ql-task-row time { color: var(--ink-2); font-size: var(--fs-xs); white-space: nowrap; justify-self: end; }
+.ql-task-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.ql-task-footer [data-task-count] { color: var(--ink-2); font-size: var(--text-caption); }
+.ql-task-footer:has([data-task-count]:empty) { display: none; }
+@container workspace (max-width: 540px) {
+  .ql-task-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .ql-task-row > .badge { justify-self: end; }
+  .ql-task-row time { grid-column: 1 / -1; justify-self: start; }
+}
+
+.ql-service-links {
+  column-gap: var(--space-3);
+  font-size: var(--fs-sm);
+}
+
 .ql-card h4 {
   margin: 6px 0 2px;
   font-size: var(--fs-xs);
@@ -309,39 +385,6 @@
   white-space: pre-wrap;
 }
 
-.ql-task-dialog {
-  width: min(800px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--bg-1);
-  color: var(--ink-0);
-  box-shadow: var(--shadow-lg);
-  overflow: auto;
-}
-
-.ql-task-dialog::backdrop {
-  background: rgb(9 13 22 / 52%);
-}
-
-.ql-task-dialog [data-job-content] {
-  display: grid;
-  gap: var(--space-2);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.ql-task-dialog .ql-log {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.ql-task-dialog .ql-task-error,
-.ql-task-dialog .ql-task-error .ql-log {
-  color: var(--danger);
-}
-
 @media (max-width: 900px) {
   .ql-head {
     flex-direction: column;
@@ -389,7 +432,7 @@
   min-height: 0;
   max-height: 240px;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior-x: contain;
   scrollbar-gutter: stable;
 }
 .ql-dashboard-scroll > .ql-table-wrap {

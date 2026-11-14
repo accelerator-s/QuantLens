@@ -1,6 +1,9 @@
 FROM quantlens/base:locked
-ARG HADOOP_VERSION=3.3.6
-RUN curl -fSL --retry 3 https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz | tar --no-same-owner -xz -C /opt && mv /opt/hadoop-${HADOOP_VERSION} /opt/hadoop
+ARG HADOOP_VERSION=3.4.3
+ARG HADOOP_SHA512
+RUN /opt/python/bin/python /opt/quantlens/install_archive.py https://downloads.apache.org/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz ${HADOOP_SHA512} /opt/hadoop
+COPY docker/harden_java.py docker/java-dependencies.json /opt/quantlens/
+RUN /opt/python/bin/python /opt/quantlens/harden_java.py hadoop
 ENV HADOOP_HOME=/opt/hadoop HADOOP_CONF_DIR=/etc/hadoop/conf HADOOP_MAPRED_HOME=/opt/hadoop PATH=/opt/hadoop/bin:/opt/hadoop/sbin:/opt/python/bin:$PATH HDFS_NAMENODE_USER=root HDFS_DATANODE_USER=root YARN_RESOURCEMANAGER_USER=root YARN_NODEMANAGER_USER=root
 COPY docker/init /opt/quantlens/init
 CMD ["bash", "/opt/quantlens/init/hadoop.sh"]

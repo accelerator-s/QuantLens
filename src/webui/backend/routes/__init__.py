@@ -19,23 +19,25 @@ from . import (
     portfolio,
     portfolio_write,
     recommend,
-    review,
     status,
     strategy,
-    strategy_chat,
-    strategy_evolution,
+    strategy_ideas,
+    market_rules,
+    model_reviews,
+    trash,
 )
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(status.router)
+api_router.include_router(model_reviews.router)
 api_router.include_router(chat_history.router)
 api_router.include_router(ai_config.router)
 api_router.include_router(factors.router)
 api_router.include_router(factor_chat.router)
 api_router.include_router(factor_eval.router)
+api_router.include_router(strategy_ideas.router)
 api_router.include_router(strategy.router)
-api_router.include_router(strategy_chat.router)
-api_router.include_router(strategy_evolution.router)
+api_router.include_router(market_rules.router)
 api_router.include_router(data.router)
 api_router.include_router(data_ops.router)
 api_router.include_router(backtest.router)
@@ -46,7 +48,7 @@ api_router.include_router(factor_evolution.router)
 api_router.include_router(portfolio.router)
 api_router.include_router(portfolio_write.router)
 api_router.include_router(recommend.router)
-api_router.include_router(review.router)
+api_router.include_router(trash.router)
 api_router.include_router(admin.router)
 
 from quantlens.routes import router as lens_router

@@ -1,22 +1,52 @@
 from __future__ import annotations
 import hashlib,json,shutil
+import fcntl
+import os
+import threading
 from pathlib import Path
 import pyarrow.parquet as pq
 from paths import workspace
 from storage.hdfs import HDFS
 from quantlens.warehouse import batch_identifier
+from exceptions import ContractViolation
+
+_manifest_lock = threading.Lock()
+
+
+def _summary_ids(entry):
+    root = (workspace().data / 'ads').resolve()
+    result = set()
+    for item in entry.get('files', []):
+        file = (root / item['path']).resolve()
+        if root not in file.parents:
+            raise ValueError('ADS path escapes root')
+        result.update(pq.ParquetFile(file).read(columns=['backtest_run']).column(0).to_pylist())
+    return result
 
 def _publish_manifest(path, manifest):
-    if manifest.get('scope') == 'backtest' and path.exists():
-        previous = json.loads(path.read_text())
-        manifest = {**previous, 'tables': {**previous.get('tables', {}), **manifest['tables']}}
-    if manifest.get('scope')=='data' and path.exists():
-        previous=json.loads(path.read_text())
-        manifest={**manifest,'tables':{**previous.get('tables',{}),**manifest['tables']}}
-    pending=path.with_suffix('.pending')
-    pending.write_text(json.dumps(manifest,indent=2,ensure_ascii=False))
-    pending.replace(path)
-    return manifest
+    with _manifest_lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(path.with_suffix('.lock'), os.O_RDONLY | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            previous = json.loads(path.read_text()) if path.exists() else {}
+            incoming = manifest.get('tables', {}).get('backtest_summary')
+            current = previous.get('tables', {}).get('backtest_summary')
+            if current and (incoming or manifest.get('scope') not in {'data', 'backtest'}):
+                if not _summary_ids(current).issubset(_summary_ids(incoming or {})):
+                    raise ContractViolation(code='ADS_BACKTEST_EXPORT_STALE',
+                                            message='回测导出缺少已发布的运行，拒绝覆盖结果列表', blocking=True)
+            if manifest.get('scope') == 'backtest' and previous:
+                manifest = {**previous, 'tables': {**previous.get('tables', {}), **manifest['tables']}}
+            elif manifest.get('scope') == 'data' and previous:
+                manifest = {**manifest, 'tables': {**previous.get('tables', {}), **manifest['tables']}}
+            pending=path.with_suffix('.pending')
+            pending.write_text(json.dumps(manifest,indent=2,ensure_ascii=False))
+            pending.replace(path)
+            return manifest
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
 
 def sync(batch_id):
     batch_identifier(batch_id)

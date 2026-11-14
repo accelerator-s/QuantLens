@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import html as _html
-import ipaddress
+import http.client
 import re
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode
 
 from exceptions import ModelRouteError
+from .public_http import fetch_public, is_public_url
 
 SPEC: dict[str, Any] = {
     "name": "web_search",
@@ -44,17 +46,7 @@ _UA = (
 )
 
 def _is_private_url(url: str) -> bool:
-    try:
-        host = urlparse(url).hostname or ""
-    except ValueError:
-        return True
-    if not host or host == "localhost" or host.endswith(".local"):
-        return True
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return ip.is_private or ip.is_loopback or ip.is_link_local
+    return not is_public_url(url)
 
 def _strip_tags(s: str) -> str:
     s = re.sub(r"<[^>]+>", "", s)
@@ -72,24 +64,11 @@ def run(arguments: dict[str, Any]) -> dict[str, Any]:
     top_k = int(arguments.get("top_k") or 5)
     top_k = max(1, min(top_k, 10))
 
-    try:
-        import httpx
-    except ImportError as exc:
-        raise ModelRouteError(
-            code="AI_TOOL_DEPENDENCY_MISSING",
-            message="未安装 httpx，无法执行 web_search。",
-            blocking=True,
-            suggested_action="pip install httpx",
-        ) from exc
-
-    from net import create_http_client
-
     params = {"q": query, "format": "rss"}
     headers = {"User-Agent": _UA}
     try:
-        with create_http_client(timeout=_DEFAULT_TIMEOUT, follow_redirects=True) as client:
-            resp = client.get(_BING_URL, params=params, headers=headers)
-    except httpx.HTTPError as exc:
+        status, body, _ = fetch_public(_BING_URL + "?" + urlencode(params), headers=headers, timeout=_DEFAULT_TIMEOUT)
+    except (OSError, http.client.HTTPException) as exc:
         raise ModelRouteError(
             code="AI_TOOL_SEARCH_FAILED",
             message=f"web_search 请求 Bing RSS 失败：{exc}",
@@ -97,21 +76,21 @@ def run(arguments: dict[str, Any]) -> dict[str, Any]:
             blocking=True,
             suggested_action="检查网络；本框架不会自动切换其它搜索引擎，也不会靠记忆回答。",
         ) from exc
-    if resp.status_code >= 400:
+    if status >= 400:
         raise ModelRouteError(
             code="AI_TOOL_SEARCH_STATUS",
-            message=f"Bing RSS 返回 HTTP {resp.status_code}",
-            context={"query": query, "status": resp.status_code},
+            message=f"Bing RSS 返回 HTTP {status}",
+            context={"query": query, "status": status},
             blocking=True,
         )
 
     try:
-        root = ET.fromstring(resp.text)
-    except ET.ParseError as exc:
+        root = ET.fromstring(body)
+    except (ET.ParseError, DefusedXmlException) as exc:
         raise ModelRouteError(
             code="AI_TOOL_SEARCH_PARSE",
             message=f"Bing RSS 解析失败：{exc}",
-            context={"query": query, "head": resp.text[:300]},
+            context={"query": query, "head": body[:300]},
             blocking=True,
         ) from exc
 

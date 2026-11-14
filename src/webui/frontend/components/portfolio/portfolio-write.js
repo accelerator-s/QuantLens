@@ -1,6 +1,7 @@
 import { runWithConfirm } from "../confirm-dialog/confirm-dialog.js";
 import { formDialog } from "../confirm-dialog/form-dialog.js";
 import { toastError } from "../../core/toast.js";
+import { setupShareQuantity } from "./share-quantity.js";
 
 export function initPortfolioWrite(root, ctx, { reloadAccounts, account, latestTradeId, setWriting }) {
   let pending = false;
@@ -15,6 +16,14 @@ export function initPortfolioWrite(root, ctx, { reloadAccounts, account, latestT
   root.querySelector("[data-holding-add]").addEventListener("click", guard(() => holdingSet()));
   root.querySelector("[data-trade-add]").addEventListener("click", guard(tradeAdd));
   root.querySelector("[data-trade-undo]").addEventListener("click", guard(undoTrade));
+
+  async function quantityRule(current) {
+    const { items } = await ctx.api.marketRules();
+    const rules = items.filter((rule) => rule.market === current.market
+      && rule.instrument_class === current.instrument_class && rule.status === "active");
+    if (rules.length !== 1) throw new Error("未找到唯一启用的股票交易规则");
+    return rules[0];
+  }
 
   async function createAccount() {
     try {
@@ -68,6 +77,7 @@ export function initPortfolioWrite(root, ctx, { reloadAccounts, account, latestT
       const result = await runWithConfirm({
         execute: (extra) => ctx.api.accountDelete(current.account_id, extra),
         title: `删除账户 ${current.alias || current.account_id}`,
+        showPreview: false,
         confirmLabel: "确认删除",
         danger: true,
       });
@@ -109,9 +119,12 @@ export function initPortfolioWrite(root, ctx, { reloadAccounts, account, latestT
     const current = account();
     if (!current) return;
     try {
+      const rule = await quantityRule(current);
       const values = await formDialog({
         title: holding ? "修改持仓" : "录入持仓",
+        autoFocus: false,
         submitLabel: "查看并确认",
+        setup: (controls) => setupShareQuantity(controls, rule, { holding: true }),
         fields: [
           { key: "instrument_id", label: "股票代码", kind: "stock", value: holding?.instrument_id || "", required: true, placeholder: "输入代码或名称" },
           { key: "qty", label: "持仓数量（股）", value: holding?.qty || "", kind: "number", min: "0", step: "1", required: true },
@@ -131,9 +144,11 @@ export function initPortfolioWrite(root, ctx, { reloadAccounts, account, latestT
     const current = account();
     if (!current) return;
     try {
+      const rule = await quantityRule(current);
       const values = await formDialog({
         title: "录入成交",
         submitLabel: "查看并确认",
+        setup: (controls) => setupShareQuantity(controls, rule),
         fields: [
           { key: "action", label: "买卖", kind: "radio", value: "buy", options: [{ value: "buy", label: "买入" }, { value: "sell", label: "卖出" }] },
           { key: "instrument_id", label: "股票代码", kind: "stock", required: true, placeholder: "输入代码或名称" },

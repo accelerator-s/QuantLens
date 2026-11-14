@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -14,6 +15,10 @@ from paths import workspace
 
 _REGISTRY_FILE = "factors.yaml"
 
+def research_base_name(name: str) -> str | None:
+    match = re.fullmatch(r"(.+)_r_[0-9a-f]{12}", name)
+    return match.group(1) if match else None
+
 def _utcnow() -> datetime:
     return datetime.now(tz=UTC)
 
@@ -26,11 +31,21 @@ class FactorStatus(StrEnum):
     ACTIVE = "active"
 
     DISABLED = "disabled"
-    RETIRED = "retired"
+
+def _parse_status(value: FactorStatus | str) -> FactorStatus:
+    try:
+        return FactorStatus(value)
+    except (ValueError, TypeError) as exc:
+        raise QuantTrainingError(
+            code="FACTOR_INVALID_STATUS",
+            message=f"非法因子状态：{value!r}。",
+            suggested_action="可选值：" + "、".join(status.value for status in FactorStatus) + "。",
+            blocking=True,
+        ) from exc
 
 class FactorMetadata(BaseModel):
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True, revalidate_instances="always")
 
     name: str
     display_name: str = ""
@@ -52,8 +67,6 @@ class FactorMetadata(BaseModel):
     missing_handling: str = "drop"
     ai_generated: bool = False
 
-    production_permission: bool = False
-
     risk_notes: str = ""
     evaluation_metrics: list[str] = Field(default_factory=list)
     status: FactorStatus = FactorStatus.DRAFT
@@ -65,6 +78,18 @@ class FactorMetadata(BaseModel):
     decay_history: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _discard_legacy_permission(cls, value):
+        if isinstance(value, dict):
+            value = {key: item for key, item in value.items() if key != "production_permission"}
+        return value
+
+    @property
+    def production_permission(self) -> bool:
+        # Compatibility for internal readers; no independent permission state.
+        return self.status == FactorStatus.ACTIVE
 
     @model_validator(mode='after')
     def _eligibility_fields(self):
@@ -99,11 +124,17 @@ class FactorRegistry:
     def list(
         self,
         *,
-        status: FactorStatus | None = None,
+        status: FactorStatus | str | None = None,
         market: str | None = None,
         instrument_class: str | None = None,
+        include_research: bool = False,
     ) -> list[FactorMetadata]:
+        if status is not None:
+            status = _parse_status(status)
         items = self.load().factors
+        # Candidate copies are execution inputs, not additional catalog factors.
+        if not include_research:
+            items = [f for f in items if research_base_name(f.name) is None]
         if status is not None:
             items = [f for f in items if f.status == status]
         if market is not None:
@@ -127,6 +158,7 @@ class FactorRegistry:
         )
 
     def upsert(self, factor: FactorMetadata, *, override: bool = False) -> None:
+        factor = FactorMetadata.model_validate(factor)
         doc = self.load()
         idx = next((i for i, f in enumerate(doc.factors) if f.name == factor.name), None)
         if idx is not None and not override:
@@ -147,23 +179,14 @@ class FactorRegistry:
         self,
         name: str,
         *,
-        target: FactorStatus,
+        target: FactorStatus | str,
         confirm: bool = False,
     ) -> FactorMetadata:
-        if target in (FactorStatus.ACTIVE, FactorStatus.RETIRED) and not confirm:
-            raise QuantTrainingError(
-                code="FACTOR_TRANSITION_CONFIRM_REQUIRED",
-                message=f"将因子置为 {target.value} 需要 --confirm。",
-                blocking=True,
-            )
+        target = _parse_status(target)
         doc = self.load()
         for f in doc.factors:
             if f.name == name:
                 f.status = target
-                if target == FactorStatus.ACTIVE:
-                    f.production_permission = True
-                if target in (FactorStatus.DISABLED, FactorStatus.RETIRED):
-                    f.production_permission = False
                 f.updated_at = _utcnow()
                 self._save(doc)
                 return f

@@ -30,14 +30,7 @@ _factor_research_slots = threading.BoundedSemaphore(_MAX_PARALLEL_FACTOR_RESEARC
 class AutoEvolutionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    base_factor: str
-    model_name: str = ""
-
-class BatchEvolutionPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    base_factors: list[str] = Field(min_length=1, max_length=16)
-    model_name: str = ""
+    base_factor: str = Field(min_length=1)
 
 def _resolve_evolution_model(model_name: str) -> str:
     
@@ -81,6 +74,8 @@ def _start_task(research_id: str, base_factor: str) -> str:
             try:
                 detail = engine.run(research_id, on_progress=append_log)
                 lifecycle = bridge.ingest(research_id)
+                if update := lifecycle.get('catalog_update'):
+                    append_log(f"因子已更新：{update['factor_name']} {update['from_version']} → {update['to_version']}")
                 append_log(f"统一生命周期对象登记完成：{lifecycle['program_id']}")
                 return json_safe({"evolution": detail, "lifecycle": lifecycle})
             except QuantTrainingError as exc:
@@ -139,13 +134,13 @@ def _start_task(research_id: str, base_factor: str) -> str:
 
 @router.post("/factor-evolution")
 def start_evolution(payload: AutoEvolutionPayload) -> dict:
-    return start_factor_evolution(payload.base_factor, model_name=payload.model_name)
+    return start_factor_evolution(payload.base_factor)
 
 def start_factor_evolution(base_factor: str, *, model_name: str = "") -> dict:
     
     selected_model = _resolve_evolution_model(model_name)
-    snapshot = DataSnapshotService().create(require_strict=True)
     config = build_auto_config(base_factor).model_copy(update={"model_name": selected_model})
+    snapshot = DataSnapshotService().create(require_strict=True)
     store = EvolutionStore()
     engine = EvolutionEngine(store, ProductionEvolutionServices())
     research_id = engine.create(config)
@@ -173,68 +168,6 @@ def start_factor_evolution(base_factor: str, *, model_name: str = "") -> dict:
         "data_snapshot_id": snapshot.snapshot_id,
         "auto_config": json_safe(config),
     }
-
-@router.post("/factor-evolution/batch")
-def start_evolution_batch(payload: BatchEvolutionPayload) -> dict:
-    factors = list(dict.fromkeys(name.strip() for name in payload.base_factors if name.strip()))
-    if not factors:
-        raise QuantTrainingError(
-            code="FACTOR_EVOLUTION_BATCH_EMPTY",
-            message="批量因子研究没有有效因子名。",
-            blocking=True,
-            suggested_action="至少选择一个已添加且有单因子策略的因子。",
-        )
-    selected_model = _resolve_evolution_model(payload.model_name)
-    snapshot = DataSnapshotService().create(require_strict=True)
-    items = []
-    errors = []
-    for factor_name in factors:
-        research_id = ""
-        program = None
-        try:
-            config = build_auto_config(factor_name).model_copy(
-                update={"model_name": selected_model}
-            )
-            evolution_store = EvolutionStore()
-            research_id = EvolutionEngine(
-                evolution_store, ProductionEvolutionServices()
-            ).create(config)
-            program = FactorEvolutionBridge().begin(
-                research_id, config, snapshot
-            )
-            task_id = _start_task(research_id, config.base_factor)
-            items.append(
-                {
-                    "base_factor": factor_name,
-                    "research_id": research_id,
-                    "program_id": program.program_id,
-                    "task_id": task_id,
-                }
-            )
-        except QuantTrainingError as exc:
-            if research_id and program is not None:
-                FactorEvolutionBridge().mark_failed(
-                    research_id, code=exc.code, message=exc.message
-                )
-            errors.append(
-                {
-                    "base_factor": factor_name,
-                    "code": exc.code,
-                    "message": exc.message,
-                    "suggested_action": exc.suggested_action,
-                }
-            )
-    return json_safe(
-        {
-            "data_snapshot_id": snapshot.snapshot_id,
-            "items": items,
-            "errors": errors,
-            "budget": {
-                "max_batch_research_programs": 16,
-                "max_parallel_research_programs": _MAX_PARALLEL_FACTOR_RESEARCH,
-            },
-        }
-    )
 
 @router.get("/factor-evolution")
 def list_evolution(include_archived: bool = False) -> dict:

@@ -80,7 +80,7 @@ def export(spark,context,batch_id,*,data_only=False):
         frame=spark.table(source)
         if name in {'overview','market','stock_prices','stock_fundamentals','stock_analyst','stock_industry','screen'}:
             frame=frame.where(F.date_format('as_of','yyyy-MM-dd')==str(as_of))
-        elif source.startswith('ads.') and 'as_of' in frame.columns:
+        elif source.startswith('ads.') and name not in BACKTEST_TABLES and 'as_of' in frame.columns:
             # Hive 3/PG cannot bind DATE partition predicates correctly. This
             # explicit expression filters the small partition list in Spark.
             frame=frame.where(F.date_format('as_of','yyyy-MM-dd')>=F.date_format(F.add_months(F.current_date(),-36),'yyyy-MM-dd'))

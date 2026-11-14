@@ -1,3 +1,4 @@
+import {newestFirst} from '../../core/sort.js';
 import {mountTabs} from '../../core/tabs.js';
 import { renderState } from "../state-card/state-card.js";
 import { runWithConfirm } from "../confirm-dialog/confirm-dialog.js";
@@ -6,8 +7,10 @@ import { createSelect } from "../../core/select.js";
 import { toastError } from "../../core/toast.js";
 import { badge, fmtNum, fmtPct, fmtTime } from "../../core/fmt.js";
 import { el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
+import {createModelReviews} from '../../core/model-reviews.js';
 
-const STATUS_LABEL = { draft: "研究中", active: "已启用", disabled: "已停用", retired: "已淘汰" };
+const STATUS_LABEL = { draft: "研究中", active: "已启用", disabled: "已停止" };
+const STATUS_TONE = { draft: "accent", active: "safe", disabled: "muted" };
 const DIRECTION_LABEL = {
   positive: "数值越高越看好",
   negative: "数值越低越看好",
@@ -30,6 +33,8 @@ const EVAL_STATE_TONE = { running: "accent", completed: "safe", failed: "danger"
 async function mountContent(root, ctx) {
   const listHost = root.querySelector("[data-list]");
   const detailHost = root.querySelector("[data-detail]");
+  const emptyHost = root.querySelector("[data-library-empty]");
+  const split = root.querySelector(".split");
   const statusRoot = root.querySelector("[data-status-select]");
   statusRoot.innerHTML = selectMarkup("全部状态");
   await hydrateIcons(root);
@@ -37,11 +42,15 @@ async function mountContent(root, ctx) {
   const statusSelect = createSelect(statusRoot, { onChange: () => load() });
   const researchOpenBtn = root.querySelector("[data-research-open]");
   researchOpenBtn.addEventListener("click", () => ctx.bus.emit("route", "factors/research"));
+  root.querySelector("[data-empty-research]").addEventListener("click", () => ctx.bus.emit("route", "factors/research"));
 
   let optionsReady = false;
   let currentName = "";
   let statuses = [];
   let evalRefreshTimer = null;
+  const selectedEvalRuns = new Map();
+  let detailRequest = 0;
+  let evalRequest = 0;
 
   ctx.bus.on("route", (id) => {
     if (id === "factors") load();
@@ -50,9 +59,14 @@ async function mountContent(root, ctx) {
       evalRefreshTimer = null;
     }
   });
+  ctx.bus.on('subtab', data => { if (data.page === 'factors' && data.tab === 'list') load(); });
+  root.closest('.view')?.querySelector('#factors-tab-list')?.addEventListener('click', load);
   await load();
 
   async function load() {
+    emptyHost.hidden = true;
+    split.hidden = false;
+    researchOpenBtn.hidden = false;
     await renderState(listHost, { kind: "loading", title: "加载因子数据表…" });
     try {
       const data = await ctx.api.factors({
@@ -63,7 +77,7 @@ async function mountContent(root, ctx) {
         statusSelect.setOptions(
           [
             { value: "__all__", label: "全部状态" },
-            ...data.statuses.map((value) => ({ value, label: STATUS_LABEL[value] || value })),
+            ...statuses.map((value) => ({ value, label: STATUS_LABEL[value] || value })),
           ],
           "__all__",
         );
@@ -82,12 +96,15 @@ async function mountContent(root, ctx) {
 
   function renderList(items) {
     listHost.innerHTML = "";
+    emptyHost.hidden = items.length > 0;
+    split.hidden = !items.length;
+    researchOpenBtn.hidden = !items.length;
     if (!items.length) {
-      renderState(listHost, {
-        kind: "empty",
-        title: "暂无注册因子",
-        detail: "点击“研究新因子”，填写研究想法。",
-      });
+      currentName = "";
+      ++detailRequest;
+      ++evalRequest;
+      clearTimeout(evalRefreshTimer);
+      evalRefreshTimer = null;
       detailHost.innerHTML = "";
       return;
     }
@@ -98,7 +115,8 @@ async function mountContent(root, ctx) {
       if (item.name === currentName) row.classList.add("is-active");
       row.append(el("span", "item-row__title", item.display_name || item.name));
       const meta = el("span", "item-row__meta");
-      meta.append(badge(STATUS_LABEL[item.status] || item.status));
+      if (item.version) meta.append(el("span", "", item.version));
+      meta.append(badge(STATUS_LABEL[item.status] || item.status, STATUS_TONE[item.status]));
       if (item.ai_generated) meta.append(badge("模型生成", "accent"));
       meta.append(el("span", "", TIMESCALE_LABEL[item.timescale] || item.timescale || "—"));
       row.append(meta);
@@ -119,11 +137,14 @@ async function mountContent(root, ctx) {
   }
 
   async function loadDetail(name) {
+    const request = ++detailRequest;
     await renderState(detailHost, { kind: "loading", title: "加载因子详情…" });
     try {
       const data = await ctx.api.factor(name);
+      if (request !== detailRequest || name !== currentName) return;
       renderDetail(data);
     } catch (err) {
+      if (request !== detailRequest || name !== currentName) return;
       await renderState(detailHost, {
         kind: "error",
         title: "因子详情加载失败",
@@ -136,29 +157,43 @@ async function mountContent(root, ctx) {
   function renderDetail(data) {
     const factor = data.factor;
     detailHost.innerHTML = "";
-    const card = el("article", "card detail-card");
+    const card = el("article", "card detail-card factors__detail");
 
-    const head = el("div", "detail-card__head");
-    head.append(el("h3", "", factor.display_name || factor.name));
-    head.append(badge(STATUS_LABEL[factor.status] || factor.status));
-    if (factor.ai_generated) head.append(badge("模型生成", "accent"));
-    if (factor.production_permission) head.append(badge("已获准正式使用", "safe"));
+    const head = el("div", "detail-card__head research-detail__head");
+    const title = el("div", "research-detail__title");
+    title.append(el("h3", "", factor.display_name || factor.name), badge(STATUS_LABEL[factor.status] || factor.status, STATUS_TONE[factor.status]));
+    if (factor.ai_generated) title.append(badge("模型生成", "accent"));
+    const experimentsBtn = el("button", "btn btn--ghost", "查看实验");
+    experimentsBtn.type = "button";
+    experimentsBtn.dataset.factorExperiments = factor.name;
+    experimentsBtn.addEventListener("click", () => {
+      ctx.factorExperimentFilter = factor.name;
+      ctx.factorExperimentFilterLabel = factor.display_name || factor.name;
+      ctx.bus.emit("factor:experiments");
+      ctx.bus.emit("route", "factors/experiments");
+    });
+    const controls = el("div", "factors__controls");
+    head.append(title, controls);
     card.append(head);
 
-    card.append(
-      kvEl([
-        ["核心假设", factor.assumption, { wide: true, scroll: true }],
-        ["适用市场", (factor.applicable_markets || []).join("、")],
-        ["适用标的", (factor.applicable_instruments || []).join("、")],
+    const hypothesis = kvEl([["核心假设", factor.assumption, { wide: true, scroll: true }]]);
+    hypothesis.classList.add("factors__hypothesis");
+    card.append(hypothesis);
+
+    const facts = kvEl([
         ["时间尺度", TIMESCALE_LABEL[factor.timescale] || factor.timescale],
+        ["当前版本", factor.version || "—"],
         ["方向", DIRECTION_LABEL[factor.direction] || factor.direction],
         ["最近评估", fmtTime(factor.last_evaluated_at)],
         ["更新时间", fmtTime(factor.updated_at)],
-      ]),
-    );
+    ]);
+    facts.classList.add("factors__facts");
+    facts.setAttribute("aria-label", "因子信息");
+    card.append(facts);
 
-    const actions = el("div", "detail-card__head detail-card__head--actions");
-    actions.append(el("h4", "", "人工权限与归档"));
+    const actions = el("div", "factors__actions");
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", "因子操作");
     for (const target of statuses) {
       if (target === factor.status) continue;
       const btn = el("button", "btn btn--ghost", `转为${STATUS_LABEL[target] || target}`);
@@ -170,41 +205,34 @@ async function mountContent(root, ctx) {
     removeBtn.type = "button";
     removeBtn.addEventListener("click", () => remove(factor.name));
     actions.append(removeBtn);
-    card.append(actions);
+    controls.append(actions, experimentsBtn);
 
     if (factor.risk_notes) {
       card.append(el("h4", "", "风险提示"));
       card.append(el("p", "item-row__meta", factor.risk_notes));
     }
 
-    card.append(el("h4", "", "评价记录"));
-    const evalRunsHost = el("div");
-    card.append(evalRunsHost);
+    const reviews = el("article", "card detail-card factors__reviews");
+    reviews.append(createModelReviews(ctx, 'factor', factor.name));
+    const evalRunsHost = el("section", "factors__evaluations");
+    evalRunsHost.setAttribute("aria-label", "因子评价记录与结论");
+    reviews.append(evalRunsHost);
     if (evalRefreshTimer) clearTimeout(evalRefreshTimer);
     const refreshRuns = async () => {
       await loadEvalRuns(factor.name, evalRunsHost);
-      if (currentName === factor.name) {
+      if (currentName === factor.name && evalRunsHost.isConnected) {
         evalRefreshTimer = setTimeout(refreshRuns, 15000);
       }
     };
     refreshRuns();
 
-    detailHost.append(card);
+    detailHost.append(card, reviews);
   }
 
   async function transition(name, target) {
     try {
-      const result = await runWithConfirm({
-        execute: (extra) => ctx.api.factorTransition(name, { target, ...extra }),
-        title: `修改因子状态：${target}`,
-        message:
-          target === "active"
-            ? "启用后可用于正式策略。"
-            : "停用或淘汰后，将收回正式使用权限。",
-        confirmLabel: "确认修改",
-      });
-      if (!result) return;
-      ctx.bus.emit("toast", { kind: "success", title: `${name} 状态已改为 ${target}` });
+      await ctx.api.factorTransition(name, { target });
+      ctx.bus.emit("toast", { kind: "success", title: `${name} 状态已改为${STATUS_LABEL[target] || target}` });
       await load();
     } catch (err) {
       toastError(ctx.bus, err, "因子状态修改失败");
@@ -216,15 +244,13 @@ async function mountContent(root, ctx) {
       const result = await runWithConfirm({
         execute: (extra) => ctx.api.factorRemove(name, extra),
         title: `删除因子 ${name}`,
-        message: "源码移入回收站可恢复，数据表元数据不可恢复。",
-        requireDecidedBy: true,
-        notePlaceholder: "删除原因",
+        showPreview: false,
         confirmLabel: "确认删除",
         danger: true,
       });
       if (!result) return;
       currentName = "";
-      ctx.bus.emit("toast", { kind: "success", title: `已删除因子 ${name}` });
+      ctx.bus.emit("toast", { kind: "success", title: `因子 ${name} 已移入回收站` });
       await load();
     } catch (err) {
       toastError(ctx.bus, err, "因子删除失败");
@@ -235,9 +261,11 @@ async function mountContent(root, ctx) {
   async function loadEvalRuns(name, host) {
     try {
       const data = await ctx.api.factorEvalRuns(name);
-      host.innerHTML = "";
+      if (!host.isConnected || name !== currentName) return;
+      host.querySelector(':scope > .factors__eval-error')?.remove();
       if (!data.items.length) {
-        host.append(el("p", "item-row__meta", "暂无评价记录。"));
+        selectedEvalRuns.delete(name);
+        host.replaceChildren();
         return;
       }
       const columns = [
@@ -262,25 +290,84 @@ async function mountContent(root, ctx) {
       ]) {
         if (data.items.some(row => row[column.key] !== null && row[column.key] !== undefined)) columns.push(column);
       }
-      const table = tableEl(columns, data.items, {onRowClick: row => showEvalRun(name, row.run_id, host)});
+      const selectRun = row => {
+        selectedEvalRuns.set(name, row.run_id);
+        updateEvalSelection(name, host);
+        showEvalRun(name, row.run_id, host);
+      };
+      const previousTable = host.querySelector('.factors__eval-runs');
+      const table = tableEl(columns, newestFirst(data.items, ['created_at', 'updated_at']), {
+        ...previousTable?.pageState?.(), onRowClick: selectRun,
+        onRowRender: (row, item) => {
+          row.dataset.evalRun = item.run_id;
+          const active = selectedEvalRuns.get(name) === item.run_id;
+          row.classList.toggle('is-active', active);
+          row.setAttribute('aria-expanded', String(active));
+        },
+      });
       table.classList.add("factors__eval-runs");
-      host.append(table);
+      table.setAttribute('aria-label', '评价记录，选择记录查看结论');
+      // Polling replaces only the list. The expanded conclusion keeps its DOM and scroll.
+      const previous = host.querySelector('.factors__eval-runs');
+      if (previous) {
+        const {scrollTop, scrollLeft} = previous;
+        const focused = previous.contains(document.activeElement) ? document.activeElement : null;
+        const focusedRun = focused?.closest('[data-eval-run]')?.dataset.evalRun;
+        previous.replaceWith(table);
+        table.scrollTop = scrollTop;
+        table.scrollLeft = scrollLeft;
+        if (focusedRun) {
+          [...table.querySelectorAll('[data-eval-run]')].find(row => row.dataset.evalRun === focusedRun)?.focus({preventScroll: true});
+        } else if (focused) table.focus({preventScroll: true});
+      } else {
+        host.replaceChildren(table);
+      }
+      updateEvalSelection(name, host);
+      const selected = selectedEvalRuns.get(name);
+      if (selected && !host.querySelector('[data-eval-run-detail]')) showEvalRun(name, selected, host);
     } catch (err) {
-      host.append(el("p", "item-row__meta", `评价记录加载失败：${err.message}`));
+      if (!host.isConnected || name !== currentName) return;
+      let error = host.querySelector(':scope > .factors__eval-error');
+      if (!error) { error = el('p', 'item-row__meta factors__eval-error'); host.append(error); }
+      error.textContent = `评价记录加载失败：${err.message}`;
     }
   }
 
+  function updateEvalSelection(name, host) {
+    const selected = selectedEvalRuns.get(name);
+    host.querySelectorAll('[data-eval-run]').forEach(row => {
+      const active = row.dataset.evalRun === selected;
+      row.classList.toggle('is-active', active);
+      row.setAttribute('aria-expanded', String(active));
+    });
+  }
+
   async function showEvalRun(name, runId, host) {
+    const request = ++evalRequest;
     let detail = host.querySelector("[data-eval-run-detail]");
     if (!detail) {
-      detail = el("div");
+      detail = el("section", "factors__eval-detail");
       detail.dataset.evalRunDetail = "";
       host.append(detail);
     }
-    detail.innerHTML = "";
+    detail.hidden = false;
+    const heading = el('div', 'factors__eval-heading');
+    const title = el('div', 'factors__eval-title');
+    title.append(el('h4', '', '评价结论'), el('p', 'item-row__meta', runId));
+    const close = el('button', 'btn btn--ghost btn--sm', '收起结论');
+    close.type = 'button';
+    close.onclick = () => {
+      ++evalRequest;
+      selectedEvalRuns.delete(name);
+      detail.hidden = true;
+      updateEvalSelection(name, host);
+    };
+    heading.append(title, close);
+    detail.replaceChildren(heading, el('p', 'item-row__meta', '正在读取评价结论…'));
     try {
       const data = await ctx.api.factorEvalRun(name, runId);
-      detail.append(el("h4", "", "评价结论"));
+      if (request !== evalRequest || name !== currentName || !detail.isConnected) return;
+      detail.replaceChildren(heading);
       const labels = data.metrics?.labels || {};
       const label = labels.strict || labels.default || Object.values(labels)[0] || {};
       const variants = label.variants || {};
@@ -292,8 +379,7 @@ async function mountContent(root, ctx) {
       const latest = yearly.length ? yearly[yearly.length - 1] : null;
       const g5 = variant.groups?.g5 || Object.values(variant.groups || {})[0] || {};
       const spread = g5.long_short || {};
-      detail.append(
-        kvEl([
+      const metrics = kvEl([
           ["平均相关系数", fmtNum(ic.ic_mean, 4)],
           ["稳定性", fmtNum(ic.icir_annualized, 3)],
           ["有效交易日", ic.n_valid_days ?? "—"],
@@ -302,28 +388,12 @@ async function mountContent(root, ctx) {
           ["分组收益差", fmtPct(spread.annualized_return)],
           ["分组最大回撤", fmtPct(spread.max_drawdown)],
           ["日均换手估算", fmtPct(spread.avg_daily_turnover_oneside)],
-        ]),
-      );
-      const weak = Math.abs(Number(ic.ic_mean) || 0) < 0.01;
-      const unstable = yearly.length >= 2 && positiveYears / yearly.length < 0.67;
-      const latestWeak = latest && Number(latest.ic_mean) * direction <= 0;
-      let conclusion = "该区间存在正向信号，仍需检验滚动表现和交易成本。";
-      if (weak) conclusion = "平均信号较弱，单个分组的高收益不足以支持假设。";
-      else if (latestWeak) conclusion = "历史整体存在信号，但最近一年转弱或反向，需要继续观察。";
-      else if (unstable) conclusion = "因子在不同年份方向不一致，暂不适合直接用于组合。";
-      detail.append(el("p", "factors__eval-conclusion", conclusion));
-      if ((data.charts || []).length) {
-        detail.append(el("h4", "", "结果数据"));
-        const links = el("p", "item-row__meta");
-        data.charts.forEach((filename, index) => {
-          const link = el("a", "", `下载数据 ${index + 1}`);
-          link.href = ctx.api.factorEvalChartUrl(name, runId, filename);
-          link.download = filename;
-          links.append(link, " ");
-        });
-        detail.append(links);
-      }
+        ]);
+      metrics.classList.add('factors__eval-metrics');
+      detail.append(metrics);
     } catch (err) {
+      if (request !== evalRequest || name !== currentName || !detail.isConnected) return;
+      detail.replaceChildren(heading, el('p', 'factors__eval-error', `评价详情加载失败：${err.message}`));
       toastError(ctx.bus, err, "评价详情加载失败");
     }
   }
@@ -335,8 +405,8 @@ async function mountContent(root, ctx) {
 export async function mount(root, ctx) {
   const html = root.innerHTML;
   await mountTabs(root, ctx, 'factors', [
-    {id: 'list', label: '因子列表', html, mount: mountContent},
+    {id: 'list', label: '因子库', html, mount: mountContent},
     {id: 'research', label: '新因子研究', component: 'factor-research'},
-    {id: 'experiments', label: '迭代实验', component: 'experiments'},
+    {id: 'experiments', label: '因子实验', component: 'experiments'},
   ]);
 }

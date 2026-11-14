@@ -239,6 +239,8 @@ PRICES_DAILY_REQUIRED = ["instrument_id", "date", "open", "high", "low", "close"
 INSTRUMENTS_REQUIRED = ["instrument_id"]
 
 TABLE_REQUIRED_COLUMNS: dict[str, list[str]] = {
+    "index_basic": ["index_code", "name", "start_date"],
+    "index_daily": ["index_code", "date", "close", "daily_return"],
     "prices_daily": PRICES_DAILY_REQUIRED,
     "returns_daily": ["instrument_id", "date"],
     "instruments": INSTRUMENTS_REQUIRED,
@@ -287,6 +289,8 @@ TABLE_REQUIRED_COLUMNS: dict[str, list[str]] = {
 }
 
 TABLE_PRIMARY_KEYS: dict[str, list[str]] = {
+    "index_basic": ["index_code", "name"],
+    "index_daily": ["index_code", "date", "name"],
     "prices_daily": ["instrument_id", "date"],
     "returns_daily": ["instrument_id", "date"],
     "instruments": ["instrument_id"],
@@ -400,7 +404,8 @@ class CSMARMapper:
         return instruments.reset_index(drop=True)
 
     def to_standard(self, raw_df: pd.DataFrame, staged_name: str) -> pd.DataFrame:
-        
+        if staged_name in {"index_basic", "index_daily"}:
+            return self._indices(raw_df, staged_name)
         if staged_name == "prices_daily":
             return self.to_prices_daily(raw_df)
         if staged_name == "instruments":
@@ -415,6 +420,35 @@ class CSMARMapper:
                 blocking=True,
             )
         return self._map_strict(raw_df, staged_name, col_map)
+
+    def _indices(self, raw_df: pd.DataFrame, name: str) -> pd.DataFrame:
+        mapping = ({"Indexcd": "index_code", "Idxinfo01": "name", "Idxinfo02": "base_date",
+                    "Idxinfo03": "base_value", "Idxinfo04": "scope", "Idxinfo05": "weighting",
+                    "Idxinfo06": "publisher", "Idxinfo07": "asset_type", "Idxinfo08": "index_type",
+                    "Idxinfo09": "market", "Idxinfo10": "formula", "Idxinfo11": "start_date"}
+                   if name == "index_basic" else
+                   {"Indexcd": "index_code", "Idxtrd01": "date", "Idxtrd02": "open", "Idxtrd03": "high",
+                    "Idxtrd04": "low", "Idxtrd05": "close", "Idxtrd06": "volume_10k",
+                    "Idxtrd07": "amount_10k", "Idxtrd08": "return_pct", "Idxtrd09": "name"})
+        unknown = set(raw_df.columns) - mapping.keys()
+        if unknown:
+            raise ProviderContractError(code="PROVIDER_CONTRACT_UNKNOWN_FIELD", message=f"{name} 未知字段：{sorted(unknown)}")
+        frame = raw_df.rename(columns=mapping).copy()
+        frame["index_code"] = frame["index_code"].astype("string").str.strip().str.replace(r"\.0$", "", regex=True)
+        numeric = {"base_value", "index_type", "open", "high", "low", "close", "volume_10k", "amount_10k", "return_pct"}
+        for column in frame:
+            if column in {"date", "base_date", "start_date"}:
+                frame[column] = pd.to_datetime(frame[column], errors="coerce").dt.strftime("%Y-%m-%d")
+            elif column in numeric:
+                frame[column] = pd.to_numeric(frame[column], errors="coerce")
+            else:
+                frame[column] = frame[column].astype("string")
+                if column in {"market", "publisher", "asset_type", "weighting"}:
+                    frame[column] = frame[column].str.replace(r"\.0$", "", regex=True)
+        if name == "index_daily":
+            frame["daily_return"] = frame.pop("return_pct") / 100
+        frame["source"] = "csmar"
+        return frame.reset_index(drop=True)
 
     def _map_strict(
         self,

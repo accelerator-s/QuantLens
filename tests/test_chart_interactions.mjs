@@ -50,6 +50,7 @@ globalThis.document = {
   createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag),
   createTextNode: text => Object.assign(new Element('#text'), {textContent: text}),
 };
+globalThis.getComputedStyle = () => ({zoom: '1'});
 globalThis.window = new Element('window');
 globalThis.ResizeObserver = class {
   constructor(callback) { this.callback = callback; observers.push(this); }
@@ -64,6 +65,21 @@ function find(node, predicate) {
 const byClass = (node, name) => find(node, child => child.classList.contains(name));
 const points = chart => byClass(chart, 'chart__line').attributes.points;
 const coordinates = chart => points(chart).split(' ').map(point => point.split(',').map(Number));
+
+test('market index gaps split curves including gaps omitted by downsampling', () => {
+  const chart = lineChart({labels: ['A', 'B', 'C', 'D', 'E', 'F', 'G'], series: [
+    {label: '指数', color: 'green', connectGaps: false, breakBefore: [5], values: [1, 2, null, 4, 5, 6, 7]},
+  ]});
+  const lines = [];
+  function collect(node) {
+    if (node.classList.contains('chart__line')) lines.push(node.attributes.points);
+    node.children.forEach(collect);
+  }
+  collect(chart);
+  assert.equal(lines.length, 3);
+  assert.deepEqual(lines.map(line => line.split(' ').length), [2, 2, 2]);
+  chart.dispose();
+});
 function fixture(interactive = true) {
   return lineChart({interactive, height: 200, labels: Array.from({length: 11}, (_, i) => `D${i}`),
     series: [{label: '回报', color: 'blue', values: Array.from({length: 11}, (_, i) => i)}]});

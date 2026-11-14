@@ -3,8 +3,10 @@ from backtest.engine import BacktestOutcome
 from backtest.report import BacktestRunStore
 from quantlens.compute import submit
 from quantlens.sync_ads import sync
+from quantlens.backtest_publication import serialized_publication
 
 
+@serialized_publication
 def run_remote(config,profile,protocol,run_id=None,reporter=None):
     run_id=run_id or 'BT-'+uuid.uuid4().hex
     batch_id='backtest-'+uuid.uuid4().hex

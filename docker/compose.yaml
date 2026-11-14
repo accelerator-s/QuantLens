@@ -1,11 +1,15 @@
 name: quantlens
 x-hadoop: &hadoop
+  security_opt: [no-new-privileges:true]
+  cap_drop: [NET_RAW, NET_ADMIN, SYS_ADMIN, SYS_PTRACE, MKNOD, SETFCAP, SETPCAP]
+  pids_limit: 1024
   image: quantlens/hadoop:locked
   build:
     context: ..
     dockerfile: docker/Dockerfile.hadoop
     args:
       HADOOP_VERSION: ${HADOOP_VERSION:?use --env-file docker/versions.env}
+      HADOOP_SHA512: ${HADOOP_SHA512}
   networks: [quantlens-net]
   mem_limit: 4g
   restart: unless-stopped
@@ -13,6 +17,9 @@ x-hadoop: &hadoop
     - ./init:/opt/quantlens/init:ro
     - ./conf/hadoop:/etc/hadoop/conf:ro
 x-spark: &spark
+  security_opt: [no-new-privileges:true]
+  cap_drop: [NET_RAW, NET_ADMIN, SYS_ADMIN, SYS_PTRACE, MKNOD, SETFCAP, SETPCAP]
+  pids_limit: 1024
   restart: unless-stopped
   image: quantlens/spark:locked
   build:
@@ -20,7 +27,9 @@ x-spark: &spark
     dockerfile: docker/Dockerfile.spark
     args:
       SPARK_VERSION: ${SPARK_VERSION}
-      HIVE_VERSION: ${HIVE_VERSION}
+      SPARK_SHA512: ${SPARK_SHA512}
+      HIVE_CLIENT_VERSION: ${HIVE_CLIENT_VERSION}
+      HIVE_CLIENT_SHA256: ${HIVE_CLIENT_SHA256}
   networks: [quantlens-net]
   mem_limit: 4g
   environment: {QUANTLENS_BACKTEST_ROOT: /data/backtest}
@@ -29,11 +38,21 @@ x-spark: &spark
     - ./conf/hadoop:/etc/hadoop/conf:ro
     - ./conf/spark/spark-defaults.conf:/etc/spark/conf/spark-defaults.conf:ro
     - ./conf/hive/hive-site.xml:/etc/spark/conf/hive-site.xml:ro
-    - ../:/workspace:ro
+    - ../src:/workspace/src:ro
+    - ../factors:/workspace/factors:ro
+    - ../config:/workspace/config:ro
+    - ../main.py:/workspace/main.py:ro
+    - ../data:/workspace/data:ro
     - ../data/landing:/data/landing
     - ../data/ads:/data/ads
     - ../data/backtest_runs:/data/backtest
 services:
+  netty-build:
+    image: quantlens/netty:locked
+    profiles: [build]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.netty
   base:
     image: quantlens/base:locked
     profiles: [build]
@@ -49,7 +68,6 @@ services:
     <<: *hadoop
     hostname: nn-rm
     environment: {QL_ROLE: namenode}
-    ports: ['127.0.0.1:9870:9870', '127.0.0.1:8088:8088', '127.0.0.1:9000:9000']
     volumes:
       - ./init:/opt/quantlens/init:ro
       - ./conf/hadoop:/etc/hadoop/conf:ro
@@ -71,7 +89,10 @@ services:
       - ./init:/opt/quantlens/init:ro
       - ./conf/hadoop:/etc/hadoop/conf:ro
       - hdfs_datanode_1:/hadoop/dfs/data
-      - ../:/workspace:ro
+      - ../src:/workspace/src:ro
+      - ../factors:/workspace/factors:ro
+      - ../config:/workspace/config:ro
+      - ../main.py:/workspace/main.py:ro
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://localhost:9864/ >/dev/null && curl -fsS http://localhost:8042/ws/v1/node/info >/dev/null']
       interval: 20s
@@ -86,35 +107,43 @@ services:
       - ./init:/opt/quantlens/init:ro
       - ./conf/hadoop:/etc/hadoop/conf:ro
       - hdfs_datanode_2:/hadoop/dfs/data
-      - ../:/workspace:ro
+      - ../src:/workspace/src:ro
+      - ../factors:/workspace/factors:ro
+      - ../config:/workspace/config:ro
+      - ../main.py:/workspace/main.py:ro
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://localhost:9864/ >/dev/null && curl -fsS http://localhost:8042/ws/v1/node/info >/dev/null']
       interval: 20s
       timeout: 10s
       retries: 10
   metastore-db:
+    security_opt: [no-new-privileges:true]
+    cap_drop: [NET_RAW, NET_ADMIN, SYS_ADMIN, SYS_PTRACE, MKNOD, SETFCAP, SETPCAP]
+    pids_limit: 1024
     restart: unless-stopped
     image: postgres:${POSTGRES_VERSION}
     networks: [quantlens-net]
     mem_limit: 512m
     environment: {POSTGRES_DB: metastore, POSTGRES_USER: hive, POSTGRES_PASSWORD: local-metastore}
-    volumes: [hive_metastore_pg:/var/lib/postgresql/data]
+    volumes: [hive_metastore_pg17:/var/lib/postgresql/data]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U hive -d metastore']
       interval: 10s
       retries: 10
   hive:
+    security_opt: [no-new-privileges:true]
+    cap_drop: [NET_RAW, NET_ADMIN, SYS_ADMIN, SYS_PTRACE, MKNOD, SETFCAP, SETPCAP]
+    pids_limit: 1024
     restart: unless-stopped
     image: quantlens/hive:locked
     build:
       context: ..
       dockerfile: docker/Dockerfile.hive
-      args: {HIVE_VERSION: '${HIVE_VERSION}', HBASE_VERSION: '${HBASE_VERSION}'}
+      args: {HIVE_VERSION: '${HIVE_VERSION}', HIVE_SHA256: '${HIVE_SHA256}', HBASE_VERSION: '${HBASE_VERSION}', HBASE_SHA512: '${HBASE_SHA512}'}
     hostname: hive
     networks: [quantlens-net]
     mem_limit: 2g
     depends_on: {metastore-db: {condition: service_healthy}, dn-nm-1: {condition: service_healthy}}
-    ports: ['127.0.0.1:9083:9083', '127.0.0.1:10000:10000']
     volumes:
       - ./init:/opt/quantlens/init:ro
       - ./conf/hadoop:/etc/hadoop/conf:ro
@@ -126,24 +155,26 @@ services:
       start_period: 90s
       retries: 15
   hbase:
+    security_opt: [no-new-privileges:true]
+    cap_drop: [NET_RAW, NET_ADMIN, SYS_ADMIN, SYS_PTRACE, MKNOD, SETFCAP, SETPCAP]
+    pids_limit: 1024
     restart: unless-stopped
     image: quantlens/hbase:locked
     build:
       context: ..
       dockerfile: docker/Dockerfile.hbase
-      args: {HBASE_VERSION: '${HBASE_VERSION}'}
+      args: {HBASE_VERSION: '${HBASE_VERSION}', HBASE_SHA512: '${HBASE_SHA512}'}
     hostname: hbase
     networks: [quantlens-net]
     mem_limit: 3g
     depends_on: {dn-nm-1: {condition: service_healthy}}
-    ports: ['127.0.0.1:16010:16010', '127.0.0.1:16030:16030', '127.0.0.1:16050:16050']
     volumes:
       - ./init:/opt/quantlens/init:ro
       - ./conf/hadoop:/etc/hadoop/conf:ro
       - ./conf/hbase:/etc/hbase/conf:ro
       - hbase_data:/hbase/zookeeper
     healthcheck:
-      test: ['CMD-SHELL', 'curl -fsS -H "Accept: application/json" http://localhost:16050/version/cluster >/dev/null']
+      test: ['CMD-SHELL', 'curl -fsS -H "Accept: application/json" http://localhost:16050/namespaces/ql >/dev/null']
       interval: 20s
       start_period: 90s
       retries: 15
@@ -161,16 +192,41 @@ services:
     hostname: spark-history
     depends_on: {nn-rm: {condition: service_healthy}}
     command: ['/opt/spark/bin/spark-class', 'org.apache.spark.deploy.history.HistoryServer']
-    ports: ['127.0.0.1:18080:18080']
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://localhost:18080/ >/dev/null']
       interval: 20s
       retries: 10
+  cluster-access:
+    image: haproxy:3.2-alpine
+    restart: unless-stopped
+    user: '${QUANTLENS_UID:?use docker/cluster.sh}:${QUANTLENS_GID:?use docker/cluster.sh}'
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 64
+    mem_limit: 64m
+    networks: [quantlens-net, quantlens-access]
+    volumes:
+      - ./conf/cluster-access.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ../data/cluster-access:/run/quantlens
+    ports:
+      - '127.0.0.1:9870:9870'
+      - '127.0.0.1:8088:8088'
+      - '127.0.0.1:16010:16010'
+      - '127.0.0.1:16030:16030'
+      - '127.0.0.1:18080:18080'
+    healthcheck:
+      test: ['CMD', 'haproxy', '-c', '-f', '/usr/local/etc/haproxy/haproxy.cfg']
+      interval: 20s
+      timeout: 10s
+      retries: 5
 networks:
-  quantlens-net: {name: quantlens-net, driver: bridge}
+  quantlens-net: {name: quantlens-net, driver: bridge, internal: true}
+  quantlens-access: {name: quantlens-access, driver: bridge}
 volumes:
   hdfs_namenode:
   hdfs_datanode_1:
   hdfs_datanode_2:
   hive_metastore_pg:
+  hive_metastore_pg17:
   hbase_data:

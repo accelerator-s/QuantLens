@@ -2,7 +2,12 @@
 set -euo pipefail
 if [[ ${QL_ROLE:-} == namenode ]]; then
   test -f /hadoop/dfs/name/current/VERSION || hdfs namenode -format -nonInteractive
-  hdfs namenode &
+  namenode_args=()
+  layout=$(sed -n 's/^layoutVersion=//p' /hadoop/dfs/name/current/VERSION)
+  if [[ $layout =~ ^-[0-9]+$ ]] && (( layout > -67 )); then
+    namenode_args=(-upgrade)
+  fi
+  hdfs namenode "${namenode_args[@]}" &
   yarn resourcemanager &
   for i in {1..120}; do
     if hdfs dfsadmin -safemode wait; then break; fi

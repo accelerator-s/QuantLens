@@ -89,6 +89,14 @@ export async function mount(root, ctx) {
         : previous.reason;
       checkHost.append(el("p", "item-row__meta data__last-check", `上次检查：${reason}`));
     }
+    const indexSchedules = (data.schedules || []).filter(item => ['index_basic', 'index_daily'].includes(item.table));
+    if (indexSchedules.length) {
+      const schedule = el('article', 'card detail-card');
+      schedule.append(el('h3', '', '指数更新计划'));
+      for (const item of indexSchedules) schedule.append(el('p', 'item-row__meta',
+        `${item.table === 'index_basic' ? '指数目录' : '指数日行情'}：${item.label}${item.last_checked ? ` · 上次检查 ${item.last_checked}` : ''}`));
+      checkHost.append(schedule);
+    }
     if (data.active_sync && !isDataSyncTask(data.active_sync)) return;
     if (data.active_sync) {
       const p = data.active_sync.progress || {};
@@ -131,10 +139,10 @@ export async function mount(root, ctx) {
     card.append(head);
     if (data.publication_pending) {
       card.append(kvEl([["已下载至", data.downloaded_date || "—"], ["已发布至", data.published_date || "尚未发布"]]));
-      card.append(el("p", "item-row__meta", "已有数据待发布，点击「检查更新并同步」完成更新。"));
+      card.append(el("p", "item-row__meta", "数据待发布，点击「检查更新并同步」。"));
     }
     if (data.first_download) {
-      card.append(el("p", "item-row__meta", "尚无历史数据，同步将执行全量下载。"));
+      card.append(el("p", "item-row__meta", "首次同步将下载全量历史数据。"));
     } else if (data.market_needs_update) {
       card.append(
         kvEl([
@@ -209,7 +217,7 @@ export async function mount(root, ctx) {
 
     async function tick() {
       try {
-        const task = await ctx.api.task(taskId);
+        const task = await ctx.api.dataSyncProgress(taskId);
         consecutiveFailures = 0;
         if (!isDataSyncTask(task)) { taskHost.replaceChildren(); syncBtn.disabled = false; return; }
         renderTask(taskHost, task);
@@ -311,7 +319,6 @@ export async function mount(root, ctx) {
     card.append(progressBox);
     if (task.error) card.append(codeEl(task.error));
     const taskLog = updateTaskLog(previousLog, task.log, {
-      limit: 24,
       subject: task.task_id || task.name,
       className: "sync-progress__log",
     });

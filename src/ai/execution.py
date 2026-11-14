@@ -12,14 +12,9 @@ def syntax_check(source: str) -> list[str]:
     return []
 
 def run_factor(*, source: str, panel_payload: dict[str, Any]):
-    namespace = {'__name__': 'quantlens_factor'}
+    from factors.sandbox import execute_factor
     try:
-        exec(compile(source, '<factor>', 'exec'), namespace)
-        compute = namespace.get('compute')
-        if not callable(compute):
-            raise ContractViolation(code='FACTOR_ENTRY_MISSING', message='因子缺少 compute(panel) 入口',
-                                    suggested_action='在因子代码中定义 compute 函数')
-        value = compute(panel_payload)
+        value = execute_factor(source, panel_payload)
         if not isinstance(value, pd.DataFrame):
             raise ContractViolation(code='FACTOR_OUTPUT_INVALID', message='因子应返回日期 × 证券的 DataFrame',
                                     suggested_action='检查 compute 函数返回值')

@@ -1,3 +1,4 @@
+import {newestFirst} from '../../core/sort.js';
 import { renderState } from "../state-card/state-card.js";
 import { runWithConfirm } from "../confirm-dialog/confirm-dialog.js";
 import { formDialog } from "../confirm-dialog/form-dialog.js";
@@ -69,7 +70,7 @@ export async function mount(root, ctx) {
             { key: "source_category", label: "分类" },
             { key: "updated_at", label: "更新时间", format: (v) => fmtTime(v) },
           ],
-          data.items,
+          newestFirst(data.items, ['updated_at']),
         ),
       );
     } catch (err) {
@@ -175,7 +176,6 @@ export async function mount(root, ctx) {
   async function trashPurge() {
     const values = await formDialog({
       title: "清理回收站",
-      message: "永久删除超过指定天数未恢复的条目，不可撤销。",
       submitLabel: "下一步",
       fields: [{ key: "days", label: "保留天数", kind: "number", required: true, value: "30" }],
     });

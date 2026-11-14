@@ -159,17 +159,17 @@ class StageCache:
         if spec is None:
             action()
             return False
-        from quantlens.gpu import atomic_json, shared_root, use_gpu, worker_status
+        from quantlens.gpu import atomic_json, shared_root, worker_status
         inputs, outputs = spec
         source = self.fingerprints(inputs)
         worker = worker_status()
         runtime = {'spark': self.spark.version if isinstance(self.spark.version, str) else '',
-                   'torch': worker.get('torch'), 'device_name': worker.get('name')}
+                   'torch': worker.get('torch'), 'numeric_engine': 'torch_float64_xgb_hist_v2'}
         cleaning = stage.startswith('dwd_')
         identity = {'format': 2 if stage.startswith('dwd_') else 1, 'stage': stage, 'parameters': parameters,
                     'code': cleaning_code(stage) if cleaning else self.context['pipeline_code_hash'],
                     'config': None if cleaning else self._configuration,
-                    'device': 'cpu' if cleaning else ('cuda' if use_gpu() else 'cpu'),
+                    'device_policy': 'cpu' if cleaning else os.environ.get('QUANTLENS_TRAIN_DEVICE', 'auto'),
                     'runtime': {'spark': runtime['spark']} if cleaning else runtime, 'inputs': source}
         # ODS file identities already describe every input to cleaning. A change
         # in an unrelated table must not invalidate unchanged source tables.

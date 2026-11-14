@@ -4,14 +4,6 @@ from backtest.signal import SignalResult, _resolve_direction
 from quantlens.warehouse import session
 
 
-def confirmed_delisting_dates(prices):
-    from pyspark.sql import functions as F
-    return (prices.groupBy('code')
-            .agg(F.max(F.when(F.col('is_trading'),F.col('date'))).alias('_last_trade'),
-                 F.max_by('is_delisting','date').alias('_terminal'))
-            .select('code',F.when(F.col('_terminal'),F.col('_last_trade')).alias('delisting_date')))
-
-
 def inputs(profile,start,end,spark=None):
     from pyspark.sql import functions as F, Window
     from factors.registry import FactorRegistry
@@ -21,7 +13,7 @@ def inputs(profile,start,end,spark=None):
         prices=spark.table('dwd.prices_clean').where((F.col('date')<=end)&(F.col('date')>=str(pd.Timestamp(start)-pd.Timedelta(days=150))[:10]))
         dates=prices.where(F.col('date')>=start).select('date').distinct().orderBy('date').toPandas()['date']
         index=pd.DatetimeIndex(pd.to_datetime(dates))
-        market_pdf=prices.where(F.col('date')>=str(pd.Timestamp(start)-pd.Timedelta(days=100))[:10]).select('code','date','close','high','low','is_trading','listed_days','trading_status','ret_wd').toPandas()
+        market_pdf=prices.where(F.col('date')>=str(pd.Timestamp(start)-pd.Timedelta(days=100))[:10]).select('code','date','close','high','low','is_trading','listed_days','trading_status','ret_wd','is_delisting','circ_mv').toPandas()
         market_pdf.date=pd.to_datetime(market_pdf.date)
         market={col:market_pdf.pivot(index='date',columns='code',values=col).sort_index() for col in market_pdf.columns if col not in {'code','date'}}
         columns=market['close'].columns
@@ -44,14 +36,12 @@ def inputs(profile,start,end,spark=None):
         else: clusters=pd.DataFrame(index=market['close'].index,columns=columns)
         # Industry values are resolved PIT by the same panel source used for factors.
         from quantlens.panel_source import fields
-        industries=fields(spark,['industry_code'],start,end).toPandas()
+        industries=fields(spark,['industry_code'],str(market_pdf.date.min())[:10],end).toPandas()
         industries.date=pd.to_datetime(industries.date)
-        industries=industries.pivot(index='date',columns='code',values='industry_code').reindex(index=index,columns=columns)
+        industries=industries.pivot(index='date',columns='code',values='industry_code').reindex(index=market['close'].index,columns=columns)
         ma_window=Window.partitionBy('code').orderBy('date').rowsBetween(-59,0)
         breadth=prices.withColumn('_ma',F.avg('close').over(ma_window)).join(spark.table('dwd.universe').select('code','date','in_universe'),['code','date']).where(F.col('in_universe')&(F.col('date')>=start)).groupBy('date').agg(F.avg((F.col('close')>F.col('_ma')).cast('double')).alias('breadth')).toPandas()
         breadth.date=pd.to_datetime(breadth.date)
-        delisting=confirmed_delisting_dates(spark.table('dwd.prices_clean')).toPandas()
-        delisting=delisting.set_index('code').delisting_date.reindex(columns)
-        return {'signal':signal,'market':market,'delisting_dates':delisting,'mask':mask,'clusters':clusters,'industries':industries,'breadth':breadth.set_index('date').breadth}
+        return {'signal':signal,'market':market,'mask':mask,'clusters':clusters,'industries':industries,'breadth':breadth.set_index('date').breadth}
     finally:
         if owned: spark.stop()

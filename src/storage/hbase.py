@@ -19,8 +19,10 @@ def _encode(value) -> str:
 
 
 class HBase:
-    def __init__(self, url='http://127.0.0.1:16050', *, client=None, timeout=10):
-        self.client = client or httpx.Client(base_url=url, timeout=timeout, trust_env=False,
+    def __init__(self, url=None, *, client=None, timeout=10):
+        from storage.cluster_access import socket_path
+        transport = httpx.HTTPTransport(uds=str(socket_path())) if url is None and client is None else None
+        self.client = client or httpx.Client(base_url=url or 'http://hbase', transport=transport, timeout=timeout, trust_env=False,
                                             headers={'Accept': 'application/json'})
 
     def _request(self, method, path, **kwargs):

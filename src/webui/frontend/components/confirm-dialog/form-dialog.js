@@ -5,6 +5,7 @@ import { el, selectMarkup } from "../../core/dom.js";
 import { createSelect } from "../../core/select.js";
 import { createMultiSelect } from "../../core/multi-select.js";
 import { attachStockPicker } from "../../core/stock-picker.js";
+import { pageScale } from "../../core/layout.js";
 
 // 弹窗高度自适应：
 
@@ -17,7 +18,8 @@ function fitDialog(dialog, body) {
   body.style.minHeight = "";
   body.style.maxHeight = "";
   body.style.overflowY = "";
-  const budget = Math.min(window.innerHeight - 48, Math.floor(window.innerHeight * 0.84));
+  const height = window.innerHeight / pageScale();
+  const budget = Math.min(height - 48, Math.floor(height * 0.84));
   const chrome = dialog.offsetHeight - body.offsetHeight; 
   const need = body.scrollHeight;
   const room = budget - chrome;
@@ -31,12 +33,13 @@ function fitDialog(dialog, body) {
   }
 }
 
-export function formDialog({ title = "填写表单", submitLabel = "提交", message = "", fields = [] }) {
+export function formDialog({ title = "填写表单", submitLabel = "提交", message = "", fields = [], setup, autoFocus = true }) {
   return new Promise((resolve) => {
     const backdrop = el("div", "dialog-backdrop");
     const dialog = el("div", "dialog dialog--wide");
     dialog.setAttribute("role", "dialog");
     dialog.setAttribute("aria-modal", "true");
+    dialog.tabIndex = -1;
     backdrop.append(dialog);
     dialog.append(el("h3", "dialog__title", title));
 
@@ -168,6 +171,7 @@ export function formDialog({ title = "填写表单", submitLabel = "提交", mes
         stockPickers.push(attachStockPicker(input));
       }
     }
+    setup?.(controls);
     dialog.append(body);
 
     const actions = el("div", "dialog__actions");
@@ -221,6 +225,7 @@ export function formDialog({ title = "填写表单", submitLabel = "提交", mes
         if (["number", "stock"].includes(f.kind) && !input.checkValidity()) {
           input.classList.add("is-invalid");
           input.focus();
+          input.reportValidity();
           return;
         }
         if (f.required && !val) {
@@ -245,6 +250,6 @@ export function formDialog({ title = "填写表单", submitLabel = "提交", mes
     document.body.append(backdrop);
     refit();
     const firstInput = Object.values(controls)[0];
-    (firstInput || ok).focus();
+    (autoFocus ? firstInput || ok : dialog).focus();
   });
 }

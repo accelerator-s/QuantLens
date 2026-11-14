@@ -107,7 +107,7 @@ class CnAStockAdapter:
             rule_text = (
                 f"须为 {min_unit} 股整数倍"
                 if increment == 0
-                else f"首笔 {min_unit} 股，之后可 {increment} 股递增"
+                else f"每笔至少 {min_unit} 股，超出可 {increment} 股递增"
             )
             raise PortfolioContractError(
                 code="portfolio.trade_lot_invalid",

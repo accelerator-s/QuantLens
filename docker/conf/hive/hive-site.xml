@@ -11,5 +11,8 @@
   <property><name>hive.execution.engine</name><value>mr</value></property>
   <property><name>hive.server2.enable.doAs</name><value>false</value></property>
   <property><name>hive.metastore.warehouse.dir</name><value>hdfs:///user/hive/warehouse</value></property>
-  <property><name>hive.server2.thrift.bind.host</name><value>0.0.0.0</value></property>
+  <property><name>hive.server2.thrift.bind.host</name><value>127.0.0.1</value></property>
+  <property><name>hive.server2.webui.host</name><value>127.0.0.1</value></property>
+  <property><name>compactor.table.optimizers</name><value>org.apache.hadoop.hive.ql.txn.compactor.AcidTableOptimizer</value></property>
+  <property><name>metastore.task.threads.remote</name><value>org.apache.hadoop.hive.metastore.txn.service.AcidHouseKeeperService,org.apache.hadoop.hive.metastore.txn.service.CompactionHouseKeeperService,org.apache.hadoop.hive.metastore.txn.service.AcidTxnCleanerService,org.apache.hadoop.hive.metastore.txn.service.AcidOpenTxnsCounterService,org.apache.hadoop.hive.metastore.MaterializationsRebuildLockCleanerTask,org.apache.hadoop.hive.metastore.PartitionManagementTask</value></property>
 </configuration>

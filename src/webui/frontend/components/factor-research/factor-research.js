@@ -17,33 +17,36 @@ export async function mount(root, ctx) {
   const resultHost = root.querySelector("[data-research-result]");
   const aiResearchBtn = root.querySelector("[data-ai-research]");
   const emptyHost = root.querySelector("[data-research-empty]");
+  const researchHeading = root.querySelector("[data-research-heading]");
+  const researchButtons = [aiResearchBtn, root.querySelector("[data-research-again]")];
+  const setResearchDisabled = value => researchButtons.forEach(button => { button.disabled = value; });
   let pollTimer = null;
   let currentTaskId = "";
   let polling = false;
   await hydrateIcons(root);
-  aiResearchBtn.addEventListener("click", () => openAIResearchDialog());
+  researchButtons.forEach(button => button.addEventListener("click", openAIResearchDialog));
   ctx.bus.on("route", id => {
     if (id === "factors" && !polling) restoreTask();
   });
   await restoreTask();
 
   async function restoreTask() {
-    aiResearchBtn.disabled = true;
+    setResearchDisabled(true);
     try {
-      const data = await ctx.api.jobs();
+      const data = await ctx.api.jobs({resource: "factor-ai-research", limit: 1});
       const task = (data.items || []).find(item => item.resource === "factor-ai-research");
       if (task) {
         pollTask(task.task_id, {
           host: candidateTaskHost,
-          buttons: [aiResearchBtn],
+          buttons: researchButtons,
           onResult: renderAIResearchResult,
           notify: false,
         });
       } else {
-        aiResearchBtn.disabled = false;
+        setResearchDisabled(false);
       }
     } catch (err) {
-      aiResearchBtn.disabled = false;
+      setResearchDisabled(false);
       await renderState(candidateTaskHost, {
         kind: "error", title: "研究任务加载失败", detail: err.message, retry: restoreTask,
       });
@@ -53,13 +56,13 @@ export async function mount(root, ctx) {
   async function openAIResearchDialog() {
     let recommendationData;
     try {
-      aiResearchBtn.disabled = true;
+      setResearchDisabled(true);
       recommendationData = await ctx.api.factorEvolutionModelRecommendations();
     } catch (err) {
       toastError(ctx.bus, err, "模型匹配加载失败");
       return;
     } finally {
-      aiResearchBtn.disabled = false;
+      setResearchDisabled(false);
     }
     const modelItems = (recommendationData.items || []).filter((item) => item.selectable);
     if (!modelItems.length) {
@@ -97,7 +100,7 @@ export async function mount(root, ctx) {
     );
     modelField.append(modelLabel, modelSelectRoot);
     toolbar.append(modelField);
-    const start = el("button", "btn btn--primary", "开始自动研究");
+    const start = el("button", "btn btn--primary", "生成候选");
     start.type = "button";
     actions.append(start);
     start.disabled = true;
@@ -139,38 +142,68 @@ export async function mount(root, ctx) {
           messages: chat.context,
         });
         close();
-        ctx.bus.emit("toast", { kind: "info", title: "自动研究已启动" });
+        ctx.bus.emit("toast", { kind: "info", title: "生成候选任务已启动" });
         pollTask(result.task_id, {
           host: candidateTaskHost,
-          buttons: [aiResearchBtn],
+          buttons: researchButtons,
           onResult: renderAIResearchResult,
         });
       } catch (err) {
-        start.textContent = "开始自动研究";
+        start.textContent = "生成候选";
         chat.setDisabled(false);
         modelTrigger.disabled = false;
-        toastError(ctx.bus, err, "自动研究启动失败");
+        toastError(ctx.bus, err, "生成候选失败");
       }
     });
   }
 
-  function renderAIResearchResult(result) {
+  function renderAIResearchResult(result, taskId) {
+    const pending = result.approval_status === "pending";
     const summary = el("article", "card detail-card factors__research-result");
     const head = el("div", "detail-card__head");
-    head.append(el("h3", "", result.display_name || "新因子"), badge("已进入自动迭代", "safe"));
+    head.append(el("h3", "", result.display_name || "新因子"), badge(pending ? "等待启动实验" : "已进入自动迭代", pending ? "accent" : "safe"));
     summary.append(head);
-    summary.append(kvEl([["内部标识", result.factor_name], ["研究会话", result.research_id]]));
+    summary.append(kvEl([["内部标识", result.factor_name], ...(result.research_id ? [["研究会话", result.research_id]] : [])]));
     summary.append(el("p", "", result.assumption || "金融假设已登记。"));
     summary.append(
       el(
         "p",
         "item-row__meta",
-        "语法检查和数据试运行已通过，正在评价并比较研究结果。正式使用仍需人工批准。",
+        pending ? "已通过语法检查和数据试运行。" : "正在评估比较。正式使用需人工批准。",
       ),
     );
+    if (pending) {
+      const start = el("button", "btn btn--primary", "启动实验");
+      start.type = "button";
+      start.addEventListener("click", async () => {
+        start.disabled = true;
+        start.textContent = "正在启动…";
+        setResearchDisabled(true);
+        try {
+          await ctx.api.factorResearchApprove(taskId);
+          if (currentTaskId !== taskId) return;
+          ctx.bus.emit("toast", { kind: "success", title: "因子实验已启动" });
+          pollTask(taskId, { host: candidateTaskHost, buttons: researchButtons,
+            onResult: renderAIResearchResult, notify: false });
+        } catch (err) {
+          start.disabled = false;
+          start.textContent = "启动实验";
+          setResearchDisabled(false);
+          toastError(ctx.bus, err, "因子实验启动失败");
+        }
+      });
+      summary.append(start);
+      resultHost.replaceChildren(summary);
+      return;
+    }
     const open = el("button", "btn btn--ghost", "查看自动研究进展");
     open.type = "button";
-    open.addEventListener("click", () => ctx.bus.emit("route", "factors/experiments"));
+    open.addEventListener("click", () => {
+      ctx.factorExperimentFilter = result.factor_name;
+      ctx.factorExperimentFilterLabel = result.display_name || result.factor_name;
+      ctx.bus.emit("factor:experiments");
+      ctx.bus.emit("route", "factors/experiments");
+    });
     summary.append(open);
     resultHost.replaceChildren(summary);
   }
@@ -180,12 +213,13 @@ export async function mount(root, ctx) {
     currentTaskId = taskId;
     polling = true;
     emptyHost.hidden = true;
+    researchHeading.hidden = false;
     resultHost.replaceChildren();
     for (const b of buttons) b.disabled = true;
 
     async function tick() {
       try {
-        const task = await ctx.api.task(taskId);
+        const task = await ctx.api.factorResearchProgress(taskId);
         if (currentTaskId !== taskId) return;
         renderTaskCard(host, task);
         if (task.status === "running") {
@@ -195,8 +229,8 @@ export async function mount(root, ctx) {
         polling = false;
         for (const b of buttons) b.disabled = false;
         if (task.status === "completed") {
-          if (notify) ctx.bus.emit("toast", { kind: "success", title: "新因子已生成，已启动迭代实验" });
-          if (onResult) onResult(task.result || {});
+          if (notify) ctx.bus.emit("toast", { kind: "success", title: "新因子已生成" });
+          if (onResult) onResult(task.result || {}, taskId);
         } else {
           if (notify) ctx.bus.emit("toast", { kind: "error", title: "新因子生成失败", detail: task.error });
         }
@@ -234,17 +268,14 @@ export async function mount(root, ctx) {
         el(
           "p",
           "factors__task-step",
-          task.status === "completed" ? "候选已登记，迭代实验已启动"
+          task.status === "completed" ? (task.result?.approval_status === "pending" ? "候选已就绪，等待启动实验" : "候选已登记，因子实验已启动")
             : `${progress.step}${task.status === "running" && Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ""}`,
         ),
       );
     }
-    card.append(el("p", "item-row__meta", task.status === "completed"
-      ? "候选已登记，后续评估与版本比较请到「迭代实验」查看。"
-      : "本阶段生成并检查初始候选；通过后会自动启动迭代实验。"));
+
     if (task.error) card.append(el("p", "factors__task-error", task.error));
     const taskLog = updateTaskLog(previousLog, task.log, {
-      limit: 8,
       subject: task.task_id || task.name,
     });
     if (taskLog) card.append(taskLog);

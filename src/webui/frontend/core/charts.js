@@ -1,4 +1,5 @@
 import {createChartViewport} from "./chart-viewport.js";
+import {pageScale} from "./layout.js";
 const NS = "http://www.w3.org/2000/svg";
 
 function svgEl(tag, attrs = {}) {
@@ -56,6 +57,9 @@ export function lineChart({
     class: "chart__svg", role: "img",
     "aria-label": series.map(s => s.label).join("、") || "折线图",
   });
+  // Keep the requested chart height on wide cards; resize the plotting area instead.
+  svg.style.height = `${height}px`;
+  svg.setAttribute("preserveAspectRatio", "none");
   const tip = document.createElement("div");
   tip.className = "chart__tip";
   tip.hidden = true;
@@ -122,22 +126,29 @@ export function lineChart({
       axes.append(label);
     }
     series.forEach((s, idx) => {
-      const points = [];
+      const segments = [[]];
+      const breaks = new Set(s.breakBefore || []);
       s.values.forEach((value, i) => {
-        if (value == null || !Number.isFinite(value)) return;
-        points.push(`${xAt(i).toFixed(2)},${yAt(value).toFixed(2)}`);
+        if (breaks.has(i) && segments.at(-1).length) segments.push([]);
+        if (value == null || !Number.isFinite(value)) {
+          if (s.connectGaps === false && segments.at(-1).length) segments.push([]);
+          return;
+        }
+        segments.at(-1).push(`${xAt(i).toFixed(2)},${yAt(value).toFixed(2)}`);
       });
-      if (!points.length) return;
-      if (fillFirst && idx === 0) {
-        const start = points[0].split(",")[0];
-        const end = points[points.length - 1].split(",")[0];
-        const base = yAt(Math.max(yMin, Math.min(0, yMax))).toFixed(2);
-        plot.append(svgEl("polygon", {
-          points: `${start},${base} ${points.join(" ")} ${end},${base}`,
-          class: "chart__area", style: `fill: ${s.color}; opacity: 0.18;`,
-        }));
+      for (const points of segments) {
+        if (!points.length) continue;
+        if (fillFirst && idx === 0) {
+          const start = points[0].split(",")[0];
+          const end = points[points.length - 1].split(",")[0];
+          const base = yAt(Math.max(yMin, Math.min(0, yMax))).toFixed(2);
+          plot.append(svgEl("polygon", {
+            points: `${start},${base} ${points.join(" ")} ${end},${base}`,
+            class: "chart__area", style: `fill: ${s.color}; opacity: 0.18;`,
+          }));
+        }
+        plot.append(svgEl("polyline", {points: points.join(" "), class: "chart__line", style: `stroke: ${s.color};`}));
       }
-      plot.append(svgEl("polyline", {points: points.join(" "), class: "chart__line", style: `stroke: ${s.color};`}));
     });
     plot.append(cursor);
     svg.replaceChildren(defs, plot, axes);
@@ -171,8 +182,9 @@ export function lineChart({
       tip.append(row);
     }
     tip.hidden = false;
-    tip.style.top = `${p.rect.top - wrap.getBoundingClientRect().top + 10}px`;
-    tip.style.left = `${Math.max(0, Math.min(event.clientX - p.rect.left + 14, p.rect.width - tip.offsetWidth - 6))}px`;
+    const scale = pageScale();
+    tip.style.top = `${(p.rect.top - wrap.getBoundingClientRect().top) / scale + 10}px`;
+    tip.style.left = `${Math.max(0, Math.min((event.clientX - p.rect.left) / scale + 14, p.rect.width / scale - tip.offsetWidth - 6))}px`;
   }
   function scheduleHover(event) {
     if (!interactive) { hover(event); return; }
@@ -188,8 +200,6 @@ export function lineChart({
   svg.addEventListener("mouseleave", hideTip);
   if (interactive) {
     const reset = () => { viewport.reset(); render(); };
-    svg.style.height = `${height}px`;
-    svg.setAttribute("preserveAspectRatio", "none");
     let pointerInside = false;
     const cancelDrag = () => {
       clearTimeout(panCursorTimer);
@@ -258,23 +268,24 @@ export function lineChart({
     };
     for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) svg.addEventListener(name, endDrag);
     svg.addEventListener("dblclick", reset);
-    let observer;
     wrap.dispose = () => {
       cancelDrag();
       leave();
       observer?.disconnect();
     };
-    if (typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(entries => {
-        if (!svg.isConnected) { wrap.dispose(); return; }
-        const nextWidth = entries[0].contentRect.width;
-        if (nextWidth > padL + padR && Math.abs(nextWidth - width) > .5) {
-          width = nextWidth;
-          render();
-        }
-      });
-      observer.observe(svg);
-    }
+  }
+  let observer;
+  if (!wrap.dispose) wrap.dispose = () => observer?.disconnect();
+  if (typeof ResizeObserver !== "undefined") {
+    observer = new ResizeObserver(entries => {
+      if (!svg.isConnected) { wrap.dispose(); return; }
+      const nextWidth = entries[0].contentRect.width;
+      if (nextWidth > padL + padR && Math.abs(nextWidth - width) > .5) {
+        width = nextWidth;
+        render();
+      }
+    });
+    observer.observe(svg);
   }
   wrap.append(svg, tip);
   render();
@@ -320,23 +331,55 @@ export function barChart({ items = [], valueFmt = (v) => String(v) } = {}) {
 }
 
 export function candleChart(rows) {
-  const wrap=document.createElement('div');wrap.className='chart';
-  const svg=svgEl('svg',{viewBox:'0 0 900 360',class:'chart__svg',role:'img','aria-label':'最近120个交易日K线和成交量'});
-  const lo=Math.min(...rows.map(r=>r.low)),hi=Math.max(...rows.map(r=>r.high));
-  const maxVol=Math.max(...rows.map(r=>r.volume),1),step=820/rows.length;
-  const y=v=>24+(hi-v)/Math.max(hi-lo,0.01)*230;
-  for(let i=0;i<5;i++){
-    const value=lo+(hi-lo)*i/4,level=y(value);
-    svg.append(svgEl('line',{x1:58,x2:885,y1:level,y2:level,stroke:'var(--border)'}));
-    const label=svgEl('text',{x:50,y:level+4,'text-anchor':'end',fill:'var(--ink-2)','font-size':11});label.textContent=value.toFixed(2);svg.append(label);
+  const wrap = document.createElement('div');
+  wrap.className = 'chart';
+  const svg = svgEl('svg', {class: 'chart__svg', role: 'img', 'aria-label': '最近120个交易日K线和成交量', preserveAspectRatio: 'none'});
+  const height = 300;
+  svg.style.height = `${height}px`;
+  let width = 900;
+  const lo = Math.min(...rows.map(r => r.low)), hi = Math.max(...rows.map(r => r.high));
+  const maxVol = Math.max(...rows.map(r => r.volume), 1);
+  const y = value => 20 + (hi - value) / Math.max(hi - lo, 0.01) * 185;
+  function render() {
+    svg.replaceChildren();
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    const plotWidth = width - 74, step = plotWidth / Math.max(1, rows.length);
+    for (let i = 0; i < 5; i++) {
+      const value = lo + (hi - lo) * i / 4, level = y(value);
+      svg.append(svgEl('line', {x1: 58, x2: width - 16, y1: level, y2: level, stroke: 'var(--border)'}));
+      const label = svgEl('text', {x: 50, y: level + 4, class: 'chart__tick chart__tick--y'});
+      label.textContent = value.toFixed(2);
+      svg.append(label);
+    }
+    rows.forEach((r, i) => {
+      const x = 58 + (i + 0.5) * step, color = r.close >= r.open ? 'var(--up)' : 'var(--down)', group = svgEl('g');
+      const title = svgEl('title');
+      title.textContent = `${String(r.date).slice(0, 10)} 开 ${r.open} 高 ${r.high} 低 ${r.low} 收 ${r.close} 量 ${r.volume}`;
+      group.append(title);
+      group.append(svgEl('line', {x1: x, x2: x, y1: y(r.high), y2: y(r.low), stroke: color}));
+      group.append(svgEl('rect', {x: x - step * .3, y: Math.min(y(r.open), y(r.close)), width: Math.max(1, step * .6), height: Math.max(1, Math.abs(y(r.open) - y(r.close))), fill: color}));
+      group.append(svgEl('rect', {x: x - step * .3, y: 270 - r.volume / maxVol * 45, width: Math.max(1, step * .6), height: r.volume / maxVol * 45, fill: color, opacity: 0.6}));
+      svg.append(group);
+    });
+    const count = Math.min(rows.length, 4, Math.max(1, Math.floor(plotWidth / 100)));
+    for (let i = 0; i < count; i++) {
+      const index = count === 1 ? 0 : Math.round(i * (rows.length - 1) / (count - 1));
+      const label = svgEl('text', {x: 58 + (index + .5) * step, y: 290, class: 'chart__tick', 'text-anchor': i === 0 ? 'start' : i === count - 1 ? 'end' : 'middle'});
+      label.textContent = String(rows[index].date).slice(0, 10);
+      svg.append(label);
+    }
   }
-  rows.forEach((r,i)=>{
-    const x=60+(i+0.5)*step,c=r.close>=r.open?'#cf4c4c':'#168365',group=svgEl('g');
-    const title=svgEl('title');title.textContent=`${String(r.date).slice(0,10)} 开 ${r.open} 高 ${r.high} 低 ${r.low} 收 ${r.close} 量 ${r.volume}`;group.append(title);
-    group.append(svgEl('line',{x1:x,x2:x,y1:y(r.high),y2:y(r.low),stroke:c}));
-    group.append(svgEl('rect',{x:x-step*.3,y:Math.min(y(r.open),y(r.close)),width:Math.max(1,step*.6),height:Math.max(1,Math.abs(y(r.open)-y(r.close))),fill:c}));
-    group.append(svgEl('rect',{x:x-step*.3,y:330-r.volume/maxVol*55,width:Math.max(1,step*.6),height:r.volume/maxVol*55,fill:c,opacity:0.6}));svg.append(group);
-    if(i%30===0){const label=svgEl('text',{x,y:350,'text-anchor':'middle',fill:'var(--ink-2)','font-size':11});label.textContent=String(r.date).slice(0,10);svg.append(label);}
-  });
-  wrap.append(svg);return wrap;
+  let observer;
+  wrap.dispose = () => observer?.disconnect();
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(entries => {
+      if (!svg.isConnected) { wrap.dispose(); return; }
+      const nextWidth = entries[0].contentRect.width;
+      if (nextWidth > 100 && Math.abs(nextWidth - width) > .5) { width = nextWidth; render(); }
+    });
+    observer.observe(svg);
+  }
+  wrap.append(svg);
+  render();
+  return wrap;
 }

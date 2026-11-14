@@ -1,0 +1,114 @@
+profile_name: strategy_b4d6d4238ecb
+display_name: 通用账户·盈利质量组合测试
+is_template: false
+inheritance_parent: ''
+status: draft
+created_at: '2026-11-14T16:21:10.791076Z'
+updated_at: '2026-11-14T16:30:23.737701Z'
+market: CN-A
+instruments:
+- stock
+timescale: daily
+data_frequency: daily
+universe:
+  min_listed_days: 120
+  exclude_suspended: true
+  exclude_st: true
+  notes: ''
+factors:
+  weighting: equal
+  items:
+  - name: earnings_growth_quality_defensive
+    weight_override: null
+    direction_override: positive
+  - name: earnings_growth_defensive_conjunction
+    weight_override: null
+    direction_override: positive
+  - name: earnings_change_63d
+    weight_override: null
+    direction_override: positive
+standardization_chain:
+- step: zscore
+trading_rules:
+  market_rule: CN-A-stock
+execution_assumption:
+  price_anchor: next_close
+  fill_assumption: all_or_nothing
+  notes: ''
+rebalance_frequency: monthly
+holding_period: 5
+position_constraint:
+  top_n: 20
+  max_weight_per_name: '0.1'
+  min_cash_ratio: '0.1'
+fees_slippage:
+  fee_source: market_rule
+  slippage_bps: '10'
+  manual_fee_bps: null
+risk_control:
+  max_single_name_pct: '0.1'
+  max_industry_pct: '0.3'
+  notes: ''
+price_deviation_threshold: '0.02'
+constraints:
+  max_weight: 0.1
+  max_cluster_weight: 0.35
+  max_industry_weight: 0.3
+  cash_reserve: 0.1
+  max_positions: 20
+risk:
+  regime_filter:
+    enabled: true
+    breadth_lookback: 60
+    breadth_low: 0.4
+    breadth_crisis: 0.3
+    exposure_low: 0.5
+    exposure_crisis: 0.25
+benchmark: model_selected
+extra:
+  discussion_model: ''
+  research_spec:
+    display_name: 通用账户·盈利质量组合测试
+    factors:
+    - earnings_growth_quality_defensive
+    - earnings_growth_defensive_conjunction
+    - earnings_change_63d
+    account_id: research-default
+    model: auto
+    train_start: '2016-01-01'
+    train_end: '2021-12-11'
+    start: '2022-01-01'
+    end: '2024-12-31'
+    top_n: 20
+    rebalance_frequency: monthly
+    label_horizon: 20
+    max_candidates: 2
+  account_binding:
+    account_id: research-default
+  creation_account_snapshot:
+    account_id: research-default
+    alias: 通用研究（包含科创板）
+    capital: '1000000'
+    star_market_enabled: true
+    valuation_date: null
+    captured_at: '2026-11-14T16:21:10.775381+00:00'
+    basis: available_cash_plus_marked_holdings
+    account_hash: 0ebb2ee55c20a3921d990e8c992d088fafc3df3c88b93dec72c9cacf8b9b0653
+    holdings_hash: 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+    snapshot_hash: b5a1b7ce80db3361030bf0f4c25608aaabfb94c7e536aad681e397ea2f7a2657
+  factor_versions:
+    earnings_growth_quality_defensive: v1
+    earnings_growth_defensive_conjunction: v1
+    earnings_change_63d: v1
+  benchmark_plan:
+    return_benchmark:
+      kind: universe_equal_weight
+      code: null
+      components: []
+      cash_weight: 0.0
+      rebalance: monthly
+    market_reference: 000985
+    rationale: 在结果前按全 A 选股范围冻结股票池等权，中证全指仅作市场参照。
+    source: csmar
+    version: 1
+    selection_model: Codex-development-supervision

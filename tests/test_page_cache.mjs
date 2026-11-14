@@ -9,6 +9,11 @@ test('mounted pages expire by type and explicit invalidation wins', () => {
   const cache = createPageCache(() => time);
   assert.equal(cache.needsRefresh('market'), true);
   cache.mark('market'); cache.mark('data');
+  cache.mark('backtest');
+  assert.equal(cache.needsRefresh('backtest'), false);
+  cache.invalidate('backtest');
+  assert.equal(cache.needsRefresh('backtest'), true);
+  cache.mark('backtest');
   time = 29_999;
   assert.equal(cache.needsRefresh('market'), false);
   assert.equal(cache.needsRefresh('data'), false);
@@ -77,16 +82,22 @@ test('preload finishing after a mutation cannot repopulate stale cache', async (
   assert.equal(calls, 2);
 });
 
-test('task completion invalidates views once, even if it finishes before first poll', async () => {
+for (const [path, wrapped] of [
+  ['/api/data/sync/cache-test/progress', false],
+  ['/api/factors/chat/research/cache-test/progress', false],
+  ['/api/factor-evolution/research-test', true],
+]) test(`task completion invalidates views once via ${path}`, async () => {
   invalidateRequests();
   let changed = 0;
   const listener = () => changed++;
   window.addEventListener('quantlens:changed', listener);
-  globalThis.fetch = async (path, options) => Response.json(options?.method === 'POST'
-    ? {task_id:'cache-test'} : {task_id:'cache-test', status:'completed'});
+  globalThis.fetch = async (_path, options) => {
+    const task = {task_id:'cache-test', status:'completed'};
+    return Response.json(options?.method === 'POST' ? {task_id:'cache-test'} : wrapped ? {task} : task);
+  };
   await fetchApi('/api/start', {method:'POST'});
-  await fetchApi('/api/tasks/cache-test');
-  await fetchApi('/api/tasks/cache-test');
+  await fetchApi(path);
+  await fetchApi(path);
   assert.equal(changed, 2);
   window.removeEventListener('quantlens:changed', listener);
 });

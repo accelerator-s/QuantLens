@@ -1,7 +1,16 @@
 import { labelText } from "./labels.js";
 
+export function selectMarkup(placeholder = "请选择") {
+  return `
+    <button type="button" class="select__trigger" data-select-trigger aria-haspopup="listbox" aria-expanded="false">
+      <span data-select-value>${placeholder}</span>
+      <span class="select__chevron">▾</span>
+    </button>
+    <div class="select__menu" data-select-list role="listbox" hidden></div>
+  `;
+}
 
-export function createSelect(root, { emptyLabel = "（无可选项）", onChange } = {}) {
+export function createSelect(root, { emptyLabel = "（无可选项）", onChange, onOpen } = {}) {
   const trigger = root.querySelector("[data-select-trigger]");
   const valueEl = root.querySelector("[data-select-value]");
   const list = root.querySelector("[data-select-list]");
@@ -10,18 +19,21 @@ export function createSelect(root, { emptyLabel = "（无可选项）", onChange
   let activeIndex = -1;
 
   function open() {
-    if (!options.length) return;
+    if (!options.length || root.classList.contains("is-open")) return;
     root.classList.add("is-open");
     list.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
     activeIndex = Math.max(0, options.findIndex((item) => item.value === selected));
     refreshActive();
+    document.addEventListener("click", outsideClick);
+    onOpen?.();
   }
 
   function close() {
     root.classList.remove("is-open");
     list.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", outsideClick);
   }
 
   function choose(option) {
@@ -96,7 +108,6 @@ export function createSelect(root, { emptyLabel = "（无可选项）", onChange
   function outsideClick(event) {
     if (!root.contains(event.target)) close();
   }
-  document.addEventListener("click", outsideClick);
 
   return {
     get value() {

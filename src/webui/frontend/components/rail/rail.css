@@ -45,6 +45,14 @@
   white-space: nowrap;
 }
 
+.rail__ver {
+  margin-top: 3px;
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
 .rail__groups {
   display: flex;
   flex-direction: column;

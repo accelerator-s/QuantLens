@@ -11,13 +11,14 @@ export async function runWithConfirm({
   notePlaceholder = "",
   confirmLabel = "确认执行",
   danger = false,
+  showPreview = true,
 }) {
   const first = await execute({ confirm: false });
   if (!first || first.requires_confirm !== true) return first;
   const answer = await confirmDialog({
     title,
     message,
-    preview: first.preview ?? null,
+    preview: showPreview ? first.preview ?? null : null,
     requireDecidedBy,
     notePlaceholder,
     confirmLabel,

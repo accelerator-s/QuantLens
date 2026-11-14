@@ -1,6 +1,6 @@
 import { labelText } from "../../core/labels.js";
 import { badge, fmtDate, fmtNum, fmtPct, fmtTime } from "../../core/fmt.js";
-import { el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
+import { el, kvEl, selectMarkup, tableEl, remoteTableEl } from "../../core/dom.js";
 import { createSelect } from "../../core/select.js";
 import { renderState } from "../state-card/state-card.js";
 import { initPortfolioWrite } from "./portfolio-write.js";
@@ -18,7 +18,6 @@ export async function mount(root, ctx) {
   const holdingsHost = root.querySelector("[data-holdings]");
   const tradesHost = root.querySelector("[data-trades]");
   const undoButton = root.querySelector("[data-trade-undo]");
-  const moreButton = root.querySelector("[data-trades-more]");
   let accounts = [];
   let strategies = [];
   let currentAccount = ctx.accountId || "";
@@ -28,8 +27,6 @@ export async function mount(root, ctx) {
   let generating = false;
   let writing = false;
   let ledgerVersion = 0;
-  let tradesRows = [];
-  let tradesTotal = 0;
   let latestTradeId = "";
   const beijingDate = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date());
   let holdingsDate = beijingDate();
@@ -68,7 +65,6 @@ export async function mount(root, ctx) {
     event.preventDefault();
     generate();
   });
-  moreButton.addEventListener("click", loadMoreTrades);
   ctx.bus.on("route", (id) => {
     if (id === "portfolio" && !generating && !writing) load();
   });
@@ -145,8 +141,8 @@ export async function mount(root, ctx) {
     ctx.portfolioStrategy = strategySelect.value;
     generateButton.disabled = generating || writing || !currentAccount || !strategySelect.value;
     strategyHint.textContent = available.length
-      ? "根据账户资金和交易权限，使用最新可用行情生成建议。"
-      : "暂无可用策略，请先在策略回测中创建并启用策略。";
+      ? "按账户资金、交易权限和最新可用行情生成建议。"
+      : "暂无可用策略，先到「策略研究」创建并启用。";
   }
 
   async function loadSavedSuggestion() {
@@ -182,7 +178,7 @@ export async function mount(root, ctx) {
     const busy = generating || writing;
     generateButton.disabled = busy || !currentAccount || !ctx.portfolioStrategy;
     root.querySelectorAll("[data-account-create], [data-account-select] button, [data-strategy-select] button, .portfolio__account-actions button, [data-account-ledger] button")
-      .forEach((button) => { button.disabled = busy; });
+      .forEach((button) => { if (!button.closest(".table-pagination")) button.disabled = busy; });
     undoButton.disabled = busy || !latestTradeId;
   }
 
@@ -192,7 +188,7 @@ export async function mount(root, ctx) {
     if (generating || writing || !accountId || !profile) return;
     const version = ++resultVersion;
     setBusy(true);
-    state(resultHost, { kind: "loading", title: "正在生成选股建议", detail: "正在计算策略信号和建议仓位，请稍候。" });
+    state(resultHost, { kind: "loading", title: "正在生成选股建议", detail: "正在计算策略信号和建议仓位" });
     try {
       const result = await ctx.api.recommendGenerate({ account: accountId, profile, as_of: "" });
       if (version !== resultVersion || accountId !== currentAccount || profile !== strategySelect.value) return;
@@ -218,25 +214,20 @@ export async function mount(root, ctx) {
     if (!accountId) return;
     latestTradeId = "";
     undoButton.disabled = true;
-    moreButton.hidden = true;
     state(holdingsHost, { kind: "loading", title: "读取持仓…" });
     state(tradesHost, { kind: "loading", title: "读取交易记录…" });
     const [holdings, trades] = await Promise.allSettled([
-      ctx.api.holdings(accountId), ctx.api.trades(accountId, { limit: 50, offset: 0 }),
+      ctx.api.holdings(accountId), ctx.api.trades(accountId, { limit: 10, offset: 0 }),
     ]);
     if (version !== ledgerVersion || accountId !== currentAccount) return;
     holdingsDate = beijingDate();
     if (holdings.status === "fulfilled") renderHoldings(holdings.value.items || []);
     else state(holdingsHost, { kind: "error", title: "持仓读取失败", detail: holdings.reason.message, retry: loadLedger });
     if (trades.status === "fulfilled") {
-      tradesRows = trades.value.items || [];
-      tradesTotal = trades.value.total_rows || 0;
       latestTradeId = trades.value.latest_trade_id || "";
-      renderTrades();
+      renderTrades(trades.value, accountId);
     } else {
-      tradesRows = [];
       state(tradesHost, { kind: "error", title: "交易记录读取失败", detail: trades.reason.message, retry: loadLedger });
-      root.querySelector("[data-trades-count]").textContent = "";
     }
     updateControls();
   }
@@ -261,8 +252,8 @@ export async function mount(root, ctx) {
     ], items));
   }
 
-  function renderTrades() {
-    if (tradesRows.length) tradesHost.replaceChildren(tableEl([
+  function renderTrades(data, accountId) {
+    tradesHost.replaceChildren(remoteTableEl([
       { key: "executed_at", label: "成交时间", format: fmtTime },
       { key: "instrument_id", label: "股票", format: stockCell },
       { key: "action", label: "买卖", format: (value) => ["open", "increase"].includes(value) ? "买入" : "卖出" },
@@ -273,27 +264,16 @@ export async function mount(root, ctx) {
       { key: "is_reversed", label: "状态", format: (value) => badge(value ? "已撤回" : "已记录", value ? "muted" : "accent") },
       { key: "reversed_at", label: "撤回时间", format: fmtTime },
       { key: "note", label: "备注" },
-    ], tradesRows));
-    else tradesHost.replaceChildren(el("p", "portfolio__result-note", "暂无交易记录。"));
-    root.querySelector("[data-trades-count]").textContent = `已显示 ${tradesRows.length} / ${tradesTotal} 笔`;
-    moreButton.hidden = tradesRows.length >= tradesTotal;
-    moreButton.disabled = generating || writing;
-    undoButton.disabled = generating || writing || !latestTradeId;
-  }
-
-  async function loadMoreTrades() {
-    if (moreButton.disabled || tradesRows.length >= tradesTotal) return;
-    const version = ledgerVersion;
-    const accountId = currentAccount;
-    moreButton.disabled = true;
-    try {
-      const data = await ctx.api.trades(accountId, { limit: 50, offset: tradesRows.length });
-      if (version !== ledgerVersion || accountId !== currentAccount) return;
-      tradesRows.push(...(data.items || []));
-      tradesTotal = data.total_rows || 0;
-      renderTrades();
-    } catch (error) { ctx.bus.emit("toast", { kind: "error", title: "交易记录加载失败", detail: error.message }); }
-    finally { moreButton.disabled = generating || writing; }
+    ],
+      params => ctx.api.trades(accountId, params), {
+        initialData: data,
+        onData: result => {
+          if (accountId !== currentAccount) return;
+          latestTradeId = result.latest_trade_id || '';
+          undoButton.disabled = generating || writing || !latestTradeId;
+        },
+      },
+    ));
   }
 
   function renderSuggestion(plan, result = {}) {

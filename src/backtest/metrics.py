@@ -7,16 +7,18 @@ import pandas as pd
 def _r6(value: float) -> float:
     return round(float(value), 6)
 
-def _drawdown(nav: pd.Series) -> tuple[float, str, str]:
+def _drawdown(nav: pd.Series, initial_capital: float) -> tuple[float, str, str]:
     
-    peak = nav.cummax()
+    peak = nav.cummax().clip(lower=initial_capital)
     dd = nav / peak - 1.0
     trough_pos = int(dd.to_numpy().argmin())
     max_dd = float(dd.iloc[trough_pos])
     if max_dd >= 0:
         return 0.0, "", ""
     peak_pos = int(nav.iloc[: trough_pos + 1].to_numpy().argmax())
-    return max_dd, str(nav.index[peak_pos].date()), str(nav.index[trough_pos].date())
+    peak_date = (str(nav.index[0].date()) if float(nav.iloc[:trough_pos+1].max()) < initial_capital
+                 else str(nav.index[peak_pos].date()))
+    return max_dd, peak_date, str(nav.index[trough_pos].date())
 
 def _annualized(total_growth: float, n_days: int, days_per_year: int) -> float:
     if n_days <= 0 or total_growth <= 0:
@@ -53,7 +55,7 @@ def compute_metrics(
         float(excess_ret.mean()) / ex_std * math.sqrt(trading_days_per_year) if ex_std > 0 else 0.0
     )
 
-    max_dd, dd_peak, dd_trough = _drawdown(nav)
+    max_dd, dd_peak, dd_trough = _drawdown(nav, initial_capital)
 
     mean_nav = float(nav.mean())
     total_buy = float(nav_frame["buy_amount"].astype(float).sum())

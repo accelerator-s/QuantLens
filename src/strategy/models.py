@@ -38,6 +38,7 @@ class WeightMode(StrEnum):
     IC = "ic"
     ICIR = "icir"
     MODEL_LINEAR = "model_linear"
+    MODEL_RIDGE = "model_ridge"
     MODEL_LOGISTIC = "model_logistic"
 
 class FillnaMethod(StrEnum):
@@ -306,7 +307,7 @@ class StrategyProfileDoc(BaseModel):
 
     constraints: PortfolioConstraints = Field(default_factory=PortfolioConstraints)
     risk: PortfolioRisk = Field(default_factory=PortfolioRisk)
-    benchmark: str = "same_cluster_equal_weight"
+    benchmark: str = "model_selected"
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("profile_name")
@@ -354,7 +355,7 @@ class ResolvedStrategyProfile(BaseModel):
     price_deviation_threshold: Decimal = Field(ge=0)
     constraints: PortfolioConstraints = Field(default_factory=PortfolioConstraints)
     risk: PortfolioRisk = Field(default_factory=PortfolioRisk)
-    benchmark: str = "same_cluster_equal_weight"
+    benchmark: str = "model_selected"
     extra: dict[str, Any] = Field(default_factory=dict)
 
 # 继承解析与状态机
@@ -364,7 +365,7 @@ _MAX_INHERIT_DEPTH = 10
 _VALID_TRANSITIONS: dict[StrategyStatus, set[StrategyStatus]] = {
     StrategyStatus.DRAFT: {StrategyStatus.ACTIVE, StrategyStatus.DISABLED},
     StrategyStatus.ACTIVE: {StrategyStatus.DISABLED},
-    StrategyStatus.DISABLED: {StrategyStatus.DRAFT},
+    StrategyStatus.DISABLED: {StrategyStatus.DRAFT, StrategyStatus.ACTIVE},
 }
 
 def validate_transition(current: StrategyStatus, target: StrategyStatus) -> None:
@@ -374,7 +375,7 @@ def validate_transition(current: StrategyStatus, target: StrategyStatus) -> None
             code="STRATEGY_PROFILE_INVALID_TRANSITION",
             message=f"策略配置状态不允许从 {current.value} 转为 {target.value}",
             blocking=True,
-            suggested_action="合法流转：draft→active/disabled、active→disabled、disabled→draft。",
+            suggested_action="合法流转：draft→active/disabled、active→disabled、disabled→draft/active。",
         )
 
 def resolve_inheritance_chain(

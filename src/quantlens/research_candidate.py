@@ -1,16 +1,10 @@
 """Publish research candidates once; evaluations only consume DWS values."""
 import hashlib,json
-import re
-from factors.registry import FactorRegistry,hash_code
+from factors.registry import FactorRegistry,hash_code,research_base_name
 from factors.plugins import FactorPlugin
 
 
-def research_base_name(name):
-    match = re.fullmatch(r'(.+)_r_[0-9a-f]{12}', name)
-    return match.group(1) if match else None
-
-
-def publish_candidate(base_name,version,*,reporter=None):
+def publish_candidate(base_name,version,*,start=None,end=None,reporter=None):
     from quantlens.compute import submit
     registry=FactorRegistry();base=registry.get(base_name)
     payload={key:getattr(version,key) for key in ['code','parameters','dependencies','standardization','missing_handling','direction']}
@@ -24,9 +18,12 @@ def publish_candidate(base_name,version,*,reporter=None):
         plugin.write(name,version.code)
         meta=base.model_copy(update={'name':name,'version':version.version_id,'code_hash':hash_code(version.code),
             'plugin_path':f'factors/{name}.py','parameters':version.parameters,'standardization':version.standardization,
-            'missing_handling':version.missing_handling,'direction':version.direction,'dependencies':version.dependencies,'production_permission':False})
+            'missing_handling':version.missing_handling,'direction':version.direction,'dependencies':version.dependencies,'status':'draft'})
         registry.upsert(meta)
-    submit('spark_factor_values','--factor',name,reporter=reporter)
+    if (start is None) != (end is None):
+        raise ValueError('Candidate publication requires both start and end')
+    bounds = ['--start', start, '--end', end] if start is not None else []
+    submit('spark_factor_values','--factor',name,*bounds,reporter=reporter)
     return name
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import yaml
+import pandas as pd
 from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -68,7 +69,8 @@ def get_portfolio_trades(account_id: str, limit: int = Query(default=50, ge=1, l
         reversals = ledger.get("reversals", {})
         latest_trade_id = ""
         if "executed_at" in df.columns and not df.empty:
-            df = df.sort_values("executed_at", kind="stable").iloc[::-1]
+            df = df.sort_values("executed_at", key=lambda values: pd.to_datetime(values, utc=True, errors="coerce", format="mixed"),
+                                kind="stable", na_position="first").iloc[::-1]
             active = df[~df["trade_id"].isin(reversals)]
             if not active.empty and active.iloc[0].trade_id in ledger.get("entries", {}):
                 latest_trade_id = str(active.iloc[0].trade_id)

@@ -9,7 +9,7 @@ from exceptions import LifecycleError, QuantTrainingError
 from portfolio.accounts import AccountRegistry
 from portfolio.models import Action
 from portfolio.recommend import build_plan
-from strategy_evolution.services import StrategyEvolutionServices
+from .strategy_profile import StrategyProfileAdapter
 
 from .models import (
     EvaluationRun,
@@ -34,7 +34,7 @@ def _hash(payload: Any) -> str:
 class DailyOperationsService:
     def __init__(self, store: LifecycleStore | None = None) -> None:
         self.store = store or LifecycleStore()
-        self.strategy_services = StrategyEvolutionServices(self.store)
+        self.strategy_services = StrategyProfileAdapter(self.store)
 
     def run(
         self, *, account_ids: list[str] | None = None, as_of: str | None = None

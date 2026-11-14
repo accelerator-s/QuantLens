@@ -40,19 +40,20 @@ call('Page.navigate',{'url':base})
 wait("document.querySelector('[data-health-label]')?.textContent==='服务启动中'")
 js("document.querySelector('[data-health]').click()")
 wait("document.querySelector('[data-service-summary]')?.textContent.includes('启动中')")
-wait("document.querySelector('[data-service-log] [data-task-log]')")
+assert js("document.querySelectorAll('[data-pane=cluster] .ql-card').length")==1
+assert js("document.querySelector('[data-service-log]')") is None
 assert js("document.querySelector('[data-start]').disabled")
 assert js("document.querySelector('[data-stop]').disabled")
-assert js("document.querySelector('[data-service-task]').hidden") is False
+assert js("document.querySelector('[data-service-task]')") is None
 assert js("location.hash")=='#settings/cluster'
 output=Path('/tmp/quantlens-background-ui');output.mkdir(exist_ok=True)
 for width in [1366,390]:
     call('Emulation.setDeviceMetricsOverride',{'width':width,'height':900,'deviceScaleFactor':1,'mobile':False})
     js('await new Promise(requestAnimationFrame)')
     assert js('document.documentElement.scrollWidth<=innerWidth')
-    js("document.querySelector('[data-service-log] details').open=true")
     shot=call('Page.captureScreenshot',{'format':'png','captureBeyondViewport':False})
     (output/f'startup-{width}.png').write_bytes(base64.b64decode(shot['data']))
+assert js("document.querySelector('.ql-task-dialog')") is None
 # Drive the same health subscription used by the live app to verify failure and ready labels.
 js("window.startupFixtureBus=(await import('/core/bus.js')).createBus();(await import('/core/health.js')).initHealth(startupFixtureBus);window.startupRealHealth=(await import('/core/health.js')).getHealth()")
 js("startupFixtureBus.emit('health',{...startupRealHealth,service_startup:{status:'failed',error:'Hive 启动失败'}})")
@@ -61,5 +62,5 @@ assert js("document.querySelector('[data-health]').title")=='Hive 启动失败'
 js("startupFixtureBus.emit('health',{...startupRealHealth,service_startup:{status:'completed'}})")
 assert js("document.querySelector('[data-health-label]').textContent")=='运行正常'
 js("startupFixtureBus.emit('health',startupRealHealth)")
-print('PASS: startup label, service link, live phase/logs, disabled startup controls, failure/ready labels, desktop/mobile layouts')
+print('PASS: startup label, compact cluster card, no task detail controls or dialog, disabled startup controls, failure/ready labels, desktop/mobile layouts')
 ws.close()

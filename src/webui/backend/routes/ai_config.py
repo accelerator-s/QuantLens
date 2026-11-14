@@ -105,40 +105,6 @@ def factor_evolution_model_recommendations() -> dict:
         "policy": "推荐只影响默认顺序；用户的明确选择优先，但不能绕过任务配置的必需权限。",
     }
 
-@router.get("/ai/recommendations/strategy-evolution")
-def strategy_evolution_model_recommendations() -> dict:
-    
-    matrix = load_matrix()
-    configured = set(secrets.list_secret_names())
-    rows = []
-    for model in ModelRegistry().list(kind=ModelKind.API_MODEL):
-        score = score_model_for_task(matrix, model, "structured_config")
-        if score < 0 or not model.enabled:
-            continue
-        has_key = env_var_name(model.name) in configured
-        rows.append(
-            {
-                "name": model.name,
-                "score": score,
-                "configured": has_key,
-                "selectable": has_key,
-                "reason": (
-                    "已通过策略候选生成与结果复盘的结构化输出权限检查。"
-                    + ("" if has_key else "尚未配置 接口密钥，暂不可选。")
-                ),
-            }
-        )
-    rows.sort(key=lambda item: (-item["score"], item["name"]))
-    selectable = [item for item in rows if item["selectable"]]
-    recommended = selectable[0]["name"] if selectable else ""
-    for item in rows:
-        item["recommended"] = item["name"] == recommended
-    return {
-        "recommended": recommended,
-        "items": rows,
-        "policy": "推荐只影响默认顺序；用户可指定任何通过任务配置权限检查的可用模型。",
-    }
-
 @router.get("/ai/discuss-model")
 def get_discuss_model() -> dict:
     return {"discuss_model": ModelRegistry().get_discuss_model()}

@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 class SparkAlgorithms(unittest.TestCase):
     def test_model_jobs_share_declared_factors_and_mature_labels(self):
         from quantlens.warehouse import session,make_run,lineage,publish
-        from quantlens.spark_kmeans import STYLE_FACTORS
+        STYLE_FACTORS=['value_defensive_quality_v2','growth_revenue_yoy','industry_momentum_60','quality_gross_margin','volatility_60']
         from factors.registry import FactorRegistry,FactorMetadata
         from pyspark.sql import functions as F
         with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,QUANTLENS_HOME=temp,QUANTLENS_COMPUTE_LOCAL='1',SPARK_LOCAL_IP='127.0.0.1',PYSPARK_PYTHON=sys.executable):
@@ -40,6 +40,12 @@ class SparkAlgorithms(unittest.TestCase):
                     if method in ['model_linear','model_logistic']:
                         self.assertGreater(weights[0],0);self.assertLess(weights[1],0)
                 from quantlens import spark_kmeans,spark_fpgrowth,spark_pca,spark_engine
+                prices=[]
+                for code,dt,_valid,year in universe:
+                    stock=int(code)
+                    prices.append((code,dt,10.+stock, .001*(stock%7-3),1e7+stock*1e6,1e9+stock*1e8,500,10.+stock,year))
+                market=spark.createDataFrame(prices,'code string,date date,adj_close double,ret_wd double,amount double,total_mv double,listed_days int,close double,year int')
+                publish(spark,lineage(market,context),'dwd.prices_clean',['year'],run=context)
                 spark_kmeans.run(spark,context)
                 clusters=spark.table('dws.style_cluster')
                 self.assertEqual(clusters.select(F.year('date')).distinct().first()[0],2021)

@@ -37,17 +37,51 @@ class SparkWarehouse(unittest.TestCase):
         frame=self.spark.createDataFrame([('a','2024-01-01','2024-01-02',1.),('a','2024-01-01','2024-01-03',2.)],['code','date','updated_at','value'])
         self.assertEqual(deduplicate(frame,['code','date']).first().value,2)
 
-    def test_data_boundary_and_suspension_are_not_delisting(self):
-        from quantlens.backtest_inputs import confirmed_delisting_dates
-        frame=self.spark.createDataFrame([
-            ('active',date(2026,11,11),True,False),
-            ('suspended',date(2026,11,10),True,False),
-            ('suspended',date(2026,11,11),False,False),
-            ('delisted',date(2026,10,9),True,True),
-            ('delisted',date(2026,10,10),False,True),
-        ],'code string,date date,is_trading boolean,is_delisting boolean')
-        result={row.code:row.delisting_date for row in confirmed_delisting_dates(frame).collect()}
-        self.assertEqual(result,{'active':None,'suspended':None,'delisted':date(2026,10,9)})
+    def test_research_preflight_blocks_missing_or_noncausal_styles(self):
+        from types import SimpleNamespace
+        from exceptions import ContractViolation
+        from quantlens.research_preflight import check_warehouse_style
+        universe=self.spark.createDataFrame([
+            ('a',date(2024,1,2),True),('a',date(2024,1,3),True),
+        ],'code string,date date,in_universe boolean')
+        def source(rows,versions=None):
+            clusters=self.spark.createDataFrame(rows,
+                'code string,date date,cluster_id int,train_end date')
+            from pyspark.sql import functions as F
+            clusters=clusters.withColumn('version', F.lit('market_rank_v2') if versions is None else versions)
+            return SimpleNamespace(catalog=SimpleNamespace(tableExists=lambda _:True),
+                table=lambda name:universe if name=='dwd.universe' else clusters)
+        with self.assertRaises(ContractViolation) as error:
+            check_warehouse_style(source([('a',date(2024,1,2),1,date(2023,12,31))]),
+                                  '2024-01-01','2024-12-31')
+        self.assertEqual(error.exception.code,'RESEARCH_STYLE_COVERAGE_MISSING')
+        with self.assertRaises(ContractViolation) as error:
+            check_warehouse_style(source([('a',date(2024,1,2),1,date(2024,1,2))]),
+                                  '2024-01-01','2024-12-31')
+        self.assertEqual(error.exception.code,'RESEARCH_STYLE_LOOKAHEAD')
+        result=check_warehouse_style(source([
+            ('a',date(2024,1,2),1,date(2023,12,31)),
+            ('a',date(2024,1,3),1,date(2023,12,31)),
+            # Test data outside the requested period must never be inspected.
+            ('a',date(2025,1,2),1,date(2026,1,1)),
+        ]),'2024-01-01','2024-12-31')
+        self.assertEqual(result['dates'],2)
+        self.assertEqual(result['min_daily_coverage'],1.)
+        self.assertEqual(result['method_version'],'market_rank_v2')
+        complete=[('a',date(2024,1,2),1,date(2023,12,31)),
+                  ('a',date(2024,1,3),1,date(2023,12,31))]
+        from pyspark.sql import functions as F
+        with self.assertRaises(ContractViolation) as error:
+            check_warehouse_style(source(complete,F.when(F.col('date')=='2024-01-02','v1')
+                                         .otherwise('market_rank_v2')),'2024-01-01','2024-12-31')
+        self.assertEqual(error.exception.code,'RESEARCH_STYLE_METHOD_MIXED')
+        universe=universe.unionByName(universe.withColumn('code',__import__('pyspark').sql.functions.lit('b')))
+        with self.assertRaises(ContractViolation) as error:
+            check_warehouse_style(source(complete),'2024-01-01','2024-12-31')
+        self.assertEqual(error.exception.code,'RESEARCH_STYLE_STOCKS_MISSING')
+        with self.assertRaises(ContractViolation) as error:
+            check_warehouse_style(source(complete+complete[:1]),'2024-01-01','2024-12-31')
+        self.assertEqual(error.exception.code,'RESEARCH_STYLE_DUPLICATE')
 
     def test_constant_and_empty_paired_correlations_are_null_under_ansi(self):
         from quantlens.spark_weight_fit import safe_correlation
@@ -58,13 +92,13 @@ class SparkWarehouse(unittest.TestCase):
 
     def test_universe_excludes_unknown_trading_amount_and_price(self):
         from quantlens.spark_dwd_prices import universe
-        rows=[('a',None,10000000.,10.),('b',True,10000000.,10.),('c',True,None,10.),('d',True,10000000.,None)]
+        rows=[('000001',None,10000000.,10.),('000002',True,10000000.,10.),('000003',True,None,10.),('000004',True,10000000.,None),('200001',True,10000000.,10.)]
         source=self.spark.createDataFrame(rows,'code string,is_trading boolean,amount double,close double')
         from pyspark.sql import functions as F
         source=(source.withColumn('date',F.to_date(F.lit('2024-01-02'))).withColumn('year',F.lit(2024))
                 .withColumn('listed_days',F.lit(500)).withColumn('is_st',F.lit(False)).withColumn('is_delisting',F.lit(False)).withColumn('ohlc_valid',F.lit(True)))
         result={row.code:row.in_universe for row in universe(source).collect()}
-        self.assertEqual(result,{'a':False,'b':True,'c':False,'d':False})
+        self.assertEqual(result,{'000001':False,'000002':True,'000003':False,'000004':False,'200001':False})
 
     def test_ttm_correction_is_visible_only_after_component_publication(self):
         from quantlens.spark_derived import fundamental_ttm

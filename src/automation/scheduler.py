@@ -182,21 +182,13 @@ class AutomationScheduler:
                         ObjectType.STRATEGY_VERSION,
                         attribution.strategy_version_id,
                     )
-                    from webui.backend.routes.strategy_evolution import (
-                        StartPayload,
-                        start_strategy_evolution,
-                    )
+                    from strategy.research import start_research
 
-                    started = start_strategy_evolution(
-                        StartPayload(
-                            profile_name=strategy.strategy_name,
-                            trigger_learning_event_id=event.learning_event_id,
-                        )
-                    )
+                    started = start_research(strategy.strategy_name)
                     triggered.append(
                         {
                             "learning_event_id": event.learning_event_id,
-                            "program_id": started["program_id"],
+                            "profile_name": started["profile_name"],
                             "task_id": started["task_id"],
                         }
                     )

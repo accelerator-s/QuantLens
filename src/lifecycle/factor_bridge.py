@@ -66,6 +66,9 @@ class FactorEvolutionBridge:
     def begin(
         self, research_id: str, config: EvolutionConfig, snapshot: DataSnapshot
     ) -> ResearchProgram:
+        from factor_evolution.publication import capture_catalog_base
+
+        capture_catalog_base(EvolutionStore(), research_id)
         protocol = load_protocol()
         program = ResearchProgram(
             program_id=self.program_id(research_id),
@@ -139,7 +142,7 @@ class FactorEvolutionBridge:
             payload={"failure_code": code},
         )
 
-    def ingest(self, research_id: str) -> dict[str, Any]:
+    def ingest(self, research_id: str, *, narrative_payload: dict[str, Any] | None = None) -> dict[str, Any]:
         legacy = EvolutionStore().detail(research_id)
         program_id = self.program_id(research_id)
         program = self.store.get(ObjectType.RESEARCH_PROGRAM, program_id)
@@ -160,35 +163,7 @@ class FactorEvolutionBridge:
             research_id, program_id, snapshot_id, protocol_hash, legacy
         )
 
-        best_legacy_id = legacy["status"].get("best_version_id") or ""
-        best_id = self.factor_version_id(research_id, best_legacy_id) if best_legacy_id else ""
         decision = legacy["status"].get("decision")
-        locked_event = next(
-            (
-                event
-                for event in reversed(legacy["events"])
-                if event["event_type"] == "locked_test_completed"
-            ),
-            None,
-        )
-        if best_id and self._exists(ObjectType.FACTOR_VERSION, best_id):
-            current = self.store.current_state(ObjectType.FACTOR_VERSION, best_id)
-            if decision == "frozen" and current == "evaluated":
-                self._transition(
-                    ObjectType.FACTOR_VERSION,
-                    best_id,
-                    "frozen",
-                    reason="验证集约束通过，候选已冻结",
-                )
-            if locked_event and locked_event["payload"].get("passed"):
-                if self.store.current_state(ObjectType.FACTOR_VERSION, best_id) == "frozen":
-                    self._transition(
-                        ObjectType.FACTOR_VERSION,
-                        best_id,
-                        "shadow",
-                        reason="唯一锁定测试通过，进入影子观察",
-                    )
-
         program_state = self.store.current_state(ObjectType.RESEARCH_PROGRAM, program_id)
         if program_state == "running":
             if decision == "frozen":
@@ -200,7 +175,10 @@ class FactorEvolutionBridge:
                 )
         from .reporting import ResearchReportService
 
-        report = ResearchReportService(self.store).generate(program_id)
+        report = ResearchReportService(self.store).generate(program_id, narrative_payload=narrative_payload)
+        from factor_evolution.publication import apply_accepted_version
+
+        catalog_update = apply_accepted_version(EvolutionStore(), research_id)
         if self.store.current_state(ObjectType.RESEARCH_PROGRAM, program_id) in {
             "running",
             "frozen",
@@ -221,6 +199,7 @@ class FactorEvolutionBridge:
             "evaluation_runs": sum(len(items) for items in run_ids_by_version.values()),
             "locked_test_exposure_id": exposure_id,
             "research_report_id": report.research_report_id,
+            "catalog_update": catalog_update,
         }
 
     def ingest_failure(self, research_id: str) -> dict[str, Any]:
@@ -310,6 +289,14 @@ class FactorEvolutionBridge:
     ) -> dict[str, list[str]]:
         specs: dict[str, tuple[str, RunPurpose, TimeWindow, dict[str, Any]]] = {}
         for event in legacy["events"]:
+            if event["event_type"] == "training_evaluated":
+                payload = event["payload"]
+                train = payload["train"]
+                specs[train["run_id"]] = (
+                    payload["version_id"], RunPurpose.TRAIN,
+                    _window(legacy["config"]["train_window"]), train["metrics"],
+                )
+        for event in legacy["events"]:
             if event["event_type"] != "version_evaluated":
                 continue
             payload = event["payload"]
@@ -389,11 +376,6 @@ class FactorEvolutionBridge:
         seen: set[str] = set()
         scores: dict[str, float] = {}
         index = FactorResearchIndex(self.store)
-        locked_versions = {
-            str(event["payload"].get("version_id") or "")
-            for event in legacy["events"]
-            if event["event_type"] == "locked_test_reserved"
-        }
         for event in legacy["events"]:
             if event["event_type"] != "version_evaluated":
                 continue
@@ -403,24 +385,6 @@ class FactorEvolutionBridge:
                 continue
             seen.add(legacy_id)
             factor_id = self.factor_version_id(research_id, legacy_id)
-            factor_state = self.store.current_state(
-                ObjectType.FACTOR_VERSION, factor_id
-            )
-            if factor_state == "proposed":
-                self._transition(
-                    ObjectType.FACTOR_VERSION,
-                    factor_id,
-                    "validating",
-                    reason="候选已通过 数据契约与试运行，开始评价",
-                )
-                factor_state = "validating"
-            if factor_state == "validating":
-                self._transition(
-                    ObjectType.FACTOR_VERSION,
-                    factor_id,
-                    "evaluated",
-                    reason="walk-forward 评价完成",
-                )
             generalization = payload.get("generalization") or {}
             factor = self.store.get(ObjectType.FACTOR_VERSION, factor_id)
             assert isinstance(factor, FactorVersion)
@@ -486,28 +450,6 @@ class FactorEvolutionBridge:
                 ),
             )
             self._add(evaluation)
-            if (
-                duplicate
-                and legacy_id not in locked_versions
-                and self.store.current_state(
-                    ObjectType.FACTOR_VERSION, factor_id
-                )
-                == "evaluated"
-            ):
-                self._transition(
-                    ObjectType.FACTOR_VERSION,
-                    factor_id,
-                    "eliminated",
-                    reason="因子去重阈值命中，不进入影子或生产",
-                    payload={
-                        "neighbor_factor_version_id": similarity.get(
-                            "neighbor_factor_version_id", ""
-                        ),
-                        "median_absolute_rank_correlation": similarity.get(
-                            "median_absolute_rank_correlation", ""
-                        ),
-                    },
-                )
             scores[legacy_id] = score
             result.append(evaluation_id)
         return result
@@ -550,13 +492,6 @@ class FactorEvolutionBridge:
             return ""
         payload = reserved["payload"]
         factor_id = self.factor_version_id(research_id, payload["version_id"])
-        if self.store.current_state(ObjectType.FACTOR_VERSION, factor_id) == "evaluated":
-            self._transition(
-                ObjectType.FACTOR_VERSION,
-                factor_id,
-                "frozen",
-                reason="锁定测试开封前冻结候选",
-            )
         exposure_id = payload["exposure_id"]
         evaluation_run_id = f"ER-{completed['payload'].get('run_id', '')}"
         if completed["event_type"] == "locked_test_failed":
@@ -635,34 +570,6 @@ class FactorEvolutionBridge:
                     else "锁定测试已开封但运行失败，禁止再次测试"
                 ),
                 payload={"passed": completed["payload"].get("passed")},
-            )
-        duplicate_evaluation = next(
-            (
-                self.store.get(ObjectType.FACTOR_EVALUATION, row["object_id"])
-                for row in self.store.list_objects(
-                    ObjectType.FACTOR_EVALUATION, limit=5000
-                )
-                if self.store.get(
-                    ObjectType.FACTOR_EVALUATION, row["object_id"]
-                ).factor_version_id
-                == factor_id
-                and self.store.get(
-                    ObjectType.FACTOR_EVALUATION, row["object_id"]
-                ).verdict
-                == "eliminate"
-            ),
-            None,
-        )
-        if (
-            duplicate_evaluation is not None
-            and self.store.current_state(ObjectType.FACTOR_VERSION, factor_id)
-            == "frozen"
-        ):
-            self._transition(
-                ObjectType.FACTOR_VERSION,
-                factor_id,
-                "eliminated",
-                reason="候选虽已开封锁定测试，但去重评价判定无增量，禁止进入影子",
             )
         return exposure_id
 

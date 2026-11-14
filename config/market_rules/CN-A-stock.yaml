@@ -68,15 +68,15 @@ quantity_rules:
 - board: 科创板
   min_unit: 200
   increment: 1
-  notes: 科创板：首笔 200 股，超出可 1 股递增
+  notes: 科创板：每笔至少 200 股，超出可 1 股递增
 - board: 创业板
   min_unit: 100
-  increment: 1
-  notes: 创业板：首笔 100 股，超出可 1 股递增
+  increment: 0
+  notes: 创业板：100 股整手交易
 - board: 北交所
   min_unit: 100
-  increment: 0
-  notes: 北交所：100 股整手交易
+  increment: 1
+  notes: 北交所：每笔至少 100 股，超出可 1 股递增
 fees:
   items:
   - name: 佣金

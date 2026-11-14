@@ -1,7 +1,7 @@
 from quantlens.warehouse import job, lineage, publish
 
 
-def run(spark,context,strategy_id='candidate_balanced_multifactor',as_of=None,profile_payload=None,
+def run(spark,context,strategy_id,as_of=None,profile_payload=None,
         star_market_enabled=True,capital=None,target_id=None):
     from pyspark.sql import functions as F, Window
     from strategy import StrategyProfileStore,ResolvedStrategyProfile
@@ -13,8 +13,8 @@ def run(spark,context,strategy_id='candidate_balanced_multifactor',as_of=None,pr
     payload=inputs(profile,end,end,spark)
     date=payload['signal'].scores.index[-1]
     candidates=payload['signal'].scores.loc[date].rename('score').rename_axis('code').reset_index()
-    candidates['cluster_id']=candidates.code.map(payload['clusters'].loc[date]).astype('string').fillna('unknown')
-    candidates['industry_code']=candidates.code.map(payload['industries'].loc[date]).astype('string').fillna('unknown')
+    candidates['cluster_id']=candidates.code.map(payload['clusters'].loc[date]).astype('string')
+    candidates['industry_code']=candidates.code.map(payload['industries'].loc[date]).astype('string')
     candidates['in_universe']=candidates.code.map(payload['mask'].loc[date])
     candidates['close']=candidates.code.map(payload['market']['close'].loc[date])
     tradable=spark.table('dwd.prices_clean').where(F.col('date')==end).select('code','is_trading','is_suspended','limit_up','is_delisting').toPandas()
@@ -34,7 +34,7 @@ def run(spark,context,strategy_id='candidate_balanced_multifactor',as_of=None,pr
 if __name__=='__main__':
     import argparse
     import json
-    parser=argparse.ArgumentParser();parser.add_argument('--strategy',default='candidate_balanced_multifactor');parser.add_argument('--as-of');parser.add_argument('--batch');parser.add_argument('--profile');parser.add_argument('--no-star-market',action='store_true');parser.add_argument('--capital',type=float);parser.add_argument('--target-id');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--strategy',required=True);parser.add_argument('--as-of');parser.add_argument('--batch');parser.add_argument('--profile');parser.add_argument('--no-star-market',action='store_true');parser.add_argument('--capital',type=float);parser.add_argument('--target-id');args=parser.parse_args()
     with job('portfolio') as (spark,context):
         run(spark,context,args.strategy,args.as_of,json.loads(args.profile) if args.profile else None,
             star_market_enabled=not args.no_star_market,capital=args.capital,target_id=args.target_id)

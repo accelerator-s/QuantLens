@@ -55,10 +55,11 @@ class BackgroundServices(unittest.TestCase):
             second = self.services.start_background_services()
             self.assertEqual(first, second)
             start.assert_called_once()
-            status = self.services.startup_status(include_logs=True)
+            status = self.services.startup_status()
             self.assertEqual(status['status'], 'running')
             self.assertEqual(status['phase'], '启动计算集群')
-            self.assertEqual(status['log'], ['Hive 正在启动'])
+            self.assertNotIn('log', status)
+            self.assertTrue(self.manager.get(first)['log'][0].endswith(']  Hive 正在启动'))
             self.release.set()
             self.assertEqual(self.wait_done(first)['status'], 'completed')
 
@@ -78,15 +79,31 @@ class BackgroundServices(unittest.TestCase):
                 self.release.set()
                 self.assertEqual(self.wait_done(status['task_id'])['status'], 'completed')
 
+    def test_cluster_summary_omits_logs_while_task_keeps_them(self):
+        from quantlens.routes import cluster_status
+        with patch.object(self.services, 'start_services', side_effect=self.block_startup), \
+             patch('quantlens.compute.cluster_status', return_value={'available':False,'nodes':[]}), \
+             patch('quantlens.gpu.worker_status', return_value={}), \
+             patch('quantlens.ads.provenance', return_value={}):
+            task_id=self.services.start_background_services()
+            self.assertTrue(self.entered.wait(1))
+            status=cluster_status()['service_startup']
+            self.assertEqual(status['task_id'],task_id)
+            self.assertEqual(status['phase'],'启动计算集群')
+            self.assertNotIn('log',status)
+            self.assertTrue(self.manager.get(task_id)['log'][0].endswith(']  Hive 正在启动'))
+            self.release.set()
+            self.assertEqual(self.wait_done(task_id)['status'],'completed')
+
     def test_failure_remains_visible_and_can_be_retried(self):
         from exceptions import ContractViolation
         with patch.object(self.services, 'start_services', side_effect=ContractViolation(
                 code='CLUSTER_NOT_READY', message='Hive 启动失败', suggested_action='检查 Hive 日志')):
             task_id = self.services.start_background_services()
             self.assertEqual(self.wait_done(task_id)['status'], 'failed')
-        status = self.services.startup_status(include_logs=True)
+        status = self.services.startup_status()
         self.assertIn('Hive 启动失败', status['error'])
-        self.assertIn('建议：检查 Hive 日志', status['log'])
+        self.assertTrue(any(line.endswith(']  建议：检查 Hive 日志') for line in self.manager.get(task_id)['log']))
         with patch.object(self.services, 'start_services'):
             retry = self.services.start_background_services()
             self.assertNotEqual(retry, task_id)

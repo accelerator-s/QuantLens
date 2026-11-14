@@ -6,7 +6,7 @@ from storage.hdfs import compose
 from exceptions import ContractViolation
 
 CLUSTER_SERVICES = frozenset({'nn-rm', 'dn-nm-1', 'dn-nm-2', 'hive', 'hbase',
-                              'metastore-db', 'spark-client', 'spark-history'})
+                              'metastore-db', 'spark-client', 'spark-history', 'cluster-access'})
 
 
 def cluster_status():

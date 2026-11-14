@@ -76,20 +76,36 @@ def _value(metrics: dict, group: str, key: str) -> float:
     return float((metrics.get(group) or {}).get(key) or 0)
 
 def aggregate_results(results: list[WindowResult], *, label: str) -> WindowResult:
-    
+    from quantlens.research_preflight import assess_input_quality
+
+    qualities = [assess_input_quality(result.metrics)
+                 for result in results]
     excess = [_value(result.metrics, "returns", "annualized_excess_return") for result in results]
     drawdowns = [_value(result.metrics, "risk", "max_drawdown") for result in results]
     turnovers = [
         _value(result.metrics, "trading", "annualized_turnover_oneside") for result in results
     ]
+    net_returns = [(result.metrics.get('returns') or {}).get('annualized_return') for result in results]
+    complete = all(value is not None for value in net_returns)
+    calmar = median(float(value) for value in net_returns) / max(abs(min(drawdowns)), 1e-9) if complete else None
     metrics = {
-        "returns": {"annualized_excess_return": median(excess)},
+        'research_standard':'cn_a_daily_v3',
+        "input_quality": {
+            "passed": all(quality['passed'] for quality in qualities),
+            "failed_run_ids": [result.run_id for result, quality in zip(results, qualities)
+                               if not quality['passed']],
+        },
+        "returns": {"annualized_excess_return": median(excess),
+                    "annualized_return": median(net_returns) if complete else None},
         "risk": {"max_drawdown": min(drawdowns)},
         "trading": {"annualized_turnover_oneside": max(turnovers)},
+        "objective": {"primary": "calmar", "value": calmar,
+                      "eligible": complete and all(result.metrics.get('objective', {}).get('eligible', False) for result in results)},
         "walk_forward": {
             "aggregation": "median_return_worst_risk_turnover",
             "source_run_ids": [result.run_id for result in results],
             "fold_values": excess,
+            "fold_net_returns": net_returns,
         },
     }
     return WindowResult(window=label, run_id=f"walk-forward:{label}", metrics=metrics)
@@ -119,6 +135,7 @@ def assess_generalization(
         metrics = fold.validation.metrics
         if (
             validation_score >= target.min_annualized_excess_return
+            and _value(metrics, "returns", "annualized_return") > 0
             and abs(_value(metrics, "risk", "max_drawdown")) <= target.max_drawdown
             and _value(metrics, "trading", "annualized_turnover_oneside")
             <= target.max_annualized_turnover
@@ -140,6 +157,7 @@ def assess_generalization(
     latest_metrics = latest_fold.validation.metrics
     latest_passed = (
         latest_score >= target.min_annualized_excess_return
+        and _value(latest_metrics, "returns", "annualized_return") > 0
         and abs(_value(latest_metrics, "risk", "max_drawdown")) <= target.max_drawdown
         and _value(latest_metrics, "trading", "annualized_turnover_oneside")
         <= target.max_annualized_turnover

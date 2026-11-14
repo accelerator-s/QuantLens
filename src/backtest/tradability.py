@@ -38,8 +38,6 @@ class Tradability:
 
     one_line_limit_down: pd.DataFrame
 
-    last_trading_date: pd.Series
-
     boards: pd.Series
 
     is_st: pd.DataFrame
@@ -47,27 +45,18 @@ class Tradability:
 def build_tradability(
     market_panel: dict[str, pd.DataFrame],
     rule_engine: RuleEngine,
-    *,
-    delisting_dates: pd.Series,
 ) -> Tradability:
     
     close = market_panel["close"]
     high = market_panel["high"]
     low = market_panel["low"]
-    is_trading = market_panel["is_trading"].astype(bool)
+    is_trading = market_panel["is_trading"].fillna(False).astype(bool)
     listed = market_panel["listed_days"] > 0
     trading_status = market_panel["trading_status"]
 
     is_st = trading_status.isin(list(_ST_STATUS_CODES)).astype(bool)
 
-    last_trading_date=pd.to_datetime(delisting_dates.reindex(close.columns))
-
-    delisted = pd.DataFrame(
-        close.index.to_numpy()[:, None] > last_trading_date.to_numpy()[None, :],
-        index=close.index,
-        columns=close.columns,
-    )
-    suspended = (~is_trading) & listed & (~delisted)
+    suspended = (~is_trading) & listed
 
     prev_close = close.ffill().shift(1)
     flat = is_trading & (high == low) & high.notna()
@@ -82,7 +71,8 @@ def build_tradability(
             continue  
         inst = close.columns[c]
         cond = special_condition_of(boards[inst], bool(is_st.iat[r, c]))
-        lower, upper = rule_engine.price_limit_range(_dec_price(float(pc)), cond)
+        lower, upper = rule_engine.price_limit_range(_dec_price(float(pc)), cond,
+                                                     as_of=close.index[r].date(), instrument=str(inst))
         px = _dec_price(float(high.iat[r, c]))
         if px >= upper:
             up.iat[r, c] = True
@@ -93,7 +83,6 @@ def build_tradability(
         suspended=suspended,
         one_line_limit_up=up,
         one_line_limit_down=down,
-        last_trading_date=last_trading_date,
         boards=boards,
         is_st=is_st,
     )

@@ -8,6 +8,8 @@ def fields(spark, names, start=None, end=None):
     from pyspark.sql import functions as F, Window
     mappings = yaml.safe_load((workspace().config/'panel_fields.yaml').read_text())['fields']
     prices = spark.table('dwd.prices_clean')
+    from quantlens.security_master import A_SHARE_PATTERN
+    prices = prices.where(F.col('code').rlike(A_SHARE_PATTERN))
     if start:prices=prices.where(F.col('date')>=F.lit(start))
     if end:prices=prices.where(F.col('date')<=F.lit(end))
     unknown=[name for name in names if name not in mappings]

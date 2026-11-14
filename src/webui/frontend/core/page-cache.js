@@ -34,7 +34,7 @@ export async function fetchApi(path, options = {}) {
     const response = await fetch(path, options);
     if (response.ok) {
       const data = await response.clone().json().catch(() => null);
-      if (data?.task_id) tasks.set(`/api/tasks/${data.task_id}`, 'running');
+      if (data?.task_id) tasks.set(data.task_id, 'running');
       if (!data?.requires_confirm) changed();
     }
     return response;
@@ -44,10 +44,12 @@ export async function fetchApi(path, options = {}) {
   if (entry && entry.expires > Date.now()) return entry.response.clone();
   if (!inflight.has(path)) {
     const promise = fetch(path, options).then(async response => {
-      if (/^\/api\/tasks\/[^/]+$/.test(path) && response.ok) {
-        const task = await response.clone().json();
-        const previous = tasks.get(path);
-        tasks.set(path, task.status);
+      if (/^\/api\/(?:data\/sync\/[^/]+\/progress|factors\/chat\/research\/[^/]+\/progress|factor-evolution\/[^/]+)$/.test(path) && response.ok) {
+        const data = await response.clone().json();
+        const task = path.startsWith('/api/factor-evolution/') ? data.task : data;
+        if (!task?.task_id) return response;
+        const previous = tasks.get(task.task_id);
+        tasks.set(task.task_id, task.status);
         if (tasks.size > 100) tasks.delete(tasks.keys().next().value);
         if (task.status !== 'running' && previous === 'running') changed();
       }

@@ -44,7 +44,9 @@ def test_baseline_is_linked_before_evaluation_and_windows_are_persisted(tmp_path
         kwargs['on_progress']('真实执行日志')
         time.sleep(.005)
         return WindowResult(window=kwargs['window_name'], run_id='BT-' + kwargs['window_name'], metrics={
-            'returns': {'annualized_excess_return': .05}, 'risk': {'max_drawdown': -.1},
+            'research_standard':'cn_a_daily_v3', 'input_quality':{'passed':True},
+            'returns': {'annualized_return': .06, 'annualized_excess_return': .05}, 'risk': {'max_drawdown': -.1},
+            'objective': {'value': .6, 'eligible': True},
             'trading': {'annualized_turnover_oneside': 2},
         })
 
@@ -53,10 +55,10 @@ def test_baseline_is_linked_before_evaluation_and_windows_are_persisted(tmp_path
     engine = EvolutionEngine(store, services)
     research_id = engine.create(config())
     detail = engine.run(research_id)
-    assert len([e for e in detail['events'] if e['event_type'] == 'window_completed']) == 2
-    assert observed[1] > observed[0]
+    assert len([e for e in detail['events'] if e['event_type'] == 'window_completed']) == 1
+    assert observed[0] > 0
     assert detail['status']['elapsed_seconds'] > 0
-    assert services.record_window_result.call_count == 2
+    assert services.record_window_result.call_count == 1
     assert any(e['event_type'] == 'runtime_log' and e['payload']['message'] == '真实执行日志' for e in detail['events'])
     assert all('test' not in call.kwargs['window_name'] for call in services.evaluate.call_args_list)
 
@@ -121,7 +123,7 @@ def test_batch_job_shares_session_and_checks_cancellation_between_windows(tmp_pa
     def completed(*args):
         assert args[:2] == (spark, context)
         control.write_text(json.dumps({'cancel_requested': True}))
-        return type('Outcome', (), {'run_id': args[6]})()
+        return type('Outcome', (), {'run_id': args[6], 'metrics': {'input_quality': {'passed': True}}})()
 
     with patch('quantlens.spark_backtest.run', side_effect=completed) as run:
         outcomes = run_windows(spark, context, requests, {'profile': 'same'}, {'protocol': 'same'}, control_path=control)
@@ -155,6 +157,7 @@ def test_batch_engine_records_every_window_and_does_not_expose_test(tmp_path):
                 assert window.end <= settings.validation_window.end
                 kwargs['on_window_started'](name)
                 result = WindowResult(window=name, run_id='BT-'+name, metrics={
+            'research_standard':'cn_a_daily_v3', 'input_quality':{'passed':True},
                     'returns': {'annualized_excess_return': .05}, 'risk': {'max_drawdown': -.1},
                     'trading': {'annualized_turnover_oneside': 2}})
                 kwargs['on_window_completed'](name, result)
@@ -169,7 +172,8 @@ def test_batch_engine_records_every_window_and_does_not_expose_test(tmp_path):
     assert len([e for e in store.detail(status.research_id)['events'] if e['event_type']=='window_completed']) == 6
 
 
-def test_production_batch_streams_verified_local_results_and_syncs_once():
+def test_production_batch_syncs_each_window_before_exposing_results(tmp_path, monkeypatch):
+    monkeypatch.setenv('QUANTLENS_HOME', str(tmp_path))
     from types import SimpleNamespace
     from factor_evolution.services import ProductionEvolutionServices
     from factor_evolution.walk_forward import build_folds
@@ -186,6 +190,7 @@ def test_production_batch_streams_verified_local_results_and_syncs_once():
     protocol.model_dump.return_value = {'locked': True}
     service._context = Mock(return_value=(protocol, profile))
     service._published_candidates[version.version_id + ':' + version.code_hash] = 'published_probe'
+    service._published_bounds[version.version_id + ':' + version.code_hash] = (settings.train_window.start, settings.validation_window.end)
     windows = [(f'{fold.fold_id}_{kind}', window) for fold in build_folds(settings)
                for kind, window in [('train', fold.train_window), ('validation', fold.validation_window)]]
     phases, completed = [], []
@@ -198,9 +203,12 @@ def test_production_batch_streams_verified_local_results_and_syncs_once():
         requests = json.loads(args[args.index('--windows') + 1])
         assert len(requests) == 6
         assert all(item['config']['end'] <= settings.validation_window.end for item in requests)
-        for item in requests:
+        batch = args[args.index('--batch') + 1]
+        for index, item in enumerate(requests):
             reporter('QUANTLENS_WINDOW_STARTED=' + json.dumps({'window': item['window']}))
-            reporter('QUANTLENS_WINDOW_COMPLETED=' + json.dumps({'window': item['window'], 'run_id': item['run_id']}))
+            reporter('QUANTLENS_WINDOW_COMPLETED=' + json.dumps({'window': item['window'], 'run_id': item['run_id'], 'batch': f'{batch}-{index:02d}'}))
+            assert sync.call_count == len(completed) == index + 1
+            assert sync.call_args.args == (f'{batch}-{index:02d}',)
 
     with patch('quantlens.compute.submit', side_effect=submit) as dispatch, patch('quantlens.sync_ads.sync') as sync, patch('backtest.report.BacktestRunStore.open_run', return_value=record):
         results = service.evaluate_windows(settings, version, windows=windows, research_id='EVO-test', timeout_seconds=60,
@@ -208,7 +216,42 @@ def test_production_batch_streams_verified_local_results_and_syncs_once():
                                            on_window_completed=lambda name, result: completed.append((name, result)))
     assert len(results) == len(phases) == len(completed) == 6
     dispatch.assert_called_once()
-    sync.assert_called_once()
+    assert sync.call_count == 6
+
+
+def test_each_window_is_exported_before_its_completion_event(capsys):
+    from quantlens.spark_backtest import run_windows
+    requests = [{'window': f'wf{i}_train', 'run_id': f'BT-{i}', 'config': {
+        'profile_name': 'probe', 'start': '2020-01-01', 'end': '2021-01-01', 'initial_capital': 1000000,
+    }} for i in range(2)]
+    exported = []
+    def export(spark, context, batch, end):
+        prior = capsys.readouterr().out
+        if exported:
+            assert json.loads(prior.split('QUANTLENS_WINDOW_COMPLETED=')[1].splitlines()[0])['batch'] == exported[-1]
+        else:
+            assert 'QUANTLENS_WINDOW_COMPLETED=' not in prior
+        exported.append(batch)
+    def run(*args):
+        return type('Outcome', (), {'run_id': args[6], 'metrics': {'input_quality': {'passed': True}}})()
+    with patch('quantlens.spark_backtest.run', side_effect=run), patch('quantlens.spark_ads.export_backtests', side_effect=export):
+        results = run_windows(object(), {}, requests, {}, {}, batch_id='research-batch')
+    assert exported == ['research-batch-00', 'research-batch-01']
+    assert len(results) == 2
+    assert json.loads(capsys.readouterr().out.split('QUANTLENS_WINDOW_COMPLETED=')[1])['batch'] == exported[-1]
+
+
+def test_export_failure_does_not_announce_an_unpublished_window(capsys):
+    import pytest
+    from quantlens.spark_backtest import run_windows
+    request = {'window': 'train', 'run_id': 'BT-test', 'config': {
+        'profile_name': 'probe', 'start': '2020-01-01', 'end': '2021-01-01', 'initial_capital': 1000000,
+    }}
+    outcome = type('Outcome', (), {'run_id': 'BT-test', 'metrics': {'input_quality': {'passed': True}}})()
+    with patch('quantlens.spark_backtest.run', return_value=outcome), patch('quantlens.spark_ads.export_backtests', side_effect=RuntimeError('export failed')):
+        with pytest.raises(RuntimeError, match='export failed'):
+            run_windows(object(), {}, [request], {}, {}, batch_id='research-batch')
+    assert 'QUANTLENS_WINDOW_COMPLETED=' not in capsys.readouterr().out
 
 
 def test_equivalent_direction_metadata_and_comments_do_not_trigger_backtests():
@@ -234,7 +277,7 @@ def test_equivalent_direction_metadata_and_comments_do_not_trigger_backtests():
 def test_backtest_identity_is_not_overwritten_by_publication_lineage():
     from webui.backend.routes.backtest import get_run
     row = {'backtest_run': 'BT-12345678901234567890', 'strategy_id': 'research_probe',
-           'config': json.dumps({'profile': {'factors': {'items': []}}}),
+           'config': json.dumps({'protocol': {'schema_version': 3}, 'profile': {'factors': {'items': []}}}),
            'status': json.dumps({'state': 'completed'}), 'metrics': json.dumps({'returns': {}})}
     with patch('webui.backend.routes.backtest.ads.query', return_value=[row]), patch('webui.backend.routes.backtest.ads.provenance', return_value={'run_id': 'publication-job', 'data_snapshot': 'snapshot'}):
         detail = get_run(row['backtest_run'])
@@ -255,7 +298,8 @@ def test_candidate_json_errors_retry_within_round_but_transport_errors_do_not():
     candidate = FactorCandidate(factor_name='probe', display_name='探针', assumption='test', direction='negative',
                                 timescale='daily', dependencies=['close'], code=current.code, model_name='test-model',
                                 parameters={'_evolution_change_type':'direction','_change_summary':'反转方向','_expected_impact':'验证反转假设'})
-    with patch('ai.router.AIRouter') as router, patch('proposals.ProposalStore') as proposals:
+    with patch.object(ProductionEvolutionServices, '_diagnose', return_value={'decision': {'action': 'hypothesis', 'change_type': 'direction'}, 'elapsed_seconds': 0}), patch('ai.router.AIRouter') as router, patch('proposals.ProposalStore') as proposals, patch('factors.registry.FactorRegistry') as registry:
+        registry.return_value.get.return_value.min_history = 120
         router.return_value.pick.return_value = SimpleNamespace(name='test-model')
         router.return_value.run_task.side_effect = [ModelRouteError(code='AI_OUTPUT_NOT_JSON', message='invalid JSON'), candidate.model_dump(mode='json')]
         proposals.return_value.create.return_value = (SimpleNamespace(proposal_id='P-test'), None)
@@ -271,13 +315,55 @@ def test_candidate_json_errors_retry_within_round_but_transport_errors_do_not():
 
 
 def test_public_factor_catalog_excludes_internal_iteration_copies():
-    from types import SimpleNamespace
+    from factors.registry import FactorMetadata
     from webui.backend.routes.factors import list_factors
     base = 'smooth_uptrend_efficiency_60d'
     copy = base + '_r_0123456789ab'
     rows = [{'metadata': json.dumps({'name': name, 'version': 'v1', 'status': 'draft'}),
              'run_id': 'publication', 'data_snapshot': 'snapshot', 'code_hash': 'hash'} for name in [base, copy]]
     with patch('webui.backend.routes.factors.FactorRegistry') as registry, patch('quantlens.ads.query', side_effect=lambda table, *args, **kwargs: rows if table == 'factor_meta' else []), patch('quantlens.ads.provenance', return_value={}):
-        registry.return_value.list.return_value = [SimpleNamespace(name=name, version='v1') for name in [base, copy]]
+        registry.return_value.list.return_value = [FactorMetadata(name=name, version='v1') for name in [base, copy]]
         result = list_factors()
     assert [row['name'] for row in result['items']] == [base]
+
+
+def test_upgraded_factor_is_visible_before_warehouse_refresh():
+    from factors.registry import FactorMetadata
+    from webui.backend.routes.factors import list_factors
+    old = {'metadata': json.dumps({'name': 'probe', 'version': 'v1'}),
+           'run_id': 'old', 'data_snapshot': 'old', 'code_hash': 'old'}
+    with patch('webui.backend.routes.factors.FactorRegistry') as registry, \
+         patch('quantlens.ads.query', side_effect=lambda table, *a, **kw: [old] if table == 'factor_meta' else []) as query, \
+         patch('quantlens.ads.provenance', return_value={}):
+        registry.return_value.list.return_value = [FactorMetadata(name='probe', version='v2', code_hash='new')]
+        item, = list_factors()['items']
+    assert (item['name'], item['version'], item['code_hash']) == ('probe', 'v2', 'new')
+    assert item['evaluation'] == []
+    assert item['run_id'] is None
+    assert query.call_args.args[2] == ['probe', 'v2']
+
+
+def test_iteration_candidates_are_not_catalog_or_training_features(tmp_path):
+    from types import SimpleNamespace
+    from factors.plugins import FactorPlugin
+    from factors.registry import FactorMetadata, FactorRegistry
+    from quantlens.research_candidate import publish_candidate
+
+    registry = FactorRegistry(tmp_path / 'factors.yaml')
+    registry.upsert(FactorMetadata(name='probe', display_name='60日温和上涨效率'))
+    version = SimpleNamespace(code='def compute(p): return p["close"].pct_change(5)', parameters={},
+                              dependencies=['close'], standardization=[], missing_handling='drop',
+                              direction='positive', version_id='v1-candidate')
+    with patch('quantlens.research_candidate.FactorRegistry', return_value=registry), \
+         patch.object(FactorPlugin, 'default') as plugin, patch('quantlens.compute.submit') as submit:
+        name = publish_candidate('probe', version)
+        assert publish_candidate('probe', version) == name
+        assert plugin.return_value.write.call_count == 1
+        assert submit.call_args.args == ('spark_factor_values', '--factor', name)
+    assert [f.name for f in registry.list()] == ['probe']
+    assert len(registry.list(include_research=True)) == 2
+    assert registry.get(name).version == 'v1-candidate'
+    # Even without its base, an execution copy must not become a catalog item.
+    registry.remove('probe', confirm=True)
+    assert registry.list() == []
+    assert registry.get(name).name == name

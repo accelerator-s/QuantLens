@@ -97,14 +97,12 @@ def test_downstream_error_is_an_event_and_never_done():
     assert events[-1] == {'type': 'error', 'message': '模型中断'}
 
 
-@pytest.mark.parametrize('kind,path', [('factor_chat', '/factors/chat'), ('strategy_chat', '/strategies/chat')])
-def test_both_chat_routes_use_streaming_and_keep_the_current_conversation(kind, path):
-    import importlib
+def test_factor_chat_uses_streaming_and_keeps_the_current_conversation():
     from contextlib import ExitStack
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    module = importlib.import_module('webui.backend.routes.' + kind)
+    from webui.backend.routes import factor_chat as module
     app = FastAPI()
     app.include_router(module.router)
     captured = []
@@ -113,18 +111,22 @@ def test_both_chat_routes_use_streaming_and_keep_the_current_conversation(kind, 
         return chat_stream(selected_router, selected_model, messages)
     with ExitStack() as stack:
         stack.enter_context(patch.object(module, 'AIRouter', return_value=SimpleNamespace(request_timeout=20)))
-        stack.enter_context(patch.object(module, 'pick_chat_model' if kind == 'factor_chat' else '_pick_model', return_value=model()))
-        if kind == 'factor_chat':
-            stack.enter_context(patch.object(module, '_factor_context', return_value='已登记因子'))
-        else:
-            stack.enter_context(patch.object(module, 'build_static_context', return_value='策略背景'))
+        stack.enter_context(patch.object(module, 'pick_chat_model', return_value=model()))
+        stack.enter_context(patch.object(module, '_factor_context', return_value='已登记因子'))
         stack.enter_context(patch.object(module, 'chat_stream', side_effect=deltas))
         stack.enter_context(patch('webui.backend.ai_chat._api_key_for', return_value='secret'))
         stack.enter_context(patch('ai.transport.stream_completion', return_value=iter([{'channel': 'content', 'text': '回答'}])))
-        response = TestClient(app).post(path, json={'model': 'test', 'messages': [
+        response = TestClient(app).post('/factors/chat', json={'model': 'test', 'messages': [
             {'role': 'user', 'content': '当前对话里的研究问题'},
         ]})
     assert response.status_code == 200
     assert response.headers['content-type'].startswith('application/x-ndjson')
     assert [json.loads(line)['type'] for line in response.text.splitlines()] == ['start', 'delta', 'done']
     assert captured[-1] == {'role': 'user', 'content': '当前对话里的研究问题'}
+
+
+def test_retired_strategy_chat_has_no_route():
+    from fastapi.testclient import TestClient
+    from webui.backend.server import create_app
+    client = TestClient(create_app())
+    assert client.post('/api/strategies/chat', json={}).status_code == 404

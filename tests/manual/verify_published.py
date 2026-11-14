@@ -8,7 +8,7 @@ import numpy as np
 from quantlens import ads
 from quantlens.integrations import ensure_hive_hbase
 from storage.hbase import HBase, factor_rowkey
-from storage.hdfs import compose
+from storage.hive import execute
 from strategy import StrategyProfileStore
 
 manifest = ads.manifest()
@@ -67,8 +67,7 @@ ensure_hive_hbase()
 sql = ("SELECT code, `date`, `close` FROM ods.profile_hbase WHERE rowkey='000001'; "
        f"SELECT code, `date`, f['{qualifier}'] FROM dws.factor_snapshot_hbase "
        f"WHERE rowkey='000001|{as_of}';")
-result = compose('exec', '-T', 'hive', 'beeline', '-u', 'jdbc:hive2://localhost:10000',
-                 '-n', 'root', '--silent=true', '--showHeader=false', '--outputformat=tsv2', '-e', sql)
+result = execute(sql)
 lines = [line.split('\t') for line in result.stdout.splitlines() if line.startswith('000001\t')]
 assert len(lines) == 2 and all(row[1] == as_of for row in lines), result.stdout
 assert abs(float(lines[1][2]) - expected['std_value']) <= 1e-12

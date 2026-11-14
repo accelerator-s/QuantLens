@@ -2,7 +2,7 @@ import { hydrateIcons, loadIcon } from "../../core/icons.js";
 import { currentTheme, onThemeChange, toggleTheme } from "../../core/theme.js";
 import { onHealth } from "../../core/health.js";
 
-const PAGE_META = {dashboard:['研究主线','工作台'],screen:['研究主线','条件选股'],stocks:['研究主线','个股分析'],factors:['研究主线','因子库'],backtest:['研究主线','策略回测'],portfolio:['研究主线','组合跟踪'],settings:['设置','设置']};
+const PAGE_META = {dashboard:['研究主线','工作台'],screen:['研究主线','条件选股'],stocks:['研究主线','个股分析'],factors:['研究主线','因子研究'],'strategy-research':['研究主线','策略研究'],backtest:['研究主线','回测结果'],portfolio:['研究主线','账户持仓'],trash:['管理','回收站'],settings:['设置','设置']};
 
 export async function mountTopbar(slot, bus, onRefresh) {
   const html = await fetch("/components/topbar/topbar.html").then((r) => r.text());

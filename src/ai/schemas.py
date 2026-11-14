@@ -157,7 +157,25 @@ class CheapBatchLabel(_BaseAIOutput):
                 raise ValueError("cheap_batch_label.items 每项必须含 id 与 label。")
         return v
 
+from benchmarks.models import ReturnBenchmark
+
+
+class BenchmarkSelection(_BaseAIOutput):
+    task: Literal["benchmark_selection"] = "benchmark_selection"
+    return_benchmark: ReturnBenchmark
+    market_reference: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+
+class MarketReferenceSelection(_BaseAIOutput):
+    task: Literal['market_reference_selection'] = 'market_reference_selection'
+    code: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+
 SCHEMA_REGISTRY: dict[str, type[_BaseAIOutput]] = {
+    "market_reference_selection": MarketReferenceSelection,
+    "benchmark_selection": BenchmarkSelection,
     "factor_candidate": FactorCandidate,
     "provider_mapping": ProviderMapping,
     "strategy_critique": StrategyCritique,

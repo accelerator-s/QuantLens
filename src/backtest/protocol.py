@@ -37,49 +37,50 @@ class BacktestProtocol(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1, 2] = 2
+    schema_version: Literal[3] = 3
+    research_standard: Literal['cn_a_daily_v3'] = 'cn_a_daily_v3'
+    historical_rules: Literal['trade_date_effective'] = 'trade_date_effective'
+    empty_portfolio_benchmark: Literal['benchmark_definition'] = 'benchmark_definition'
     objective: Objective = Field(default_factory=Objective)
-    benchmark_fallback: Literal["universe_equal_weight"] = "universe_equal_weight"
 
     # -- 执行时序 --
     execution_delay_days: Literal[1] = 1
 
-    price_anchor: Literal["next_open", "next_close"] = "next_close"
+    price_anchor: Literal["next_close"] = "next_close"
 
     fill_assumption: Literal["all_or_nothing"] = "all_or_nothing"
 
-    block_buy_on_suspension: bool = True
+    block_buy_on_suspension: Literal[True] = True
 
-    block_buy_on_limit_up_one_line: bool = True
+    block_buy_on_limit_up_one_line: Literal[True] = True
 
-    block_sell_on_suspension: bool = True
+    block_sell_on_suspension: Literal[True] = True
 
-    block_sell_on_limit_down_one_line: bool = True
+    block_sell_on_limit_down_one_line: Literal[True] = True
 
     # -- 成本模型 --
     fee_source: Literal["market_rule"] = "market_rule"
 
     commission_override_rate: Decimal | None = Field(default=Decimal("0.00008"))
 
-    model_min_commission: bool = True
+    model_min_commission: Literal[True] = True
 
     slippage_bps: Decimal = Field(default=Decimal("10"), ge=0)
 
-    return_field: Literal["ret_wd", "ret_nd"] = "ret_wd"
+    return_field: Literal["ret_wd"] = "ret_wd"
 
     valuation_mode: Literal["mv_drift"] = "mv_drift"
 
-    sell_proceeds_available: Literal["same_day", "next_day"] = "same_day"
+    sell_proceeds_available: Literal["same_day"] = "same_day"
 
     unaffordable_lot: Literal["reject_keep_cash"] = "reject_keep_cash"
 
     # -- 退市处置 --
-    delist_force_close: bool = True
+    delisting_action: Literal["sell_on_observed_risk_next_close"] = "sell_on_observed_risk_next_close"
 
-    delist_recovery_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
 
     # -- 基准 --
-    benchmark: Literal["universe_equal_weight", "same_cluster_equal_weight"] = "same_cluster_equal_weight"
+    benchmark: Literal["model_selected", "universe_equal_weight", "same_cluster_equal_weight"] = "model_selected"
 
     # -- 环境引用 --
     market_rule_name: str = "CN-A-stock"
@@ -91,9 +92,6 @@ class BacktestProtocol(BaseModel):
         
         payload = self.model_dump(mode="json")
         payload.pop("lock", None)
-        if self.schema_version == 1:
-            payload.pop("objective", None)
-            payload.pop("benchmark_fallback", None)
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 

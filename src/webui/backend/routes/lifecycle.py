@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 from exceptions import LifecycleError
@@ -131,6 +131,8 @@ def approve_research_report(report_id: str, payload: ReportApprovalPayload) -> d
     store = LifecycleStore()
     report = store.get(ObjectType.RESEARCH_REPORT, report_id)
     assert isinstance(report, ResearchReport)
+    if report.report_kind == "factor":
+        raise HTTPException(404, "Not Found")
     if not payload.confirm:
         return confirm_preview(
             {
@@ -162,47 +164,3 @@ def approve_research_report(report_id: str, payload: ReportApprovalPayload) -> d
         payload=verification,
     )
     return {"report_id": report_id, "state": "approved", **verification}
-
-@router.post("/lifecycle/factor-versions/{factor_version_id}/promote")
-def promote_factor_version(
-    factor_version_id: str, payload: ReportApprovalPayload
-) -> dict:
-    store = LifecycleStore()
-    factor = store.get(ObjectType.FACTOR_VERSION, factor_version_id)
-    state = store.current_state(ObjectType.FACTOR_VERSION, factor_version_id)
-    if not payload.confirm:
-        return confirm_preview(
-            {
-                "操作": "批准因子使用权限",
-                "因子版本": factor_version_id,
-                "因子": factor.factor_name,
-                "当前状态": state,
-                "说明": "仅 shadow 版本且研究报告已批准时可进入 production。",
-            }
-        )
-    actor = payload.decided_by.strip()
-    if not actor:
-        raise LifecycleError(
-            code="FACTOR_PRODUCTION_APPROVER_REQUIRED",
-            message="批准因子使用权限必须填写决策人。",
-            blocking=True,
-            suggested_action="填写可审计的姓名或内部账号。",
-        )
-    if state == "production":
-        return {"factor_version_id": factor_version_id, "state": state}
-    if state != "shadow":
-        raise LifecycleError(
-            code="FACTOR_VERSION_NOT_SHADOW",
-            message=f"因子版本 {factor_version_id} 当前为 {state}，不能进入生产。",
-            blocking=True,
-            suggested_action="只能批准已通过锁定测试并进入模拟观察的因子。",
-        )
-    store.transition(
-        ObjectType.FACTOR_VERSION,
-        factor_version_id,
-        "production",
-        actor_type=ActorType.HUMAN,
-        actor_ref=actor,
-        reason=payload.reason.strip() or "人工核验研究报告和锁定测试后批准正式使用",
-    )
-    return {"factor_version_id": factor_version_id, "state": "production"}

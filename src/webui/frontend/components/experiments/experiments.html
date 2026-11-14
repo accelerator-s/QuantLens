@@ -4,21 +4,16 @@
       <div>
         <h3>实验会话</h3>
       </div>
-      <button type="button" class="btn btn--primary" data-evolution-start>新建实验</button>
+      <div class="experiments__session-actions">
+        <div class="select experiments__filter" data-session-filter></div>
+        <button type="button" class="btn btn--primary" data-evolution-start>新建实验</button>
+      </div>
     </div>
     <div data-evolution-list></div>
+    <div class="factors__research-empty library-empty experiments__empty" data-experiments-empty hidden>
+      <span class="research-entry__mark" data-icon="ban" aria-hidden="true"></span>
+      <h3>暂无实验</h3>
+    </div>
   </article>
   <div class="experiments__evolution-detail" data-evolution-detail></div>
-  <div class="toolbar experiments__logbook-head">
-    <div>
-      <h3>实验记录</h3>
-      <p class="item-row__meta">按因子、策略和组合政策查看回测、实验对比与模型复盘。</p>
-    </div>
-    <span class="toolbar__spacer"></span>
-    <div class="select experiments__filter" data-improved-filter></div>
-  </div>
-  <div class="split">
-    <div class="item-list" data-list></div>
-    <div class="experiments__detail" data-detail></div>
-  </div>
 </section>

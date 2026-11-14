@@ -13,7 +13,8 @@ import pyarrow.parquet as pq
 from paths import workspace
 from quantlens.schema_export import staged_tables, export
 from quantlens.warehouse import make_run
-from storage.hdfs import HDFS, compose
+from storage.hdfs import HDFS
+from storage.hive import execute as execute_hive
 
 
 def checksum(files):
@@ -98,7 +99,7 @@ def ingest(root=None, *, cluster_checked=False):
                     for year in changed:
                         uri=f'{destination}/year={year}'
                         statements.extend([f"ALTER TABLE ods.{table} ADD IF NOT EXISTS PARTITION (year={int(year)}) LOCATION '{uri}'",f"ALTER TABLE ods.{table} PARTITION (year={int(year)}) SET LOCATION '{uri}'"])
-                    compose('exec','-T','hive','beeline','-u','jdbc:hive2://localhost:10000/default','-e',';'.join(statements)+';')
+                    execute_hive(';'.join(statements)+';')
                     from datetime import datetime,UTC
                     for year,sha in changed.items():
                         manifest['partitions'][f'{table}/year={year}']={'run_id':run['run_id'],'table':table,'partition':f'year={year}','rows':rows[year],'sha256':sha,'source_uri':f'{destination}/year={year}','completed_at':datetime.now(UTC).isoformat()}

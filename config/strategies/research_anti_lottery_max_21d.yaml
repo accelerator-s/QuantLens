@@ -1,0 +1,11 @@
+profile_name: research_anti_lottery_max_21d
+display_name: 反彩票低MAX研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items:
+  - name: anti_lottery_max_21d
+extra:
+  purpose: factor_research_only
+  internal_only: true

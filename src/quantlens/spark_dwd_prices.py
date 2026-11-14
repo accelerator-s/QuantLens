@@ -46,7 +46,10 @@ def clean_prices(prices, returns, calendar=None, first_dates=None):
 
 def universe(prices):
     from pyspark.sql import functions as F
-    reasons = F.concat_ws(',', F.when(F.col('listed_days')<120, 'new_listing'),
+    from quantlens.security_master import A_SHARE_PATTERN
+    reasons = F.concat_ws(',', F.when(~F.col('code').rlike(A_SHARE_PATTERN), 'not_a_share'),
+        F.when(F.col('code').rlike('^(43|83|87|88|92)') & (F.col('date')<F.lit('2021-11-15')), 'before_bse_listing'),
+        F.when(F.col('listed_days')<120, 'new_listing'),
         F.when(F.coalesce('is_st', F.lit(True)), 'st_or_unknown'), F.when(F.coalesce('is_delisting', F.lit(True)), 'delisting_or_unknown'),
         F.when(~F.coalesce('is_trading',F.lit(False)), 'not_trading'), F.when(F.coalesce(F.col('amount')<5000000,F.lit(True)), 'low_amount'),
         F.when(F.coalesce(F.col('close')<1,F.lit(True)), 'low_price'), F.when(~F.coalesce('ohlc_valid',F.lit(False)), 'invalid_ohlc'))

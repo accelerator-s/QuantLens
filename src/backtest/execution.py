@@ -99,7 +99,8 @@ def _fill_sell(
     proceeds = gross_value * (Decimal(1) - slippage)
     proceeds_q = proceeds.quantize(_CENT, rounding=ROUND_HALF_UP)
     breakdown = rule_engine.calculate_total_cost(
-        proceeds_q, "sell", commission_override=protocol.commission_override_rate
+        proceeds_q, "sell", commission_override=protocol.commission_override_rate,
+        as_of=date.date(), instrument=order.instrument
     )
     commission, transfer, stamp, other = _fee_fields(breakdown)
     cash_in = proceeds - breakdown.total
@@ -123,42 +124,6 @@ def _fill_sell(
         other_fees=float(other),
         slippage_cost=float(slippage_cost),
         note=order.note,
-    )
-
-def force_close(
-    ledger,  
-    instrument: str,
-    *,
-    date: pd.Timestamp,
-    close: float,
-    rule_engine: RuleEngine,
-    protocol: BacktestProtocol,
-) -> Fill:
-    
-    pos = ledger.positions[instrument]
-    gross_value = pos.market_value
-    gross_q = gross_value.quantize(_CENT, rounding=ROUND_HALF_UP)
-    breakdown = rule_engine.calculate_total_cost(
-        gross_q, "sell", commission_override=protocol.commission_override_rate
-    )
-    commission, transfer, stamp, other = _fee_fields(breakdown)
-    cash_in = gross_value - breakdown.total
-    ledger.apply_sell(instrument, shares=pos.shares, value_out=gross_value, cash_in=cash_in)
-    close_dec = _dec_price(close)
-    return Fill(
-        date=date,
-        instrument=instrument,
-        side="sell",
-        status="forced_delist_close",
-        shares=0,
-        anchor_price=float(close_dec),
-        exec_price=float(close_dec),
-        amount=float(gross_value),
-        commission=float(commission),
-        transfer_fee=float(transfer),
-        stamp_tax=float(stamp),
-        other_fees=float(other),
-        note="最后可交易日强制平仓（退市处置）",
     )
 
 # 买入
@@ -215,7 +180,8 @@ def _fill_buy(
         amount = Decimal(shares) * exec_price
         amount_q = amount.quantize(_CENT, rounding=ROUND_HALF_UP)
         breakdown = rule_engine.calculate_total_cost(
-            amount_q, "buy", commission_override=protocol.commission_override_rate
+            amount_q, "buy", commission_override=protocol.commission_override_rate,
+            as_of=date.date(), instrument=order.instrument
         )
         total_out = amount + breakdown.total
         if total_out <= budget:
@@ -442,4 +408,4 @@ def execute_day(
 
     return result
 
-__all__ = ["DayResult", "Fill", "Order", "execute_day", "force_close"]
+__all__ = ["DayResult", "Fill", "Order", "execute_day"]

@@ -11,7 +11,7 @@ def metadata(spark):
     if spark.catalog.tableExists('dws.factor_meta'):
         existing = {(r.name,r.version):(r.code_hash,json.loads(r.metadata)) for r in spark.table('dws.factor_meta').select('name','version','code_hash','metadata').collect()}
     result = []
-    for meta in FactorRegistry().list():
+    for meta in FactorRegistry().list(include_research=True):
         if meta.name == 'model_gbt':
             from quantlens.spark_engine import identity
             names=list(meta.dependencies)

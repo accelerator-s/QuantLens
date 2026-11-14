@@ -20,6 +20,8 @@ from .incremental import (
 from .integrity import IntegrityReport, run_integrity_checks
 
 UPDATE_ORDER: tuple[str, ...] = (
+    "index_basic",
+    "index_daily",
     "prices_daily",
     "returns_daily",
     "fs_balance",

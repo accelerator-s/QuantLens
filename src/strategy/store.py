@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from exceptions import QuantTrainingError, StrategyProfileError
 from paths import Workspace, workspace
+from security import confined_path
 
 from .models import (
     ResolvedStrategyProfile,
@@ -174,26 +175,6 @@ class StrategyProfileStore:
                 suggested_action="先 `configure market-rule activate` 激活该规则。",
             )
 
-        from portfolio.accounts import AccountRegistry
-
-        accounts = AccountRegistry().list(
-            market=resolved.market, instrument_class=rule.instrument_class
-        )
-        if not accounts:
-            raise StrategyProfileError(
-                code="STRATEGY_PROFILE_NO_ACCOUNT",
-                message=(
-                    f"策略配置 {name} 面向市场 {resolved.market}（{rule.instrument_class}），"
-                    "尚无对应账户，无法激活实盘。"
-                ),
-                blocking=True,
-                suggested_action=(
-                    f"先用 `account create` 创建 {resolved.market} 市场的 "
-                    f"{rule.instrument_class} 账户，再激活该策略。"
-                ),
-                related_subjects={"strategy_profile": name},
-            )
-
         return warnings
 
     def transition(
@@ -203,12 +184,6 @@ class StrategyProfileStore:
         target: StrategyStatus,
         confirm: bool = False,
     ) -> StrategyProfileDoc:
-        if target == StrategyStatus.ACTIVE and not confirm:
-            raise StrategyProfileError(
-                code="STRATEGY_PROFILE_TRANSITION_CONFIRM_REQUIRED",
-                message=f"将策略配置置为 {target.value} 需要 --confirm（人工确认）。",
-                blocking=True,
-            )
         doc = self.get(name)
         validate_transition(doc.status, target)
         if target == StrategyStatus.ACTIVE:
@@ -259,6 +234,7 @@ class StrategyProfileStore:
             category="strategy_profile",
             deleted_by=deleted_by,
             reason=reason or f"删除策略配置 {name}",
+            name=doc.display_name or doc.profile_name,
         )
         self._rebuild_meta()
         return entry.bucket_dir
@@ -273,7 +249,7 @@ class StrategyProfileStore:
             )
 
     def _profile_path(self, name: str) -> Path:
-        return self.path / f"{name}.yaml"
+        return confined_path(self.path, name, ".yaml")
 
     def _load_all(self) -> list[StrategyProfileDoc]:
         docs: list[StrategyProfileDoc] = []
@@ -298,8 +274,18 @@ class StrategyProfileStore:
             ) from exc
 
     def _save_doc(self, doc: StrategyProfileDoc) -> None:
+        from portfolio.transaction import lock
+        with lock:
+            self._save_doc_locked(doc)
+
+    def _save_doc_locked(self, doc: StrategyProfileDoc) -> None:
+        from .account_binding import validate_binding_change
+        path = self._profile_path(doc.profile_name)
+        old = yaml.safe_load(path.read_text(encoding='utf-8')) if path.exists() else {}
+        validate_binding_change(old or {}, doc.model_dump(mode='json'))
         self.path.mkdir(parents=True, exist_ok=True)
-        self._profile_path(doc.profile_name).write_text(
+        temporary = path.with_suffix('.pending')
+        temporary.write_text(
             yaml.safe_dump(
                 doc.model_dump(mode="json"),
                 allow_unicode=True,
@@ -307,6 +293,7 @@ class StrategyProfileStore:
             ),
             encoding="utf-8",
         )
+        temporary.replace(path)
 
     def _rebuild_meta(self) -> None:
         names = sorted(f.stem for f in self.path.glob("*.yaml") if f.name != _META_FILE)

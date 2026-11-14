@@ -6,8 +6,12 @@ import { formDialog } from "../confirm-dialog/form-dialog.js";
 import { hydrateIcons } from "../../core/icons.js";
 import { toastError } from "../../core/toast.js";
 import { badge } from "../../core/fmt.js";
-import { el, kvEl, selectMarkup, tableEl } from "../../core/dom.js";
+import { el, kvEl, selectMarkup, tableEl as createTable } from "../../core/dom.js";
 import { createSelect } from "../../core/select.js";
+
+function tableEl(columns, rows, options = {}) {
+  return createTable(columns, rows, {...options, pagination: false});
+}
 
 const CAPABILITY_LABELS = {
   reasoning_high: "深度推理",
@@ -83,7 +87,7 @@ export async function mount(root, ctx) {
         span.title = text;
         return span;
       }
-      const modelTable = tableEl([
+      const columns = [
         {key: 'name', label: '名称', format: value => clipped(value, 'ai-config__model-name')},
         {key: 'api_type', label: '接口', format: value => badge(value === 'anthropic' ? 'Anthropic' : 'OpenAI', 'muted')},
         {key: 'api_model_id', label: '模型', format: (value, row) => {
@@ -93,43 +97,48 @@ export async function mount(root, ctx) {
         }},
         {key: 'capability_tags', label: '能力', format: value => tagBadges(value, 1)},
         {key: 'enabled', label: '状态', format: (value, row) => {
-          const toggle = el('button', 'ai-config__model-status');
+          const toggle = el('button', 'btn btn--ghost ai-config__model-status');
           toggle.type = 'button';
           toggle.setAttribute('role', 'switch');
           toggle.setAttribute('aria-checked', String(value));
           toggle.setAttribute('aria-label', `${value ? '停用' : '启用'} ${row.name}`);
           toggle.title = `${value ? '点击停用' : '点击启用'}${row.configured ? '' : ' · 未配置密钥'}`;
           toggle.append(badge(value ? '已启用' : '已停用', value ? 'safe' : 'muted'));
-          if (!row.configured) toggle.append(badge('缺密钥', 'warn'));
           toggle.addEventListener('click', async () => {
             if (toggle.disabled) return;
             toggle.disabled = true;
             try { await setEnabled(row.name, !value); }
             finally { toggle.disabled = false; }
           });
-          return toggle;
+          const state = el('span', 'ai-config__model-status-cell');
+          state.append(toggle);
+          if (!row.configured) state.append(badge('缺密钥', 'warn'));
+          return state;
         }},
         {key: 'name', label: '操作', format: (name, row) => {
           const actions = el('span', 'ai-config__model-actions');
-          const edit = el('button', 'btn btn--ghost btn--sm', '编辑');
+          const edit = el('button', 'btn btn--ghost', '编辑');
           edit.type = 'button';
           edit.addEventListener('click', () => openModelForm(row));
           actions.append(edit);
           if (row.kind === 'api_model') {
-            const test = el('button', 'btn btn--ghost btn--sm ai-config__model-test', '测试');
+            const test = el('button', 'btn btn--ghost ai-config__model-test', '测试');
             test.type = 'button';
             test.title = '测试连通性';
             test.setAttribute('aria-label', `测试 ${name} 的连通性`);
             test.addEventListener('click', () => testModel(name, test));
             actions.append(test);
           }
-          const remove = el('button', 'btn btn--ghost btn--sm ai-config__model-remove', '删除');
+          const remove = el('button', 'btn btn--ghost ai-config__model-remove', '删除');
           remove.type = 'button';
           remove.addEventListener('click', () => removeModel(name, row.configured));
           actions.append(remove);
           return actions;
         }},
-      ], data.items);
+      ];
+      const modelTable = tableEl(columns, data.items, {onRowRender:row=>{
+        [...row.children].forEach((cell,index)=>{cell.dataset.label=columns[index].label;});
+      }});
       modelTable.classList.add('ai-config__models-table');
       modelsHost.append(modelTable);
     } catch (err) {

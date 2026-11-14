@@ -31,11 +31,11 @@ call('Runtime.enable');call('Page.enable');call('Network.enable')
 call('Emulation.setDeviceMetricsOverride',{'width':1280,'height':900,'deviceScaleFactor':1,'mobile':False})
 call('Page.navigate',{'url':'http://127.0.0.1:8611/'})
 wait("document.querySelector('[data-route=dashboard]') && document.querySelector('[data-view=dashboard] h2')")
-assert js("document.querySelectorAll('[data-route]').length")==6
+assert js("document.querySelectorAll('[data-route]').length")==8
 report={'navigation':[],'layouts':[]}
 for width in [1280,400]:
     call('Emulation.setDeviceMetricsOverride',{'width':width,'height':900,'deviceScaleFactor':1,'mobile':False})
-    for route in ['dashboard','screen','factors','backtest','portfolio','settings']:
+    for route in ['dashboard','screen','factors','strategy-research','backtest','portfolio','trash','settings']:
         js(f"document.querySelector('[data-route={route}]').click()")
         wait(f"document.querySelector('[data-view={route}]') && !document.querySelector('[data-view={route}]').hidden && document.querySelector('[data-view={route}]').innerText.length>10")
         time.sleep(.3)
@@ -46,7 +46,7 @@ for width in [1280,400]:
     screenshot=call('Page.captureScreenshot',{'format':'png','captureBeyondViewport':False})
     Path(f'docs/course/evidence/ui-{width}.png').write_bytes(base64.b64decode(screenshot['data']))
 # Open each internal tab at least once and exercise keyboard navigation.
-for route in ['factors','backtest','portfolio','settings']:
+for route in ['factors','strategy-research','settings']:
     js(f"document.querySelector('[data-route={route}]').click()")
     wait(f"document.querySelector('[data-view={route}] [role=tab]')")
     count=js(f"document.querySelectorAll('[data-view={route}] > [role=tablist] > [role=tab]').length")
@@ -79,10 +79,8 @@ js("document.querySelector('[data-view=factors] [data-detail] tbody tr').click()
 wait("document.querySelector('[data-view=factors] [data-eval-run-detail]')")
 report['business_views']['factor_evaluation']=True
 js("document.querySelector('[data-route=backtest]').click()")
-wait("document.querySelector('#backtest-tab-results')")
-js("document.querySelector('#backtest-tab-results').click()")
-wait("document.querySelector('#backtest-panel-results [data-detail] .metric')")
-report['business_views']['backtest_metrics']=js("document.querySelectorAll('#backtest-panel-results .metric').length")
+wait("document.querySelector('[data-view=backtest] [data-detail] .metric')")
+report['business_views']['backtest_metrics']=js("document.querySelectorAll('[data-view=backtest] .metric').length")
 assert js("document.documentElement.scrollWidth<=innerWidth")
 js("document.querySelector('[data-route=portfolio]').click()")
 wait("document.querySelector('#portfolio-tab-attribution')")

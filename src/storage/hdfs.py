@@ -12,16 +12,20 @@ from paths import workspace
 
 def compose(*args: str, timeout: int = 300, check: bool = True, on_line=None):
     root = workspace().root
+    if args and args[0] == 'up':
+        from storage.cluster_access import prepare_access
+        prepare_access()
+    environment = {**os.environ, 'QUANTLENS_UID': str(os.getuid()), 'QUANTLENS_GID': str(os.getgid())}
     command = ['docker', 'compose', '--env-file', str(root/'docker/versions.env'),
                '-f', str(root/'docker/compose.yaml'), *map(str, args)]
     try:
         if on_line is None:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=environment)
         else:
             import threading
             from collections import deque
             output = deque(maxlen=10000)
-            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1) as process:
+            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=environment) as process:
                 def read_output():
                     for line in process.stdout:
                         output.append(line)

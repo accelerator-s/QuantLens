@@ -180,6 +180,16 @@ def _validate_pair(
     account: Account, profile: ResolvedStrategyProfile, *, require_active_profile: bool
 ) -> None:
     from strategy.models import StrategyStatus  
+    from strategy.account_binding import require_binding
+    require_binding(profile, account.account_id)
+    if profile.extra.get('account_binding'):
+        from strategy.capital_guard import check_account
+        from strategy import StrategyProfileStore
+        check_account(account.account_id, reason='portfolio_recommendation')
+        current = StrategyProfileStore().get(profile.profile_name)
+        if current.extra.get('capital_suspension') or current.status is not StrategyStatus.ACTIVE:
+            raise PortfolioContractError(code='portfolio.strategy_capital_suspended',
+                message='策略因账户资金变化或停用而不可执行，请在策略页面人工重新启用。', blocking=True)
 
     if require_active_profile and profile.status is not StrategyStatus.ACTIVE:
         raise PortfolioContractError(

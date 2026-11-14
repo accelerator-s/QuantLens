@@ -7,6 +7,8 @@ def run(spark, context):
     source = spark.table('ods.industry_classification')
     frame = source.select(F.col('instrument_id').alias('code'), F.to_date('effective_date').alias('effective_date'),
                           'classification_id','industry_code','industry_name')
+    from quantlens.security_master import normalize_industry_identity
+    frame = normalize_industry_identity(frame)
     frame = deduplicate(frame, ['code','classification_id','effective_date']).where('effective_date IS NOT NULL').withColumn('year', F.year('effective_date'))
     publish(spark, lineage(frame, context), 'dwd.industry_pit', ['year'], run=context)
 

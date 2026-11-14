@@ -41,6 +41,7 @@ def session(name):
     builder = SparkSession.builder.appName('QuantLens:'+name)
     if local_mode():
         builder = (builder.master('local[2]').config('spark.sql.shuffle.partitions', '4')
+                   .config('spark.executorEnv.PYTHONPATH', str(Path(__file__).resolve().parents[1]))
                    .config('spark.sql.warehouse.dir', str(workspace().data/'warehouse'/'_catalog'))
                    .config('spark.eventLog.enabled', 'false').config('spark.driver.host', '127.0.0.1'))
     elif not os.environ.get('SPARK_HOME') or not os.path.isdir('/workspace'):

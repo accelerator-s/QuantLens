@@ -77,8 +77,6 @@ export const api = {
   aiMatrix: () => request("GET", "/api/ai/matrix"),
   factorEvolutionModelRecommendations: () =>
     request("GET", "/api/ai/recommendations/factor-evolution"),
-  strategyEvolutionModelRecommendations: () =>
-    request("GET", "/api/ai/recommendations/strategy-evolution"),
   aiSetMatrixTask: (task, payload) =>
     request("POST", `/api/ai/matrix/tasks/${task}`, payload),
   aiDiscussModel: () => request("GET", "/api/ai/discuss-model"),
@@ -91,6 +89,7 @@ export const api = {
   dataUpdateCheck: () => request("GET", "/api/data/update-check"),
   dataSync: (payload) => request("POST", "/api/data/sync", payload),
   activeDataSync: () => request("GET", "/api/data/sync/active"),
+  dataSyncProgress: (id) => request("GET", `/api/data/sync/${id}/progress`),
   dataSnapshots: () => request("GET", "/api/lifecycle/data-snapshots"),
   dataSnapshotCreate: (payload) => request("POST", "/api/lifecycle/data-snapshots", payload),
   lifecycleSummary: () => request("GET", "/api/lifecycle/summary"),
@@ -100,9 +99,7 @@ export const api = {
   researchReportGenerate: (id) => request("POST", `/api/lifecycle/research-programs/${id}/report`, {}),
   researchReportContent: (id) => request("GET", `/api/lifecycle/research-reports/${id}/content`),
   researchReportApprove: (id, payload) => request("POST", `/api/lifecycle/research-reports/${id}/approve`, payload),
-  factorVersionPromote: (id, payload) => request("POST", `/api/lifecycle/factor-versions/${id}/promote`, payload),
-  task: (id) => request("GET", `/api/tasks/${id}`),
-  jobs: () => request("GET", "/api/jobs"),
+  jobs: (params) => request("GET", withQuery("/api/jobs", params)),
 
   
   factors: (params) => request("GET", withQuery("/api/factors", params)),
@@ -112,7 +109,11 @@ export const api = {
   factorRemove: (name, payload) => request("POST", `/api/factors/${name}/remove`, payload),
   factorResearchChat: (payload, options) => requestChat("/api/factors/chat", payload, options),
   factorResearchStart: (payload) => request("POST", "/api/factors/chat/research", payload),
+  factorResearchApprove: (id) => request("POST", `/api/factors/chat/research/${id}/approve`, {}),
+  factorResearchProgress: (id) => request("GET", `/api/factors/chat/research/${id}/progress`),
   factorEvalRuns: (name) => request("GET", `/api/factors/${name}/eval-runs`),
+  factorReviews: (name) => request("GET", `/api/factors/${name}/reviews`),
+  factorReviewGenerate: (name) => request("POST", `/api/factors/${name}/reviews`, {}),
   factorEvalRun: (name, runId) => request("GET", `/api/factors/${name}/eval-runs/${runId}`),
   factorEvalChartUrl: (name, runId, filename) =>
     `/api/factors/${name}/eval-runs/${runId}/charts/${encodeURIComponent(filename)}`,
@@ -120,21 +121,20 @@ export const api = {
   
   strategies: (params) => request("GET", withQuery("/api/strategies", params)),
   strategy: (name) => request("GET", `/api/strategies/${name}`),
-  strategyUpsert: (payload) => request("POST", "/api/strategies", payload),
-  strategyTransition: (name, payload) =>
-    request("POST", `/api/strategies/${name}/transition`, payload),
-  strategyDelete: (name, payload) => request("POST", `/api/strategies/${name}/delete`, payload),
-  strategyChat: (payload, options) => requestChat("/api/strategies/chat", payload, options),
-  strategyChatFinalize: (payload) => request("POST", "/api/strategies/chat/finalize", payload),
-  strategyEvolutions: () => request("GET", "/api/strategy-evolution"),
-  strategyEvolution: (id) => request("GET", `/api/strategy-evolution/${id}`),
-  strategyEvolutionStart: (payload) => request("POST", "/api/strategy-evolution", payload),
-  strategyEvolutionResume: (id) => request("POST", `/api/strategy-evolution/${id}/resume`, {}),
-  championSlots: () => request("GET", "/api/operations/champion-slots"),
-  bootstrapChampion: (id, payload) => request("POST", `/api/operations/strategies/${id}/bootstrap-champion`, payload),
-  proposePromotion: (id) => request("POST", `/api/operations/strategies/${id}/propose-promotion`),
-  proposeRollback: (id, payload) => request("POST", `/api/operations/strategies/${id}/propose-rollback`, payload),
-  approvePromotion: (id, payload) => request("POST", `/api/operations/champion-decisions/${id}/approve`, payload),
+  strategyReviews: (name) => request("GET", `/api/strategies/${name}/reviews`),
+  strategyReviewGenerate: (name) => request("POST", `/api/strategies/${name}/reviews`, {}),
+  strategyResearchModels: () => request("GET", "/api/strategies/research/models"),
+  strategyResearchChat: (payload, options) => requestChat("/api/strategies/research/chat", payload, options),
+  strategyResearchStart: (payload) => request("POST", "/api/strategies/research/start", payload),
+  strategyResearchApprove: (id) => request("POST", `/api/strategies/research/${id}/approve`, {}),
+  strategyResearchProgress: (id) => request("GET", `/api/strategies/research/${id}/progress`),
+  strategyExperiments: () => request("GET", "/api/strategies/experiments"),
+  strategyExperiment: (id) => request("GET", `/api/strategies/experiments/${id}`),
+  strategyOptions: () => request("GET", "/api/strategies/options"),
+  strategyCreate: (payload) => request("POST", "/api/strategies", payload),
+  strategyResearch: (name) => request("POST", `/api/strategies/${name}/research`, {}),
+  strategyStatus: (name, status) => request("PUT", `/api/strategies/${name}/status`, { status }),
+  strategyDelete: (name) => request("DELETE", `/api/strategies/${name}`),
   marketRules: () => request("GET", "/api/market-rules"),
   marketRule: (id) => request("GET", `/api/market-rules/${id}`),
   marketRuleCheckFees: (name, params) =>
@@ -146,6 +146,7 @@ export const api = {
   backtestRuns: (params) => request("GET", withQuery("/api/backtest/runs", params)),
   backtestRun: (id) => request("GET", `/api/backtest/runs/${id}`),
   backtestNav: (id) => request("GET", `/api/backtest/runs/${id}/nav`),
+  backtestReferences: (id) => request("GET", `/api/backtest/runs/${id}/references`),
   backtestTrades: (id, params) =>
     request("GET", withQuery(`/api/backtest/runs/${id}/trades`, params)),
   backtestPositions: (id, params) =>
@@ -160,7 +161,6 @@ export const api = {
     request("GET", withQuery("/api/factor-evolution/locked-tests", params)),
   factorEvolution: (id) => request("GET", `/api/factor-evolution/${id}`),
   factorEvolutionStart: (payload) => request("POST", "/api/factor-evolution", payload),
-  factorEvolutionBatchStart: (payload) => request("POST", "/api/factor-evolution/batch", payload),
   factorEvolutionResume: (id) => request("POST", `/api/factor-evolution/${id}/resume`, {}),
 
   
@@ -168,7 +168,7 @@ export const api = {
   stockSuggestions: (q) => request("GET", withQuery("/api/stocks/suggestions", { q, limit: 20 })),
   accountCreate: (payload) => request("POST", "/api/accounts", payload),
   accountSettings: (id, payload) => request("POST", `/api/accounts/${id}/settings`, payload),
-  backtestStart: (payload) => request("POST", "/api/backtests", payload),
+  backtestStart: (payload) => request("POST", "/api/backtest/runs", payload),
   accountDelete: (id, payload) => request("DELETE", `/api/accounts/${encodeURIComponent(id)}`, payload),
   accountCashSet: (id, payload) => request("POST", `/api/accounts/${id}/cash`, payload),
   holdings: (account) => request("GET", `/api/portfolio/${account}/holdings`),
@@ -181,11 +181,8 @@ export const api = {
   recommendGenerate: (payload) => request("POST", "/api/portfolio/recommend", payload),
 
   
-  proposals: (params) => request("GET", withQuery("/api/proposals", params)),
-  proposal: (id) => request("GET", `/api/proposals/${id}`),
-  proposalTransition: (id, payload) =>
-    request("POST", `/api/proposals/${id}/transition`, payload),
   trashList: (params) => request("GET", withQuery("/api/trash", params)),
+  trashEmpty: (payload) => request("POST", "/api/trash/empty", payload),
   trashCategories: () => request("GET", "/api/trash/categories"),
   trashRestore: (id, payload) => request("POST", `/api/trash/${id}/restore`, payload),
   trashPurge: (id, payload) => request("POST", `/api/trash/${id}/purge`, payload),

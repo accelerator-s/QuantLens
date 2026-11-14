@@ -1,30 +1,3 @@
-.view.backtest-page {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: 12px;
-  align-items: start;
-}
-
-.backtest-page > .section-tabs {
-  grid-column: 1;
-  grid-row: 1;
-  min-width: 0;
-}
-
-.backtest-page > [data-backtest-start] {
-  grid-column: 2;
-  grid-row: 1;
-  display: none;
-}
-
-.backtest-page:has(> .section-tabs > #backtest-tab-results[aria-selected="true"]) > [data-backtest-start] {
-  display: inline-flex;
-}
-
-.backtest-page > .section-panel {
-  grid-column: 1 / -1;
-}
-
 .backtest {
   width: 100%;
   max-width: 1640px;
@@ -83,7 +56,7 @@
 
 .metric-group {
   --metric-color: var(--accent);
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--line-0);
   border-top: 3px solid var(--metric-color);
   border-radius: var(--radius-sm);
@@ -94,20 +67,20 @@
 .metric-group[data-metric-group="risk"] { --metric-color: var(--danger); }
 .metric-group[data-metric-group="orders"] { --metric-color: var(--warn); }
 
-.metric-group > h4 {
-  margin: -10px -12px 10px;
-  padding: 8px 12px;
+.backtest .metric-group > h4 {
+  margin: -8px -10px 8px;
+  padding: 6px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--metric-color) 15%, var(--line-0));
   background: color-mix(in srgb, var(--metric-color) 9%, var(--bg-1));
-  font-size: var(--fs-xs);
+  font-size: var(--text-module);
   font-weight: 600;
   color: var(--metric-color);
 }
 
 .metric-group__items {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
 }
 
 .metric {
@@ -115,18 +88,24 @@
   flex-direction: column;
 }
 
-.metric__label {
-  font-size: var(--fs-xs);
+.backtest .metric__label {
+  font-size: var(--text-caption);
+  line-height: 1.4;
   color: var(--ink-2);
 }
 
-.metric__value {
+.backtest .metric__value {
   margin-top: 2px;
-  font-size: var(--fs-md);
+  font-size: var(--text-section);
   font-weight: 600;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
+
+.backtest .metric__value.is-positive { color: var(--up); }
+.backtest .metric__value.is-negative { color: var(--down); }
 
 .heatmap {
   display: grid;
@@ -157,8 +136,21 @@
 }
 
 .backtest__date-select {
+  width: 180px;
   min-width: 170px;
+  max-width: 100%;
+  margin-left: auto;
 }
+
+.backtest__positions { width: 100%; max-width: 100%; }
+.backtest__positions .table :is(th, td) { white-space: nowrap; }
+.backtest__positions .table th:nth-child(1) { width: 30%; }
+.backtest__positions .table th:nth-child(2) { width: 16%; }
+.backtest__positions .table th:nth-child(3) { width: 28%; }
+.backtest__positions .table th:nth-child(4) { width: 26%; }
+.backtest__stock { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.backtest__stock-code { color: var(--ink-2); font: inherit; }
+.backtest__snapshot-note { margin: 0 0 8px; }
 
 .backtest .split > .backtest__runs {
   display: block;
@@ -200,9 +192,12 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: stretch;
   margin: 0;
+  gap: 8px;
 }
 
-.backtest__metric-window { margin: 0; }
+.backtest .backtest__metrics { padding: 12px; gap: 10px; }
+.backtest .backtest__metrics > h3 { font-size: var(--text-section); }
+.backtest .backtest__metric-window { margin: 0; font-size: var(--text-table); line-height: 1.4; }
 .metric[data-metric="max_drawdown"] .metric__value { color: var(--danger); }
 .metric[data-metric="annualized_cost_drag"] .metric__value,
 .metric[data-metric="total_cost_paid"] .metric__value { color: var(--warn); }
@@ -235,3 +230,63 @@
 .backtest__run-items { display: grid; gap: 6px; min-width: 0; }
 .backtest__run-items .item-row { height: auto; align-items: stretch; text-align: left; }
 .backtest__run-items .item-row__title { white-space: normal; overflow-wrap: anywhere; }
+
+/* Each row fills the available width, including the last row. */
+.backtest__summary.kv {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.backtest__summary.kv > .kv__row { flex: 1 1 180px; }
+.backtest__summary.kv > .kv__row:nth-child(-n+2) { flex-basis: calc(50% - 4px); }
+.backtest__factor-summary,
+.backtest__detail .backtest__factor-badge {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.backtest__detail .backtest__factor-badge { max-width: min(100%, 240px); }
+.backtest__detail .detail-card__head > .run-id { flex: 1 1 180px; }
+@container workspace (max-width: 1080px) {
+  .backtest .metric-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container workspace (max-width: 540px) {
+  .backtest .metric-groups { grid-template-columns: minmax(0, 1fr); }
+  .backtest__summary.kv > .kv__row { flex-basis: 140px; }
+  .backtest__summary.kv > .kv__row:nth-child(-n+2) { flex-basis: 100%; }
+}
+.backtest__comparison-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.backtest__comparison-head h3 { margin: 0; font-size: var(--fs-md); }
+.backtest__comparison-heading { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.backtest__curve-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; min-width: 0; }
+.backtest__curve-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  margin: 0;
+  line-height: 1.4;
+  font-size: var(--text-table);
+  cursor: pointer;
+}
+.backtest__curve-toggle input { width: 14px; height: 14px; margin: 0; flex: none; accent-color: var(--accent); }
+.backtest__curve-toggle:has(input:disabled) { opacity: .6; cursor: default; }
+.backtest__curve-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.backtest__legend-marker {
+  width: 14px;
+  height: 3px;
+  flex: none;
+}
+.backtest__comparison { gap: 6px; }
+.backtest__index-note { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.backtest__index-stats { color: var(--ink-1); font-variant-numeric: tabular-nums; }
+.backtest__comparison-plot { min-width: 0; }
+.backtest__curves-empty { margin: 0; padding: 20px 0; text-align: center; }

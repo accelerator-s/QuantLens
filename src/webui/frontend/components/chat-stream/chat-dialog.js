@@ -1,4 +1,5 @@
 import { el } from "../../core/dom.js";
+import { pageScale } from "../../core/layout.js";
 
 function bindHistoryResize(dialog, historyHost, divider, backdrop) {
   let width = 228, drag = null;
@@ -25,12 +26,12 @@ function bindHistoryResize(dialog, historyHost, divider, backdrop) {
     if (event.button !== 0 || drag || !desktop.matches) return;
     event.preventDefault();
     divider.focus({ preventScroll: true });
-    drag = { pointerId: event.pointerId, x: event.clientX, width: historyHost.getBoundingClientRect().width };
+    drag = { pointerId: event.pointerId, x: event.clientX, width: historyHost.offsetWidth };
     divider.setPointerCapture(event.pointerId);
     backdrop.classList.add("is-resizing");
   });
   divider.addEventListener("pointermove", event => {
-    if (drag?.pointerId === event.pointerId) update(drag.width + event.clientX - drag.x);
+    if (drag?.pointerId === event.pointerId) update(drag.width + (event.clientX - drag.x) / pageScale());
   });
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
     divider.addEventListener(type, event => { if (drag?.pointerId === event.pointerId) stopDrag(); });
@@ -100,8 +101,9 @@ export function createChatDialog({ title, description = "", history = false, onC
   // visualViewport accounts for mobile keyboards as well as browser chrome.
   const viewport = window.visualViewport;
   function fitViewport() {
-    backdrop.style.height = `${viewport?.height || window.innerHeight}px`;
-    backdrop.style.top = `${viewport?.offsetTop || 0}px`;
+    const scale = pageScale();
+    backdrop.style.height = `${(viewport?.height || window.innerHeight) / scale}px`;
+    backdrop.style.top = `${(viewport?.offsetTop || 0) / scale}px`;
   }
   fitViewport();
   viewport?.addEventListener("resize", fitViewport);

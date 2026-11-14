@@ -207,7 +207,7 @@ def update_account_settings(account_id: str, payload: AccountSettingsPayload) ->
 
 @router.delete("/accounts/{account_id}")
 def delete_account(account_id: str, payload: ConfirmPayload) -> dict:
-    from portfolio.transaction import lock, transaction
+    from portfolio.transaction import lock
     with lock:
         registry = AccountRegistry()
         account = registry.get(account_id)
@@ -216,35 +216,9 @@ def delete_account(account_id: str, payload: ConfirmPayload) -> dict:
                 {
                     "操作": "删除账户",
                     "账户": account.alias or account.account_id,
-                    "删除范围": "账户资料、持仓、成交、快照和账户计划。",
-                    "说明": "删除后从账户列表和每日调度中移除，未完成计划失效。账户数据移入回收站保留。",
                 }
             )
-        from automation import AutomationStore
-        from lifecycle.models import ObjectType
-        from lifecycle.states import ActorType
-        from lifecycle.store import LifecycleStore
-
-        lifecycle = LifecycleStore()
-        transitions = []
-        for row in lifecycle.list_objects(ObjectType.PORTFOLIO_PLAN, limit=5000):
-            if row["state"] in {"proposed", "confirmed", "active", "partially_executed"}:
-                plan = lifecycle.get(ObjectType.PORTFOLIO_PLAN, row["object_id"])
-                if account_id in plan.account_ids:
-                    transitions.append({"object_type": ObjectType.PORTFOLIO_PLAN,
-                                        "object_id": row["object_id"], "target": "expired",
-                                        "actor_type": ActorType.SYSTEM, "actor_ref": "account_delete",
-                                        "reason": "账户已删除"})
-        if transitions:
-            lifecycle.transition_batch(transitions)
-        automation = AutomationStore()
-        config = automation.load()
-        with transaction([automation.path]):
-            if account_id in config.account_ids:
-                remaining = [value for value in config.account_ids if value != account_id]
-                automation.save(config.model_copy(update={"account_ids": remaining,
-                                                         "enabled": config.enabled and bool(remaining)}))
-            registry.delete(account_id, confirm=True)
+        registry.delete(account_id, confirm=True)
         return {"deleted": account_id}
 
 class AccountCashPayload(BaseModel):

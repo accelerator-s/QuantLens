@@ -55,6 +55,9 @@ class RuleEngine:
         self,
         prev_close: Decimal,
         special_condition: str = "",
+        *,
+        as_of: date | None = None,
+        instrument: str = "",
     ) -> tuple[Decimal, Decimal]:
         
         pl = self.rule.price_limit
@@ -62,6 +65,13 @@ class RuleEngine:
             return Decimal("0"), Decimal("Infinity")
 
         pct = self._resolve_limit_pct(pl, special_condition)
+        if as_of is not None and special_condition.startswith('创业板'):
+            if as_of < date(2020, 8, 24):
+                pct = Decimal('10')
+            elif instrument in {'300216','300156','300090'}:
+                # These three stocks retained 10% limits throughout their
+                # existing delisting period after the 2020 reform.
+                pct = Decimal('10')
         factor = pct / Decimal("100")
         upper = (prev_close * (1 + factor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         lower = (prev_close * (1 - factor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -86,6 +96,8 @@ class RuleEngine:
         direction: str,
         *,
         commission_override: Decimal | None = None,
+        as_of: date | None = None,
+        instrument: str = "",
     ) -> FeeBreakdown:
         
         items: list[FeeBreakdownItem] = []
@@ -93,6 +105,12 @@ class RuleEngine:
             if not self._direction_matches(fee.direction, direction):
                 continue
             rate = fee.rate
+            if as_of is not None and fee.name == '过户费':
+                if as_of < date(2015, 8, 1):
+                    raise ValueError('历史过户费数据只覆盖2015-08-01及以后，请补充更早的分市场费率。')
+                rate = (Decimal('0.00001') if as_of >= date(2022, 4, 29)
+                        else Decimal('0.000025') if instrument.startswith(('43','83','87','92'))
+                        else Decimal('0.00002'))
             if commission_override is not None and fee.name == "佣金":
                 rate = commission_override
             raw = (amount * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -103,13 +121,18 @@ class RuleEngine:
             items.append(FeeBreakdownItem(name=fee.name, amount=raw, notes=fee.notes))
         return FeeBreakdown(items=items)
 
-    def calculate_taxes(self, amount: Decimal, direction: str) -> FeeBreakdown:
+    def calculate_taxes(self, amount: Decimal, direction: str, *, as_of: date | None = None) -> FeeBreakdown:
         
         items: list[FeeBreakdownItem] = []
         for tax in self.rule.taxes.items:
             if not self._direction_matches(tax.direction, direction):
                 continue
-            raw = (amount * tax.rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            rate = tax.rate
+            if as_of is not None and tax.name == '印花税':
+                if as_of < date(2008, 9, 19):
+                    raise ValueError('历史印花税数据只覆盖2008-09-19及以后，请补充更早费率。')
+                rate = Decimal('0.0005') if as_of >= date(2023, 8, 28) else Decimal('0.001')
+            raw = (amount * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             items.append(FeeBreakdownItem(name=tax.name, amount=raw, notes=tax.notes))
         return FeeBreakdown(items=items)
 
@@ -119,10 +142,13 @@ class RuleEngine:
         direction: str,
         *,
         commission_override: Decimal | None = None,
+        as_of: date | None = None,
+        instrument: str = "",
     ) -> FeeBreakdown:
         
-        fees = self.calculate_fees(amount, direction, commission_override=commission_override)
-        taxes = self.calculate_taxes(amount, direction)
+        fees = self.calculate_fees(amount, direction, commission_override=commission_override,
+                                   as_of=as_of, instrument=instrument)
+        taxes = self.calculate_taxes(amount, direction, as_of=as_of)
         return FeeBreakdown(items=[*fees.items, *taxes.items])
 
     # -- 交易单位 --

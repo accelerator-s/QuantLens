@@ -41,11 +41,12 @@ def construct(candidates, constraints=Constraints(), *, breadth=None, regime=Non
         if col in frame: allowed &= frame[col].fillna(False).astype(bool)
     for col in ['is_suspended','limit_up','is_delisting']:
         if col in frame: allowed &= ~frame[col].fillna(True).astype(bool)
-    # Unknown classifications are one conservative group, never unconstrained.
+    frame=frame.loc[allowed & np.isfinite(frame.score)].copy()
     for col in ['cluster_id','industry_code']:
-        if col not in frame: frame[col]='unknown'
-        frame[col]=frame[col].fillna('unknown').astype(str)
-    frame=frame.loc[allowed & np.isfinite(frame.score)].sort_values(['score','code'],ascending=[False,True],kind='stable').head(constraints.max_positions).copy()
+        if col not in frame or frame[col].isna().any():
+            raise ValueError(f'候选缺少完整的 {col}；请修复分类数据接口。')
+        frame[col]=frame[col].astype(str)
+    frame=frame.sort_values(['score','code'],ascending=[False,True],kind='stable').head(constraints.max_positions).copy()
     frame['weight']=0.0
     budget=1-constraints.cash_reserve
     if frame.empty: return frame

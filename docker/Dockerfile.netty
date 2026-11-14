@@ -1,0 +1,11 @@
+# Rebuild Apache's relocation package with the patched Netty dependency.
+FROM maven:3.9.12-eclipse-temurin-21 AS build
+WORKDIR /source
+RUN curl -fsSL https://codeload.github.com/apache/hbase-thirdparty/tar.gz/ff313b4f4e20e3c2f12a7feb9c617d049cf2006b -o /tmp/source.tar.gz && \
+    echo '766d6f2eb586c72728459eec29b987c004fbb0bc4e3aa04fa05fd6312519ce3d  /tmp/source.tar.gz' | sha256sum -c - && \
+    tar -xzf /tmp/source.tar.gz --strip-components=1 && rm /tmp/source.tar.gz
+RUN echo "<toolchains><toolchain><type>jdk</type><provides><version>21</version></provides><configuration><jdkHome>${JAVA_HOME}</jdkHome></configuration></toolchain></toolchains>" > /tmp/toolchains.xml && \
+    mvn -B -t /tmp/toolchains.xml -pl hbase-shaded-netty -am \
+        -Dtoolchain.jdk.version=21 -Dnetty.version=4.1.137.Final -DskipTests package
+FROM scratch
+COPY --from=build /source/hbase-shaded-netty/target/hbase-shaded-netty-4.1.14.jar /hbase-shaded-netty.jar

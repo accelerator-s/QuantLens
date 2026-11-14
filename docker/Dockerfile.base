@@ -1,13 +1,14 @@
 ARG UBUNTU_VERSION=22.04
 FROM ubuntu:${UBUNTU_VERSION}
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg software-properties-common procps netcat-openbsd tini && \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg software-properties-common procps netcat-openbsd tini libseccomp2 && \
     mkdir -p /etc/apt/keyrings && curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg && \
     echo 'deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb jammy main' > /etc/apt/sources.list.d/adoptium.list && \
     add-apt-repository -y ppa:deadsnakes/ppa && apt-get update && \
-    apt-get install -y --no-install-recommends temurin-8-jdk temurin-17-jdk python3.12 python3.12-venv && \
+    apt-get install -y --no-install-recommends temurin-8-jdk temurin-17-jdk temurin-21-jdk python3.12 python3.12-venv && \
     ln -s /usr/lib/jvm/temurin-8-jdk-$(dpkg --print-architecture) /usr/lib/jvm/java-8 && \
     ln -s /usr/lib/jvm/temurin-17-jdk-$(dpkg --print-architecture) /usr/lib/jvm/java-17 && \
+    ln -s /usr/lib/jvm/temurin-21-jdk-$(dpkg --print-architecture) /usr/lib/jvm/java-21 && \
     python3.12 -m venv /opt/python && rm -rf /var/lib/apt/lists/*
 ARG PANDAS_VERSION=3.0.3
 ARG NUMPY_VERSION=2.4.6
@@ -16,3 +17,4 @@ RUN /opt/python/bin/pip install --no-cache-dir pandas==${PANDAS_VERSION} numpy==
     ln -sf /opt/python/bin/python /usr/bin/python3
 ENV JAVA_HOME=/usr/lib/jvm/java-8 PYTHONPATH=/workspace/src:/workspace PYSPARK_PYTHON=/usr/bin/python3
 ENTRYPOINT ["/usr/bin/tini", "--"]
+COPY docker/install_archive.py /opt/quantlens/install_archive.py

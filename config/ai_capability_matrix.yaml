@@ -10,6 +10,16 @@ tags:
 - risk_aware
 - web_browsing
 tasks:
+- task: market_reference_selection
+  description: 按投资范围选择用于图表展示的整体市场参照
+  required_tags: [structured_output, reasoning_high]
+  optional_tags: [risk_aware, long_context]
+  permitted_executors: [api_model]
+- task: benchmark_selection
+  description: 回测前选择并冻结收益基准及整体市场参照
+  required_tags: [structured_output, reasoning_high]
+  optional_tags: [risk_aware, long_context]
+  permitted_executors: [api_model]
 - task: factor_candidate
   description: 因子候选生成
   required_tags:

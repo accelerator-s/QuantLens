@@ -1,0 +1,11 @@
+profile_name: research_fundamental_value_quality
+display_name: 财务价值质量研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items:
+  - name: fundamental_value_quality
+extra:
+  purpose: factor_research_only
+  internal_only: true

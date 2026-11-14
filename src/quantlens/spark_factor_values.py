@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from exceptions import ContractViolation
 from factors.registry import FactorRegistry
+from factors.sandbox import execute_factor
 from quantlens.warehouse import job, lineage, publish
 
 
@@ -22,9 +23,7 @@ def run_window(data, source, dependencies):
     data = data.copy()
     data['date'] = pd.to_datetime(data['date'])
     panel = {dep:data.pivot(index='date',columns='code',values=dep).sort_index() for dep in dependencies}
-    namespace = {}
-    exec(compile(source, '<factor>', 'exec'), namespace)
-    value = namespace['compute'](panel)
+    value = execute_factor(source, panel)
     if not isinstance(value,pd.DataFrame): raise TypeError('compute(panel) must return a DataFrame')
     start,end = pd.to_datetime(data['_output_start'].iloc[0]),pd.to_datetime(data['_output_end'].iloc[0])
     value = value.loc[(value.index>=start)&(value.index<=end)]
@@ -52,7 +51,7 @@ def run(spark, context, names=None, start=None, end=None):
     dates = [r.date for r in spark.table('dwd.prices_clean').select('date').distinct().orderBy('date').collect()]
     instruments = spark.table('dwd.prices_clean').select('code').distinct().count()
     results,failures = [],[]
-    for meta in FactorRegistry().list():
+    for meta in FactorRegistry().list(include_research=bool(names)):
         if meta.name == 'model_gbt' or (names and meta.name not in names): continue
         print('QUANTLENS_FACTOR='+meta.name,flush=True)
         inputs=None

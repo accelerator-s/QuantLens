@@ -5,7 +5,7 @@ import re
 from datetime import date, timedelta
 
 import pandas as pd
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai.router import AIRouter
@@ -38,7 +38,7 @@ _DISCUSSION_SYSTEM = """\
 用户没有技术偏好时，直接给出一个保守的建议假设并说明理由。
 不得询问代码、公式、YAML、JSON、数据字段、面板、缩尾、标准化、中性化或回测参数，
 也不得向用户展示这些内部内容。信息足够时，用通俗语言总结现象、逻辑链、
-预期持有期和失效条件，然后提示用户点击“开始自动研究”。
+预期持有期和失效条件，然后提示用户点击“生成候选”。
 不得承诺收益，不得声称一个未评价的因子可以稳定盈利。
 """
 
@@ -204,7 +204,6 @@ def _register_draft(candidate: FactorCandidate) -> tuple[str, str]:
         standardization=list(candidate.standardization),
         missing_handling=candidate.missing_handling,
         ai_generated=True,
-        production_permission=False,
         risk_notes=(
             "该因子由 AI 根据金融现象生成，尚未获得实盘权限。"
             + (f"模型自评：{candidate.rationale}" if candidate.rationale else "")
@@ -323,9 +322,7 @@ def start_factor_chat_research(payload: FactorChatPayload) -> dict:
         proposal_id, profile_name = _register_draft(candidate)
         report("候选已作为不可直接交易的研究版本登记。")
 
-        report.progress({"state": "running", "step": "启动自动评价与迭代", "percent": 90.0})
-        evolution = start_factor_evolution(candidate.factor_name, model_name=selected.name)
-        report("已启动训练、滚动验证、父版本对比与失效风险检查。")
+        report.progress({"state": "running", "step": "候选已就绪，等待启动实验", "percent": 100.0})
         return json_safe(
             {
                 "factor_name": candidate.factor_name,
@@ -333,14 +330,31 @@ def start_factor_chat_research(payload: FactorChatPayload) -> dict:
                 "assumption": candidate.assumption,
                 "proposal_id": proposal_id,
                 "profile_name": profile_name,
-                "research_id": evolution["research_id"],
-                "evolution_task_id": evolution["task_id"],
-                "program_id": evolution["program_id"],
-                "status": "已进入自动评价与迭代",
+                "model": selected.name,
+                "approval_status": "pending",
             }
         )
 
     task_id = manager.start("新因子自动研究", run, resource="factor-ai-research")
     return {"task_id": task_id, "model": selected.name}
+
+@router.post("/factors/chat/research/{task_id}/approve")
+def approve_factor_chat_research(task_id: str) -> dict:
+    factor_research_progress(task_id)
+
+    def start(result: dict) -> dict:
+        evolution = start_factor_evolution(result["factor_name"], model_name=result["model"])
+        return {"research_id": evolution["research_id"], "evolution_task_id": evolution["task_id"],
+                "program_id": evolution["program_id"]}
+
+    return json_safe(manager.approve_result(task_id, resource="factor-ai-research", start=start))
+
+@router.get("/factors/chat/research/{task_id}/progress")
+def factor_research_progress(task_id: str) -> dict:
+    task = manager.get(task_id)
+    if task.get("resource") != "factor-ai-research":
+        raise HTTPException(status_code=404, detail="未找到候选生成任务")
+    return {key: task.get(key) for key in
+            ("task_id", "status", "progress", "log", "error", "result")}
 
 __all__ = ["router"]

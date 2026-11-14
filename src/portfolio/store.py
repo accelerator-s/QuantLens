@@ -74,6 +74,8 @@ class PortfolioStore:
         tmp = target.with_suffix(".tmp")
         df.to_parquet(tmp, index=False)
         tmp.replace(target)
+        from strategy.capital_guard import on_mutation
+        on_mutation(account_id)
         return target
 
     def append_trades(

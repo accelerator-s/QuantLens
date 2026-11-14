@@ -1,0 +1,124 @@
+// Isolated browser regression: polling must preserve an expanded factor evaluation.
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {spawn} from 'node:child_process';
+import {readFile, mkdir, writeFile, mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {setTimeout as delay} from 'node:timers/promises';
+
+const root = fileURLToPath(new URL('../../src/webui/frontend/', import.meta.url));
+const output = await mkdtemp(join(tmpdir(), 'quantlens-factor-eval-'));
+const index = await readFile(join(root, 'index.html'), 'utf8');
+const styles = [...index.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(m => `<link rel="stylesheet" href="${m[1]}">`).join('');
+const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${styles}</head><body><main class="workspace"><section class="view"></section></main><script type="module">
+import {mount} from '/components/factors/factors.js';
+window.polls=[];window.listReads=0;window.failList=false;window.holdFirst=false;window.events=[];window.handlers={};
+const nativeTimeout=window.setTimeout;
+window.setTimeout=(fn,ms,...args)=>ms===15000?(polls.push(fn),-polls.length):nativeTimeout(fn,ms,...args);
+const items=[{name:'alpha',display_name:'低波动防御因子',status:'draft',timescale:'daily'},{name:'beta',display_name:'质量因子',status:'active',timescale:'daily'},{name:'disabled',display_name:'停用因子',status:'disabled',timescale:'daily'}];
+const runs=[{run_id:'daily-20261112T155226-8d352361',state:'completed',period:'2022-01-04 ~ 2026-11-11',primary_horizon:5,ic_mean:-.0682,icir_annualized:-4.730},{run_id:'daily-20261113T155226-8d352362',state:'completed',period:'2022-01-04 ~ 2026-11-12',primary_horizon:5,ic_mean:.025,icir_annualized:1.234}];
+window.runIds=runs.map(r=>r.run_id);window.clearRuns=()=>{runs.length=0};
+const evaluation=id=>({metrics:{direction:'negative',labels:{strict:{variants:{raw:{ic:{ic_mean:id===runs[0].run_id?-.0682:.025,icir_annualized:-4.730,n_valid_days:123},yearly_ic:[{year:2025,ic_mean:-.06}],groups:{g5:{long_short:{annualized_return:.12,max_drawdown:-.15,avg_daily_turnover_oneside:.03}}}}}}}},charts:[]});
+window.reviewCalls=0;window.reviewFail=false;window.reviewTask='';
+window.reviewRecords=[{review_id:'REV-old',model_name:'research-model',created_at:'2026-11-14T10:00:00Z',scope:'训练期候选复盘',version:'v1',source_id:'EVO-1',conclusion:'模型保留的历史复盘',risks:[],next_steps:[]}];
+const reviewApi={factorReviews:async()=>({items:reviewRecords,task:reviewTask?{status:reviewTask,error:reviewTask==='failed'?'模型连接失败':''}:null}),factorReviewGenerate:async()=>{reviewCalls++;reviewTask='running';nativeTimeout(()=>{if(reviewFail){reviewTask='failed';return}reviewRecords.unshift({...reviewRecords[0],review_id:'REV-new',scope:'已发布因子评价',conclusion:'模型生成的新结论 <img src=x onerror=alert(1)>',created_at:'2026-11-15T10:00:00Z'});reviewTask='completed'},80);return {task_id:'review-task'}}};
+const api={...reviewApi,factors:async()=>({items,statuses:['draft','active','disabled']}),factor:async name=>({factor:{...items.find(i=>i.name===name),version:'v1.0.0',last_evaluated_at:'2026-11-13T07:52:00Z',updated_at:'2026-11-14T02:16:00Z',assumption:'检验较低历史波动是否能预测未来收益，并在不同市场环境下比较其稳定性。使用历史数据构建信号，通过样本外评价验证收益与风险。',direction:'negative',applicable_markets:['CN-A'],applicable_instruments:['股票']}}),factorEvalRuns:async()=>{listReads++;if(failList)throw Error('暂时不可用');return {items:runs}},factorEvalRun:async(name,id)=>{if(holdFirst&&id===runs[0].run_id)return new Promise(resolve=>window.releaseFirst=()=>resolve(evaluation(id)));return evaluation(id)}};
+const bus={on(type,fn){(handlers[type]??=[]).push(fn)},emit(type,value){events.push([type,value])}};
+window.refreshFactor=()=>handlers.route?.forEach(fn=>fn('factors'));
+const host=document.querySelector('.view');host.innerHTML=await(await fetch('/components/factors/factors.html')).text();
+await mount(host,{api,bus,tabState:{}});window.ready=true;
+</script></body></html>`;
+const server=createServer(async(req,res)=>{
+  try{
+    const path=new URL(req.url,'http://localhost').pathname;
+    res.setHeader('Content-Type',path.endsWith('.css')?'text/css':path.endsWith('.js')?'text/javascript':'text/html; charset=utf-8');
+    res.end(path==='/'?html:await readFile(join(root,path)));
+  }catch{res.writeHead(404);res.end()}
+});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const browser=spawn(process.env.QUANTLENS_CHROME_BIN||'google-chrome',['--headless=new','--no-sandbox','--disable-gpu','--remote-debugging-port=0',`--user-data-dir=${join(output,'browser')}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
+let socket;
+try{
+  const endpoint=await new Promise((resolve,reject)=>{let log='';const timer=setTimeout(()=>reject(Error(log)),10000);browser.stderr.on('data',chunk=>{log+=chunk;const match=log.match(/DevTools listening on (ws:\/\/\S+)/);if(match){clearTimeout(timer);resolve(match[1])}});browser.once('error',reject)});
+  const target=await(await fetch(`http://127.0.0.1:${new URL(endpoint).port}/json/new?about:blank`,{method:'PUT'})).json();
+  socket=new WebSocket(target.webSocketDebuggerUrl);await new Promise(r=>socket.onopen=r);
+  let serial=0;const pending=new Map(),exceptions=[];
+  socket.onmessage=e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result)}};
+  const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++serial;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}))});
+  const js=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});assert(!r.exceptionDetails,JSON.stringify(r.exceptionDetails));return r.result.value};
+  async function wait(expression){for(let i=0;i<100;i++){if(await js(expression))return;await delay(30)}throw Error('Timed out: '+expression)}
+  const click=selector=>js(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const detail='.factors__eval-detail';
+  await call('Runtime.enable');await call('Page.enable');
+  await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await call('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`});
+  await wait("window.ready&&document.querySelectorAll('[data-eval-run]').length===2&&polls.length");
+  await wait("document.querySelector('.model-reviews__conclusion')?.textContent==='模型保留的历史复盘'");
+  assert.equal(await js('reviewCalls'),0);
+  assert(await js("[...document.querySelectorAll('.factors .badge--accent')].filter(e=>e.textContent==='研究中').length===2"));
+  await click('.model-reviews__head button');
+  await wait("document.querySelector('.model-reviews__head button').disabled");
+  await wait("document.querySelector('.model-reviews__conclusion')?.textContent.includes('模型生成的新结论')");
+  assert(await js("document.querySelector('.model-reviews__entry').textContent.includes('research-model')&&!document.querySelector('.model-reviews img')&&document.querySelector('.model-reviews__history').textContent.includes('模型保留的历史复盘')"));
+  await js('reviewFail=true');await click('.model-reviews__head button');
+  await wait("document.querySelector('.model-reviews [role=status]').textContent.includes('模型连接失败')");
+  assert(await js("document.querySelector('.model-reviews__conclusion').textContent.includes('模型生成的新结论')&&!document.querySelector('.model-reviews__head button').disabled"));
+  assert.equal(await js(`!!document.querySelector('${detail}')`),false);
+  assert.deepEqual(await js("[...document.querySelectorAll('[data-status-select] [role=option]')].map(e=>e.dataset.value)"),['__all__','draft','active','disabled']);
+  assert.deepEqual(await js("[...document.querySelectorAll('.factors__actions button')].map(e=>e.textContent)"),['转为已启用','转为已停止','删除']);
+  assert.equal(await js("(async()=> (await import('/core/labels.js')).labelText('eliminated'))()"),'未采用');
+  await click('[data-eval-run]');await wait(`document.querySelector('${detail}')?.innerText.includes('-0.0682')`);
+  await js(`window.originalDetail=document.querySelector('${detail}');document.querySelector('[data-eval-run]').focus()`);
+  for(let i=0;i<3;i++)await js('polls.shift()()');
+  assert(await js(`originalDetail===document.querySelector('${detail}')&&!originalDetail.hidden&&document.querySelector('[data-eval-run]').getAttribute('aria-expanded')==='true'`));
+  assert.equal(await js('listReads'),4);
+  assert(await js("document.activeElement.dataset.evalRun===runIds[0]"));
+  await js('failList=true;polls.shift()()');
+  assert(await js(`!originalDetail.hidden&&document.querySelector('.factors__eval-error')&&originalDetail.innerText.includes('-0.0682')`));
+  await js('failList=false;polls.shift()()');
+  assert.equal(await js("!!document.querySelector('.factors__eval-error')"),false);
+  await click('.factors__eval-heading button');await js('polls.shift()()');
+  assert(await js('originalDetail.hidden'));
+  await js("document.querySelector('[data-eval-run]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
+  await wait("!originalDetail.hidden&&originalDetail.innerText.includes('-0.0682')");
+  await js(`holdFirst=true;document.querySelector('[data-eval-run]').click()`);await wait('!!window.releaseFirst');
+  await click('[data-eval-run]:nth-child(2)');await wait(`document.querySelector('${detail}').innerText.includes('0.0250')`);
+  await js('releaseFirst()');await delay(50);
+  assert(await js(`document.querySelector('${detail}').innerText.includes('0.0250')&&!document.querySelector('${detail}').innerText.includes('-0.0682')`));
+  await js('holdFirst=false');
+  await click('[data-name=beta]');await wait("document.querySelector('[data-name=beta]').classList.contains('is-active')&&document.querySelectorAll('[data-eval-run]').length===2");
+  await click('[data-name=alpha]');await wait(`document.querySelector('${detail}')?.innerText.includes('0.0250')`);
+  await js('refreshFactor()');await wait(`document.querySelector('${detail}')?.innerText.includes('0.0250')`);
+  await click('.model-reviews__history summary');
+  for(const theme of ['light','dark'])for(const width of [1440,1024,768,390,320]){
+    await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
+    await js(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);await delay(80);
+    const layout=await js(`(()=>{const d=document.querySelector('${detail}'),m=d.querySelector('.factors__eval-metrics'),row=document.querySelector('.factors__eval-runs tbody tr'),r=d.getBoundingClientRect();return {left:r.left,right:r.right,columns:getComputedStyle(m).gridTemplateColumns.split(' ').length,rowHeight:row.getBoundingClientRect().height,minCell:Math.min(...[...m.children].map(e=>e.getBoundingClientRect().width)),overflow:d.scrollWidth>d.clientWidth,tableScroll:document.querySelector('.factors__eval-runs .table-wrap').scrollWidth>document.querySelector('.factors__eval-runs .table-wrap').clientWidth}})()`);
+    assert(layout.left>=0&&layout.right<=width&&!layout.overflow,JSON.stringify(layout));
+    assert.equal(layout.columns,width===1440?4:width>=768?2:1);
+    assert(layout.minCell>=180&&layout.rowHeight>=40,JSON.stringify(layout));
+    if(width===390)assert(layout.tableScroll);
+    const facts=await js(`(()=>{const c=document.querySelector('.factors__detail'),a=c.querySelector('.factors__facts'),p=c.querySelector('.factors__hypothesis .kv__val'),r=a.getBoundingClientRect(),lines=new Map();for(const e of a.children){const b=e.getBoundingClientRect(),y=Math.round(b.top);if(!lines.has(y))lines.set(y,[]);lines.get(y).push(b)}return {labels:[...c.querySelectorAll('.factors__hypothesis .kv__key,.factors__facts .kv__key')].map(e=>e.textContent),lines:lines.size,filled:[...lines.values()].every(line=>Math.abs(line[0].left-r.left)<2&&Math.abs(line.at(-1).right-r.right)<2),cards:[...a.children].every(e=>parseFloat(getComputedStyle(e).borderTopWidth)>0),overflow:a.scrollWidth>a.clientWidth,weight:getComputedStyle(p).fontWeight,maxHeight:Math.max(...[...a.children].map(e=>e.getBoundingClientRect().height))}})()`);
+    assert.deepEqual(facts.labels,['核心假设','时间尺度','当前版本','方向','最近评估','更新时间']);
+    assert.equal(facts.lines,width<=390?5:width===768?2:1);
+    assert(facts.filled&&facts.cards&&!facts.overflow&&facts.weight==='400'&&facts.maxHeight<=72,JSON.stringify(facts));
+    assert(await js(`(()=>{const h=document.querySelector('.factors__detail .research-detail__head'),t=h.querySelector('.research-detail__title').getBoundingClientRect(),a=h.querySelector('.factors__controls').getBoundingClientRect();return h.querySelectorAll('button').length===4&&h.scrollWidth<=h.clientWidth&&(window.innerWidth<=390?a.top>=t.bottom:t.right<=a.left)})()`));
+    assert(await js("(()=>{const r=document.querySelector('.factors__reviews'),e=r.querySelector('.model-reviews__history-list .model-reviews__entry');return r.parentElement===document.querySelector('.factors__detail').parentElement&&r.scrollWidth<=r.clientWidth&&getComputedStyle(e).borderTopStyle==='none'&&r.querySelector('details').open})()"));
+    await js("document.querySelector('.factors__detail').scrollIntoView({block:'start'})");
+    const overview=await call('Page.captureScreenshot',{format:'png'});await writeFile(join(output,`factor-info-${width}-${theme}.png`),Buffer.from(overview.data,'base64'));
+    await js("document.querySelector('.factors__reviews').scrollIntoView({block:'start'})");
+    const reviews=await call('Page.captureScreenshot',{format:'png'});await writeFile(join(output,`reviews-${width}-${theme}.png`),Buffer.from(reviews.data,'base64'));
+    await js(`document.querySelector('${detail}').scrollIntoView({block:'start'})`);
+    const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(join(output,`evaluation-${width}-${theme}.png`),Buffer.from(shot.data,'base64'));
+  }
+  await click('[data-name=disabled]');await wait("document.querySelector('.factors__detail h3')?.textContent==='停用因子'");
+  assert.deepEqual(await js("[...document.querySelectorAll('.factors__actions button')].map(e=>e.textContent)"),['转为研究中','转为已启用','删除']);
+  assert(await js("!document.querySelector('.factors__detail').textContent.includes('淘汰')"));
+  await js('reviewRecords=[];clearRuns();refreshFactor()');
+  await wait("document.querySelector('.model-reviews__content')?.childElementCount===0&&!document.querySelector('[data-eval-run]')");
+  assert(await js("!document.querySelector('[data-detail]').textContent.includes('暂无评价记录。')&&getComputedStyle(document.querySelector('.factors__evaluations')).display==='none'&&!document.querySelector('.model-reviews__head button').disabled"));
+  assert.deepEqual(exceptions,[]);
+  console.log(`PASS: polling/error recovery, selection restoration, header actions, separate reviews, empty states, and 10 responsive light/dark layouts. ${output}`);
+}finally{socket?.close();browser.kill();server.close()}

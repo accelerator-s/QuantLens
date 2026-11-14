@@ -1,5 +1,15 @@
 FROM quantlens/hadoop:locked
-ARG HBASE_VERSION=2.2.7
-RUN curl -fSL --retry 3 https://archive.apache.org/dist/hbase/${HBASE_VERSION}/hbase-${HBASE_VERSION}-bin.tar.gz | tar --no-same-owner -xz -C /opt && mv /opt/hbase-${HBASE_VERSION} /opt/hbase
-ENV HBASE_HOME=/opt/hbase HBASE_CONF_DIR=/etc/hbase/conf HBASE_HEAPSIZE=1024 PATH=/opt/hbase/bin:$PATH
+ARG HBASE_VERSION=2.6.7
+ARG HBASE_SHA512
+RUN /opt/python/bin/python /opt/quantlens/install_archive.py https://downloads.apache.org/hbase/${HBASE_VERSION}/hbase-${HBASE_VERSION}-hadoop3-bin.tar.gz ${HBASE_SHA512} /opt/hbase && \
+    rm -rf /opt/hbase/lib/shaded-clients /opt/hbase/lib/client-facing-thirdparty
+RUN mkdir -p /opt/hbase/lib/client-facing-thirdparty && \
+    curl -fSL --retry 3 https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j-api/2.26.1/log4j-api-2.26.1.jar -o /opt/hbase/lib/client-facing-thirdparty/log4j-api.jar && \
+    echo 'f1810a4704ccce019d02bba029dc02a4f2ac0c997f647b465e7d409c1927f822  /opt/hbase/lib/client-facing-thirdparty/log4j-api.jar' | sha256sum -c - && \
+    curl -fSL --retry 3 https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j-core/2.26.1/log4j-core-2.26.1.jar -o /opt/hbase/lib/client-facing-thirdparty/log4j-core.jar && \
+    echo '2ec8c3bf5a6d7c89be8620116a2fc973f7dda1ad0261ad393c4d4726edfd3dcb  /opt/hbase/lib/client-facing-thirdparty/log4j-core.jar' | sha256sum -c -
+COPY docker/harden_java.py docker/java-dependencies.json /opt/quantlens/
+RUN /opt/python/bin/python /opt/quantlens/harden_java.py hbase
+COPY --from=quantlens/netty:locked /hbase-shaded-netty.jar /opt/hbase/lib/hbase-shaded-netty-4.1.14.jar
+ENV JAVA_HOME=/usr/lib/jvm/java-17 HBASE_HOME=/opt/hbase HBASE_CONF_DIR=/etc/hbase/conf HBASE_HEAPSIZE=1024 PATH=/opt/hbase/bin:$PATH
 CMD ["bash", "/opt/quantlens/init/hbase.sh"]

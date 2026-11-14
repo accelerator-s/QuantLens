@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from providers.registry import ProviderRegistry, ProviderStatus
 
 from ..serialize import json_safe
-from ..tasks import manager
+from ..tasks import manager, task_category
 
 router = APIRouter(tags=["data"])
 
@@ -51,9 +51,13 @@ class _LogWriter:
             self._append(self._buf.rstrip())
         self._buf = ""
 
-@router.get("/tasks/{task_id}")
-def get_task(task_id: str) -> dict:
-    return manager.get(task_id)
+@router.get("/data/sync/{task_id}/progress")
+def data_sync_progress(task_id: str) -> dict:
+    task = manager.get(task_id)
+    if task_category(task) != "data_sync":
+        raise HTTPException(status_code=404, detail="未找到数据同步任务")
+    return {key: task.get(key) for key in
+            ("task_id", "name", "category", "status", "progress", "log", "error", "result")}
 
 @router.get("/data/sync/active")
 def get_active_data_sync() -> dict:

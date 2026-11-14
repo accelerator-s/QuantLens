@@ -39,8 +39,8 @@ def apply_conclusions():
     means={key:float(np.mean(value)) for key,value in scores.items()}
     if means['model_gbt']<max(means['icir'],means['model_linear']):
         registry=FactorRegistry();meta=registry.get('model_gbt')
-        if meta.status==FactorStatus.RETIRED:return False
-        meta.status=FactorStatus.RETIRED;meta.production_permission=False
+        if meta.status==FactorStatus.DISABLED:return False
+        meta.status=FactorStatus.DISABLED
         meta.risk_notes='样本外同窗口评估未胜过 ICIR/线性加权；保留研究结论。'+str(means)
         registry.upsert(meta,override=True)
         return True

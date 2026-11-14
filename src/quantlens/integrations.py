@@ -1,5 +1,5 @@
 """Bind published HBase snapshots into the shared Hive catalog."""
-from storage.hdfs import compose
+from storage.hive import execute
 from storage.hbase import HBase
 from paths import workspace
 
@@ -12,4 +12,4 @@ def ensure_hive_hbase():
     finally:client.close()
     ddl=workspace().root/'docker/ddl'
     sql=(ddl/'001_databases.sql').read_text()+'\n'+(ddl/'002_hbase.sql').read_text()
-    compose('exec','-T','hive','beeline','-u','jdbc:hive2://localhost:10000','-n','root','-e',sql,timeout=300)
+    execute(sql, timeout=300)

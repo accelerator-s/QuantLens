@@ -1,0 +1,11 @@
+profile_name: research_liquidity_behavior_20d
+display_name: 流动性行为研究
+inheritance_parent: a_share_research_base
+status: draft
+factors:
+  weighting: equal
+  items:
+  - name: liquidity_behavior_20d
+extra:
+  purpose: factor_research_only
+  internal_only: true

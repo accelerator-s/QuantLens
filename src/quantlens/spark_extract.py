@@ -14,6 +14,11 @@ def run(spark,context,request_id,query):
         from quantlens.signals import composite
         profile=ResolvedStrategyProfile.model_validate(query['profile'])
         frame,upstream=composite(spark,profile,query['start'],query['end'])
+    elif kind=='signal_diagnostics':
+        from strategy import ResolvedStrategyProfile
+        from factor_evolution.signal_diagnostics import extract_daily
+        profile=ResolvedStrategyProfile.model_validate(query['profile'])
+        frame,upstream=extract_daily(spark,profile,query['start'],query['end'],query['horizons'])
     elif kind=='factor':
         frame=spark.table('dws.factor_values').where((F.col('factor')==query['factor'])&(F.col('version')==query['version'])).select('code','date','value','std_value','run_id','data_snapshot')
     elif kind=='labels':

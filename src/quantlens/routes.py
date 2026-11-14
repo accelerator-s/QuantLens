@@ -1,8 +1,9 @@
 from __future__ import annotations
 import json
+import base64
 from datetime import date
-from typing import Literal
-from fastapi import APIRouter,Query
+from typing import Annotated, Literal
+from fastapi import APIRouter,Query,HTTPException
 from pydantic import BaseModel,Field
 from quantlens import data,store,ads
 from quantlens.screening import Criteria,execute,translate
@@ -14,7 +15,7 @@ router=APIRouter(tags=['warehouse'])
 
 @router.get('/overview')
 def overview():
-    return {'coverage':data.coverage(),'market':data.market(),'evaluations':ads.query('factor_eval',limit=10),
+    return {'coverage':data.coverage(),'market':data.market(),'evaluations':ads.query('factor_eval',limit=10,order='as_of DESC,eval_end DESC,run_id DESC'),
             'jobs':jobs()['items'],'quality':ads.query('quality_report',limit=10),**ads.provenance('overview')}
 
 
@@ -68,9 +69,21 @@ def watchlist():
 
 
 @router.get('/jobs')
-def jobs():
-    with manager._lock: items=[{k:v for k,v in item.items() if k!='result'} for item in manager._tasks.values()]
-    return {'items':sorted(items,key=lambda x:x['created_at'],reverse=True)[:100],**ads.provenance()}
+def jobs(limit: Annotated[int, Query(ge=1, le=100)] = 20,
+         cursor: Annotated[str | None, Query(max_length=2048)] = None,
+         resource: str | None = None):
+    before = None
+    if cursor is not None:
+        try:
+            value = json.loads(base64.b64decode(cursor, altchars=b'-_', validate=True))
+            if not isinstance(value, list) or len(value) != 2 or not all(isinstance(item, str) and item for item in value):
+                raise ValueError('Invalid task cursor')
+            before = tuple(value)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise HTTPException(status_code=422, detail='任务分页游标无效') from exc
+    page = manager.list_page(limit=limit, before=before, resource=resource)
+    next_cursor = base64.urlsafe_b64encode(json.dumps(page['next']).encode()).decode() if page['next'] else None
+    return {'items':page['items'], 'next_cursor':next_cursor, **ads.provenance()}
 
 
 @router.get('/records/{record_id}')
@@ -129,46 +142,6 @@ def factor_values(name:str,as_of:date|None=None,code:str='',version:str='',limit
 def factor_evaluation(name:str): return ads.response('factor_eval',where='factor=?',params=[name],order='as_of DESC')
 
 
-@router.get('/strategies/{strategy_id}/weights')
-def strategy_weights(strategy_id:str): return ads.response('factor_weights',where='strategy_id=?',params=[strategy_id],order='as_of DESC,method,factor')
-
-
-class BacktestRequest(BaseModel):
-    strategy_id:str
-    start:date
-    end:date
-    capital:float=Field(default=1000000,gt=0)
-    account_id:str=''
-
-
-@router.post('/backtests')
-def backtest(payload:BacktestRequest):
-    from backtest.config import BacktestConfig
-    from backtest.engine import run_backtest
-    if payload.start>=payload.end: raise ContractViolation(code='BACKTEST_BAD_RANGE',message='回测日期顺序错误',suggested_action='结束日期必须晚于开始日期')
-    from portfolio.accounts import AccountRegistry
-    from portfolio.capital import account_capital
-    account = AccountRegistry().resolve(payload.account_id)
-    capital = account_capital(account)
-    # Freeze account settings before the asynchronous job starts.
-    config=BacktestConfig(profile_name=payload.strategy_id,start=str(payload.start),end=str(payload.end),initial_capital=capital,
-                          account_id=account.account_id,account_name=account.alias,
-                          star_market_enabled=account.star_market_enabled)
-    def run(report):
-        report('从 DWS 读取因子与权重，执行逐日撮合')
-        from backtest.protocol import verify_protocol_or_raise
-        from backtest.config import resolve_and_check
-        protocol=verify_protocol_or_raise()
-        outcome=run_backtest(config,protocol=protocol,profile=resolve_and_check(config,protocol))
-        return {'run_id':outcome.run_id,'metrics':outcome.metrics}
-    return {'task_id':manager.start('策略回测',run,resource='data'),**ads.provenance()}
-
-
-@router.get('/backtests/{run_id}')
-def backtest_result(run_id:str):
-    return {'summary':ads.query('backtest_summary','backtest_run=?',[run_id]),'nav':ads.query('backtest_nav','backtest_run=?',[run_id],limit=10000,order='date'),**ads.provenance('backtest_summary')}
-
-
 @router.get('/settings/data')
 def settings_data(): return {**ads.manifest(),**ads.provenance()}
 
@@ -178,7 +151,7 @@ def cluster_status():
     from quantlens.compute import cluster_status as status
     from webui.backend.services import startup_status
     from quantlens.gpu import worker_status
-    return {**status(), 'service_startup': startup_status(include_logs=True),
+    return {**status(), 'service_startup': startup_status(),
             'training_ready': bool(worker_status()), **ads.provenance()}
 
 
@@ -197,20 +170,6 @@ def compute_stop():
 
 @router.get('/settings/audit')
 def audit(limit:int=Query(100,ge=1,le=1000),offset:int=Query(0,ge=0)): return ads.response('audit_log',limit=limit,offset=offset,order='created_at DESC')
-
-
-class PipelineRequest(BaseModel):
-    start_at: Literal['factor_values','factor_eval','weight_fit','kmeans','fpgrowth','pca','engine'] | None = None
-    factor_start: date | None = None
-
-
-@router.post('/pipeline')
-def pipeline(payload: PipelineRequest | None = None):
-    from quantlens.spark_daily import run
-    payload=payload or PipelineRequest()
-    def execute(report):
-        return run(report,ingest_data=payload.start_at is None,start_at=payload.start_at,factor_start=payload.factor_start)
-    return {'task_id':manager.start('分层因子研究批次',execute,resource='data',category='research'),**ads.provenance()}
 
 
 @router.post('/quality')
