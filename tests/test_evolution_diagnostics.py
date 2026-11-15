@@ -89,10 +89,10 @@ def test_repeated_queries_are_bounded(frames):
         analyze(packet(frames), lambda *_: {'action': 'query', 'section': 'annual'}, max_turns=2, timeout_seconds=5)
 
 
-def test_lower_net_return_is_not_redeemed_by_calmar():
+def test_comparison_contract_allows_risk_return_tradeoff_but_not_input_change():
     parent = {'returns': {'annualized_return': .06}, 'risk': {'max_drawdown': -.16}, 'research_comparison_hash': 'same'}
     candidate = {'returns': {'annualized_return': .05}, 'risk': {'max_drawdown': -.10}, 'research_comparison_hash': 'same'}
-    assert not training_noninferiority(candidate, parent)
+    assert training_noninferiority(candidate, parent)
     candidate['returns']['annualized_return'] = .06
     assert training_noninferiority(candidate, parent)
     candidate['research_comparison_hash'] = 'other-capital'
@@ -109,6 +109,9 @@ def test_benchmark_reference_is_frozen_independently_of_factor():
     original = digest(comparison_contract(config, {}, profile))
     profile['factors']['name'] = 'b'
     assert digest(comparison_contract(config, {}, profile)) == original
+    profile['extra']['execution_policy'] = {'no_trade_band': .2}
+    assert digest(comparison_contract(config, {}, profile)) != original
+    profile['extra'].pop('execution_policy')
     profile['extra']['benchmark_plan']['market_reference'] = '000300'
     assert digest(comparison_contract(config, {}, profile)) != original
     profile['extra'] = {}

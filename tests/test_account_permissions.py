@@ -26,6 +26,12 @@ class AccountPermissions(unittest.TestCase):
         self.env = patch.dict(os.environ, QUANTLENS_HOME=self.temp.name)
         self.env.start()
         shutil.copytree(ROOT / 'config', self.root / 'config')
+        # User research strategies must not bind the accounts in this fixture.
+        import yaml
+        for path in (self.root / 'config/strategies').glob('*.yaml'):
+            data = yaml.safe_load(path.read_text()) or {}
+            if data.get('extra', {}).get('account_binding'):
+                path.unlink()
         from quantlens.bootstrap import prepare
         prepare()
         from fastapi.testclient import TestClient
@@ -353,7 +359,10 @@ class AccountPermissions(unittest.TestCase):
                 'start': '2024-01-02', 'end': '2024-01-05', 'account_id': account.account_id, 'capital': 999999})
         self.assertEqual(result.status_code, 200, result.text)
         self.client.post(f'/api/accounts/{account.account_id}/settings', json={'alias': account.alias, 'star_market_enabled': True, 'confirm': True})
-        jobs[0](lambda message: None)
+        # Benchmark selection is tested separately with its own index fixture.
+        from strategy import StrategyProfileStore
+        with patch('backtest.config.resolve_and_check', return_value=StrategyProfileStore().resolve('research_reversal_5')):
+            jobs[0](lambda message: None)
         config = run.call_args.args[0]
         self.assertEqual(config.initial_capital, Decimal('12345'))
         self.assertFalse(config.star_market_enabled)
@@ -377,7 +386,9 @@ class AccountPermissions(unittest.TestCase):
                 result = self.client.post('/api/backtest/runs', json=payload)
                 self.assertEqual(result.status_code, 200, result.text)
                 self.assertEqual(capital.call_args.args[0].account_id, DEFAULT_ACCOUNT_ID)
-                jobs[-1](lambda _: None)
+                from strategy import StrategyProfileStore
+                with patch('backtest.config.resolve_and_check', return_value=StrategyProfileStore().resolve('research_reversal_5')):
+                    jobs[-1](lambda _: None)
                 config = run.call_args.args[0]
                 self.assertEqual(config.account_id, DEFAULT_ACCOUNT_ID)
                 self.assertEqual(config.account_name, DEFAULT_ACCOUNT_ALIAS)
@@ -394,6 +405,16 @@ class AccountPermissions(unittest.TestCase):
         from rich.console import Console
         profile = StrategyProfileStore().resolve('research_reversal_5')
         dates = pd.bdate_range('2024-01-02', periods=4)
+        from benchmarks.models import BenchmarkPlan
+        plan = BenchmarkPlan(return_benchmark={'kind': 'universe_equal_weight'},
+                             market_reference='000985', rationale='账户权限测试固定基准')
+        profile.extra['benchmark_plan'] = plan.model_dump(mode='json')
+        indices = self.root / 'data/staged/cn_a/stock'
+        indices.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([{'index_code': '000985', 'name': '中证全指指数',
+                       'asset_type': '1', 'publisher': '3'}]).to_parquet(indices / 'index_basic.parquet', index=False)
+        pd.DataFrame({'index_code': '000985', 'date': ['2023-12-29', *dates.strftime('%Y-%m-%d')],
+                      'close': 100.}).to_parquet(indices / 'index_daily.parquet', index=False)
         codes = ['688001', '689001', '000001', '000002']
         close = pd.DataFrame(10., index=dates, columns=codes)
         market = {'close': close, 'high': close*1.01, 'low': close*.99, 'ret_wd': close*0,

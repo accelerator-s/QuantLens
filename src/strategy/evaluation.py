@@ -18,6 +18,8 @@ def candidate_profile(profile, candidate, weights):
     payload['constraints']['max_positions'] = candidate.max_positions
     payload['position_constraint']['top_n'] = candidate.max_positions
     payload['rebalance_frequency'] = candidate.frequency
+    from strategy.execution_policy import ExecutionPolicy
+    payload['extra']['execution_policy'] = {k: getattr(candidate, k) for k in ExecutionPolicy.model_fields}
     from strategy import ResolvedStrategyProfile
     return ResolvedStrategyProfile.model_validate(payload)
 
@@ -59,7 +61,7 @@ def evaluate(spark, context, profile, spec, protocol, config, candidate, stage, 
             'account_snapshot': profile.extra['research_account_snapshot'], 'windows': windows,
             'data_snapshot': context['data_snapshot'], 'pipeline': context['pipeline_code_hash'],
             'label_horizon': spec.label_horizon})
-        folds = []
+        prepared = []
         for window in windows:
             train = frame.join(labels, ['code', 'date']).where(
                 (F.col('date') >= window['fit_start']) & (F.col('date') <= window['fit_end']) &
@@ -73,6 +75,24 @@ def evaluate(spark, context, profile, spec, protocol, config, candidate, stage, 
                 weights = dict(zip(names, map(float, fit(spark, train, names, candidate.method))))
             finally:
                 train.unpersist()
+            from factor_evolution.prediction import spark_prediction
+            scored = frame.join(labels, ['code', 'date']).where(
+                (F.col('date') >= window['start']) & (F.col('date') <= window['end']) &
+                (F.col('valid_until') <= window['end'])).withColumn(
+                    'score', sum(F.col(n)*float(w) for n, w in weights.items()))
+            prediction = spark_prediction(scored)
+            prediction['horizon'] = spec.label_horizon
+            prepared.append((window, weights, stats, prediction))
+        from factor_evolution.prediction import screen
+        screening = screen([item[3] for item in prepared])
+        identity = {'candidate': candidate.model_dump(mode='json'), 'comparison_hash': comparison,
+                    'data_snapshot': context['data_snapshot'], 'pipeline_code_hash': context['pipeline_code_hash']}
+        # Baseline must be simulated for diagnosis even with a weak signal.
+        if stage == 'inner' and candidate.method != 'equal' and not screening['passed']:
+            return {**identity, 'folds': [], 'screening': screening,
+                    'prediction_folds': [item[3] for item in prepared]}
+        folds = []
+        for window, weights, stats, prediction in prepared:
             fitted = candidate_profile(profile, candidate, weights)
             current = config.model_copy(update={'start': window['start'], 'end': window['end']})
             ident = run_id if stage == 'final' else 'BT-'+uuid.uuid4().hex
@@ -88,21 +108,14 @@ def evaluate(spark, context, profile, spec, protocol, config, candidate, stage, 
             diagnostics = summarize_training(store.read_daily('nav'), store.read_daily('trades'),
                 store.read_daily('positions'), start=window['start'], end=window['end'],
                 capital=float(config.initial_capital), benchmark=plan_from_profile(fitted.model_dump(mode='json')).model_dump(mode='json'))
-            # Prediction diagnostics use only labels mature within this evaluation fold.
-            scored = frame.join(labels, ['code', 'date']).where(
-                (F.col('date') >= window['start']) & (F.col('date') <= window['end']) &
-                (F.col('valid_until') <= window['end'])).withColumn(
-                    'score', sum(F.col(n)*float(w) for n, w in weights.items()))
-            from quantlens.model_comparison import summarize
-            prediction = summarize(scored)
-            diagnostics['signal'] = {'rank_ic': prediction['rank_ic'], 'horizon': spec.label_horizon,
-                                     'scope': 'mature_labels_only', 'not_a_net_return': True}
+            diagnostics['signal'] = prediction
             folds.append({'run_id': outcome.run_id, 'window': window, 'weights': weights,
                 'training': {'rows': stats.rows, 'days': stats.days, 'latest_label': str(stats.latest_label)},
                 'metrics': outcome.metrics, 'diagnostics': diagnostics})
         result = {'candidate': candidate.model_dump(mode='json'), 'folds': folds,
                   'comparison_hash': comparison, 'data_snapshot': context['data_snapshot'],
-                  'pipeline_code_hash': context['pipeline_code_hash']}
+                  'pipeline_code_hash': context['pipeline_code_hash'],
+                  'prediction_screen': screening}
         if stage == 'final':
             from quantlens.spark_ads import export_backtests
             export_backtests(spark, context, batch, str(spec.end))

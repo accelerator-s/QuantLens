@@ -70,3 +70,40 @@ def test_search_never_sees_validation_and_freezes_before_evaluation(tmp_path):
         engine.run(rid)
     assert error.value.code == 'EVOLUTION_VALIDATION_TERMINAL'
     assert len(calls) == 7
+
+
+def test_invalid_candidate_does_not_abort_remaining_training_budget(tmp_path):
+    from factor_evolution.supervision import check_source
+    config = EvolutionConfig(base_factor='probe', profile_name='probe',
+        train_window={'start':'2018-01-01','end':'2021-12-31'},
+        validation_window={'start':'2022-01-01','end':'2024-12-31'},
+        test_window={'start':'2025-01-01','end':'2026-01-01'},
+        targets={'min_annualized_excess_return':.03,'max_drawdown':.2,
+                 'max_annualized_turnover':6,'min_oos_stability':.5}, max_iterations=2)
+    base = FactorVersion(version_id='v0', factor_name='probe', assumption='probe', direction='positive',
+        timescale='daily', dependencies=['close'], code='def compute(p): return p["close"]',
+        change_type='baseline', change_summary='baseline')
+    service = Mock()
+    service.load_base.return_value = base
+    service.check_candidate.side_effect = lambda cfg, v, **kwargs: check_source(v.code)
+    service.begin_experiment.side_effect = lambda cfg, v, parent: 'EXP-'+v.version_id
+    service.propose.side_effect = [
+        base.model_copy(update={'version_id':'v1','code':'def compute(p): return (p["close"]'}),
+        base.model_copy(update={'version_id':'v2','code':'def compute(p): return p["close"]*2'})]
+    service.evaluate.return_value = WindowResult(window='fixed_train', run_id='BT-probe', metrics={
+        'research_standard':'cn_a_daily_v3','input_quality':{'passed':True},
+        'returns':{'annualized_return':.1,'annualized_excess_return':.1},
+        'risk':{'max_drawdown':-.1},'objective':{'value':1.,'eligible':True},
+        'trading':{'annualized_turnover_oneside':2}})
+    service.review.return_value = ReviewResult(decision='continue', assessment='training only')
+    service.summarize_experiment.return_value = {'conclusion':'no improvement','ai_generated':False}
+    store = EvolutionStore(Workspace(tmp_path))
+    engine = EvolutionEngine(store, service)
+    result = engine.run(engine.create(config))
+    assert result['status']['state'] == 'completed'
+    assert result['status']['failed_rounds'] == 1
+    assert service.propose.call_count == 2
+    assert service.evaluate.call_count == 2  # Baseline and valid candidate only.
+    assert all(c.kwargs['window_name'] == 'fixed_train' for c in service.evaluate.call_args_list)
+    failures = [e['payload'] for e in result['events'] if e['event_type']=='round_failed']
+    assert failures[0]['code'] == 'EVOLUTION_SOURCE_INVALID'

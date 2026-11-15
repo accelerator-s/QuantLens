@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
@@ -49,6 +50,16 @@ def test_dynamic_leaks_unbounded_history_and_bad_contracts_rejected(panel, sourc
 def test_insufficient_audit_window_fails_closed(panel):
     with pytest.raises(ContractViolation):
         audit_factor('def compute(p): return p["close"]', panel, min_history=100)
+
+
+def test_syntax_error_is_a_candidate_failure_before_execution(panel, monkeypatch):
+    import factor_evolution.supervision as supervision
+    execute = Mock()
+    monkeypatch.setattr(supervision, 'execute_factor', execute)
+    with pytest.raises(ContractViolation) as error:
+        audit_factor('def compute(p): return (p["close"]', panel, min_history=15)
+    assert error.value.code == 'EVOLUTION_SOURCE_INVALID'
+    execute.assert_not_called()
 
 
 def test_production_rejects_lookahead_before_publishing(monkeypatch):

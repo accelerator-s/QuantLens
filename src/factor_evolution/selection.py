@@ -11,10 +11,10 @@ from .models import FactorVersion, VersionResult
 
 
 def training_noninferiority(candidate: dict, parent: dict) -> bool:
-    """Do not promote a lower-return candidate just because Calmar increased.
+    """Verify the frozen comparison contract; ranking uses the protocol objective.
 
-    1e-6 only accommodates the persisted metrics' six-decimal rounding; it is
-    not an economic loss tolerance. Matched references remain descriptive.
+    This is a search filter, not adoption. Return/risk targets and validation
+    remain enforced independently by EvolutionEngine.
     """
     from exceptions import ContractViolation
     left, right = candidate.get('research_comparison_hash'), parent.get('research_comparison_hash')
@@ -22,8 +22,10 @@ def training_noninferiority(candidate: dict, parent: dict) -> bool:
             or candidate.get('research_benchmark_return_hash') != parent.get('research_benchmark_return_hash')):
         raise ContractViolation(code='RESEARCH_COMPARISON_CHANGED',
             message='候选与父版本的资金、冻结基准、输入快照或交易协议不同，禁止比较。', blocking=True)
-    return (float(candidate['returns']['annualized_return']) + 1e-6 >= float(parent['returns']['annualized_return'])
-            and abs(float(candidate['risk']['max_drawdown'])) <= abs(float(parent['risk']['max_drawdown'])) + 1e-6)
+    primary = candidate.get('objective', {}).get('primary')
+    if primary != parent.get('objective', {}).get('primary'):
+        raise ContractViolation(code='RESEARCH_COMPARISON_CHANGED', message='比较目标发生变化。')
+    return True
 
 
 def definition_key(version: FactorVersion) -> str:

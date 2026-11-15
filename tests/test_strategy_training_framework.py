@@ -33,11 +33,11 @@ def test_folds_are_chronological_and_bounded():
 def outcome(candidate, ret=.05, dd=-.1):
     return {'candidate': candidate.model_dump(mode='json'), 'comparison_hash': 'fixed',
             'folds': [{'window': {'start':'2019-01-01', 'end':'2019-12-31'},
-                'metrics': {'returns': {'annualized_return': ret}, 'risk': {'max_drawdown': dd}, 'objective': {'eligible': True}},
+                'metrics': {'returns': {'annualized_return': ret}, 'risk': {'max_drawdown': dd}, 'objective': {'eligible': True, 'primary': 'calmar', 'value': ret/abs(dd)}},
                 'diagnostics': {'overview': {'capital':50000}, 'annual': [], 'costs': {'commission':500}, 'drawdown': {'max_drawdown':dd}, 'signal': {'ic': .04}}}]}
 
 
-def test_measured_gates_reject_return_risk_tradeoff_and_comparison_change():
+def test_equal_objective_keeps_incumbent_and_rejects_comparison_change():
     base = outcome(Candidate(method='equal',max_positions=20,frequency='monthly'))
     assert not beats(outcome(Candidate(method='model_ridge',max_positions=20,frequency='monthly'), .1, -.2),base)
     assert beats(outcome(Candidate(method='model_ridge',max_positions=20,frequency='monthly'), .06, -.09),base)

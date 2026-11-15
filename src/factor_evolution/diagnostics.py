@@ -29,7 +29,8 @@ def comparison_contract(config, protocol, profile):
                {'factors', 'standardization_chain', 'extra', 'display_name', 'source_chain'}}
     return {'capital': config.initial_capital, 'train_window': config.train_window.model_dump(),
             'protocol': protocol, 'portfolio': mandate,
-            'benchmark_plan': plan.model_dump(mode='json')}
+            'benchmark_plan': plan.model_dump(mode='json'),
+            'execution_policy': profile.get('extra', {}).get('execution_policy', {})}
 
 
 def summarize_training(nav, trades, positions, *, start, end, capital, benchmark):
@@ -78,12 +79,15 @@ def summarize_training(nav, trades, positions, *, start, end, capital, benchmark
     peak = int(before.to_numpy().argmax()) if before.max() >= capital else -1
     episode = nav.iloc[peak + 1:trough + 1] if dd.iloc[trough] < 0 else nav.iloc[:0]
     filled = trades[trades.status == 'filled']
+    from .attribution import attribute
+    attribution = attribute(nav, trades, positions, capital=capital, episode_dates=episode.date)
     return {
         'overview': {'start': str(nav.date.iloc[0].date()), 'end': str(nav.date.iloc[-1].date()),
                      'capital': capital, 'total_return': float(nav.nav.iloc[-1] / capital - 1),
                      'mean_equity_exposure': float(nav.exposure.mean()), 'benchmark': benchmark,
                      'reconciled': True},
         'annual': annual,
+        'attribution': attribution,
         'costs': {'total_cost': float(nav.cost_paid.sum()),
                   'components': {k: float(trades[k].sum()) for k in COST_FIELDS},
                   'filled_orders': len(filled), 'commission_at_five_orders': int(filled.commission.eq(5).sum()),
@@ -140,9 +144,10 @@ class EvidenceQueries:
         self.served = {}
 
     def query(self, section):
-        if section not in {'overview', 'annual', 'costs', 'drawdown', 'signal', 'limitations'}:
+        if section not in {'overview', 'annual', 'costs', 'drawdown', 'signal', 'attribution', 'limitations'}:
             fail('未授权的训练证据查询。')
-        packet = {'section': section, 'data': self.evidence['sections'][section],
+        data = self.evidence['sections'].get(section, {'available': False, 'reason': '该历史研究未保存此项诊断。'})
+        packet = {'section': section, 'data': data,
                   'scope': 'training_only', 'run_id': self.evidence['run_id'],
                   'definition_hash': self.evidence['definition_hash']}
         packet['evidence_id'] = digest(packet)

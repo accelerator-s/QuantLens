@@ -633,6 +633,13 @@ class ProductionEvolutionServices:
                 self._signal_diagnostics[identity] = signal_summary(daily,
                     start=config.train_window.start, end=config.train_window.end, horizons=config.prediction_horizons)
             signal = self._signal_diagnostics[identity]
+            from .prediction import screen
+            selected = [r for r in signal['horizons'] if r['horizon'] == max(config.prediction_horizons)]
+            screening = screen(selected)
+            signal['screening'] = screening
+            if version.change_type != 'baseline' and not screening['passed']:
+                raise QuantTrainingError(code='EVOLUTION_PREDICTION_REJECTED', message=screening['reason'],
+                                         context={'screening': screening}, blocking=False)
         run_id='BT-'+uuid.uuid4().hex
         on_progress('读取已发布的候选因子与统一行情，执行逐日回测')
         run_backtest(BacktestConfig(profile_name=profile.profile_name,start=window.start,end=window.end,initial_capital=config.initial_capital,lookback_buffer_days=config.lookback_buffer_days),protocol=protocol,profile=profile,run_id=run_id,console=_LogConsole(on_progress))

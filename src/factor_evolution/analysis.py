@@ -20,7 +20,7 @@ class Citation(BaseModel):
 class AnalysisAction(BaseModel):
     model_config = ConfigDict(extra='forbid')
     action: Literal['query', 'hypothesis', 'stop']
-    section: Literal['overview', 'annual', 'costs', 'drawdown', 'signal', 'limitations'] | None = None
+    section: Literal['overview', 'annual', 'costs', 'drawdown', 'signal', 'attribution', 'limitations'] | None = None
     observation: str = ''
     hypothesis: str = ''
     alternative: str = ''

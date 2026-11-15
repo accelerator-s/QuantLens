@@ -79,7 +79,7 @@ def fake_compute(module, *args, **kwargs):
     evaluation = {'candidate':candidate, 'comparison_hash':stage, 'data_snapshot':'snapshot', 'pipeline_code_hash':'source',
         'profile':profile, 'folds':[{'window':{'start':'2020-01-01','end':'2020-12-31'},
         'weights':weights,'training':{'days':244,'rows':2440,'latest_label':'2022-12-30'},
-        'metrics':{'returns':{'annualized_return':.05},'risk':{'max_drawdown':-.1},'objective':{'eligible':True}},
+        'metrics':{'returns':{'annualized_return':.05},'risk':{'max_drawdown':-.1},'objective':{'eligible':True,'primary':'calmar','value':.5}},
         'diagnostics':{'overview':{},'annual':[],'costs':{},'drawdown':{},'signal':{}}}]}
     write_result(profile['profile_name'], {'state':'computed','run_id':args[args.index('--run-id')+1], 'stage':stage,'evaluation':evaluation})
 

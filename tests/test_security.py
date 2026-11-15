@@ -197,8 +197,7 @@ def test_non_loopback_peer_and_forged_forwarded_header_are_denied():
 
 @pytest.mark.parametrize('client', ['127.0.0.1', '::1'])
 @pytest.mark.parametrize('body', [None, b'{}'])
-def test_configured_https_origin_accepts_same_origin_proxy_requests(monkeypatch, client, body):
-    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', 'https://quant.example.com')
+def test_any_https_domain_accepts_same_origin_proxy_requests(client, body):
     headers = {'host': 'quant.example.com', 'x-forwarded-proto': 'https',
                'origin': 'https://quant.example.com', 'sec-fetch-site': 'same-origin'}
     assert http_request(headers=headers, client=client, body=body).status_code == 200
@@ -206,42 +205,38 @@ def test_configured_https_origin_accepts_same_origin_proxy_requests(monkeypatch,
     assert http_request(headers=headers, client=client).status_code == 200
 
 
-def test_public_origin_is_opt_in_and_remains_loopback_only(monkeypatch):
+def test_any_domain_remains_loopback_only():
     headers = {'host': 'quant.example.com', 'x-forwarded-proto': 'https'}
-    monkeypatch.delenv('QUANTLENS_PUBLIC_ORIGIN', raising=False)
-    assert http_request(headers=headers).status_code == 400
-    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', 'https://quant.example.com')
+    assert http_request(headers=headers).status_code == 200
     assert http_request(headers=headers, client='192.0.2.1').status_code == 403
     assert http_request(headers={**headers, 'x-forwarded-for': '127.0.0.1'}, client='192.0.2.1').status_code == 403
-    assert http_request(headers={'host': 'quant.example.com'}).status_code == 403
-    assert http_request(headers={**headers, 'x-forwarded-proto': 'http'}).status_code == 403
-    assert http_request(headers={'host': 'evil.example.com', 'x-forwarded-host': 'quant.example.com',
-                                 'x-forwarded-proto': 'https'}).status_code == 400
+    assert http_request(headers={'host': 'quant.example.com'}).status_code == 200
+    assert http_request(headers={**headers, 'x-forwarded-proto': 'http'}).status_code == 200
+    # Forwarded-Host does not override the actual origin seen by the browser.
+    assert http_request(headers={'host': 'other.example.com', 'x-forwarded-host': 'quant.example.com',
+                                 'origin': 'https://quant.example.com', 'x-forwarded-proto': 'https'}).status_code == 403
 
 
 @pytest.mark.parametrize('origin', ['https://evil.example.com', 'http://quant.example.com',
                                    'https://quant.example.com.evil.example',
                                    'https://quant.example.com:8443', 'https://quant.example.com:0',
                                    'https://@quant.example.com', 'null'])
-def test_public_proxy_rejects_other_origins(monkeypatch, origin):
-    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', 'https://quant.example.com')
+def test_public_proxy_rejects_other_origins(origin):
     headers = {'host': 'quant.example.com', 'x-forwarded-proto': 'https', 'origin': origin}
     assert http_request(headers=headers).status_code == 403
     assert http_request(headers=headers, body=b'{}').status_code == 403
 
 
 @pytest.mark.parametrize('site', ['cross-site', 'same-site'])
-def test_public_proxy_keeps_fetch_metadata_checks(monkeypatch, site):
-    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', 'https://quant.example.com')
+def test_public_proxy_keeps_fetch_metadata_checks(site):
     assert http_request(headers={'host': 'quant.example.com', 'x-forwarded-proto': 'https',
                                  'origin': 'https://quant.example.com', 'sec-fetch-site': site},
                         body=b'{}').status_code == 403
 
 
-def test_public_proxy_redirects_keep_https(monkeypatch):
+def test_public_proxy_redirects_keep_https():
     from starlette.responses import PlainTextResponse
     from starlette.routing import Route, Router
-    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', 'https://quant.example.com')
 
     async def endpoint(request):
         return PlainTextResponse('ok')
@@ -257,44 +252,27 @@ def test_public_proxy_redirects_keep_https(monkeypatch):
     asyncio.run(check())
 
 
-def test_proxy_host_port_and_trusted_host_middleware_use_configured_origin(monkeypatch):
-    from starlette.middleware.trustedhost import TrustedHostMiddleware
-    from webui.deployment import public_origin, trusted_hosts
-    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', 'https://QUANT.example.com:8443/')
-    assert public_origin() == 'https://quant.example.com:8443'
+@pytest.mark.parametrize('host', ['quantlen.nomisaki.com', 'new.example.org', 'localhost.evil.example',
+                                 'testserver', '192.0.2.5:8443', '[::1]:8443', 'quant.example.com:443'])
+def test_arbitrary_domains_and_ports_need_no_configuration(monkeypatch, host):
+    # A stale deployment environment must never reintroduce an allowlist.
+    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', 'https://old.example.com')
+    assert http_request(headers={'host': host, 'x-forwarded-proto': 'https',
+                                 'origin': f'https://{host}'}, body=b'{}').status_code == 200
 
-    async def check():
-        app = SecurityMiddleware(TrustedHostMiddleware(dummy_app, allowed_hosts=trusted_hosts()))
-        transport = httpx.ASGITransport(app=app, client=('::1', 1234))
-        async with httpx.AsyncClient(transport=transport, base_url='http://localhost:8610') as client:
-            headers = {'host': 'quant.example.com:8443', 'origin': 'https://quant.example.com:8443',
-                       'x-forwarded-proto': 'https'}
-            assert (await client.post('/api/test', headers=headers, content=b'{}')).status_code == 200
-            headers['host'] = 'quant.example.com'
-            assert (await client.get('/api/test', headers=headers)).status_code == 400
-    asyncio.run(check())
-    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', 'https://quant.example.com:443/')
-    assert public_origin() == 'https://quant.example.com'
+
+def test_origin_compares_default_ports_and_rejects_protocol_spoofing():
     assert http_request(headers={'host': 'quant.example.com:443', 'origin': 'https://quant.example.com',
                                  'x-forwarded-proto': 'https'}).status_code == 200
+    assert http_request(headers={'host': 'quant.example.com:8443', 'origin': 'https://quant.example.com',
+                                 'x-forwarded-proto': 'https'}).status_code == 403
+    assert http_request(headers={'x-forwarded-proto': 'https,http'}).status_code == 400
 
 
-@pytest.mark.parametrize('origin', ['http://quant.example.com', 'https://quant.example.com/path',
-                                   'https://user:password@quant.example.com', 'https://@quant.example.com',
-                                   'https://*.example.com', 'https://quant.example.com:0',
-                                   'https://quant.example.com:', 'https://quant.example.com?query=1',
-                                   'https://quant.example.com#fragment', 'https://quant.example.com:bad'])
-def test_invalid_public_origin_fails_closed(monkeypatch, origin):
-    from webui.deployment import public_origin
-    monkeypatch.setenv('QUANTLENS_PUBLIC_ORIGIN', origin)
-    with pytest.raises(ContractViolation) as raised:
-        public_origin()
-    assert raised.value.code == 'QL_PUBLIC_ORIGIN_INVALID'
-
-
-@pytest.mark.parametrize('host', ['evil.example:8610', 'localhost.evil.example',
-                                '127.0.0.1@evil.example', 'localhost/path', 'localhost:bad', 'testserver'])
-def test_dns_rebinding_and_malformed_hosts_are_denied(host):
+@pytest.mark.parametrize('host', ['127.0.0.1@evil.example', 'localhost/path', 'localhost:bad',
+                                 'localhost:', 'localhost?', 'localhost#', 'bad host', '',
+                                 'localhost:0', 'localhost:65536', 'localhost\\path'])
+def test_malformed_hosts_are_denied(host):
     assert http_request(headers={'host': host}).status_code == 400
 
 

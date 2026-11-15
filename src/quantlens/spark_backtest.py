@@ -80,6 +80,9 @@ def run(spark,context,profile_name,start,end,capital=1000000,run_id=None,profile
         publish(spark,frame,'ads.'+table,['as_of'],run=context)
     for table,pdf in [('backtest_nav',nav),('attribution',attr),('backtest_trades',store.read_daily('trades')),('backtest_positions',positions)]:
         if pdf.empty:continue
+        if table=='backtest_positions':
+            # Detailed industry attribution stays in the local research artifact.
+            pdf=pdf.drop(columns=['industry_code'],errors='ignore')
         if table=='backtest_trades':
             schema='date string, instrument string, side string, status string, target_weight double, shares long, anchor_price double, exec_price double, amount double, commission double, transfer_fee double, stamp_tax double, other_fees double, slippage_cost double, note string'
             pdf=pdf.copy();pdf['date']=pdf.date.astype(str)

@@ -21,7 +21,12 @@ def _reject(message: str) -> None:
 
 
 def check_source(source: str) -> None:
-    tree = ast.parse(source)
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        raise ContractViolation(code='EVOLUTION_SOURCE_INVALID',
+                                message=f'因子代码语法错误（第 {exc.lineno} 行）：{exc.msg}',
+                                blocking=False) from exc
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue

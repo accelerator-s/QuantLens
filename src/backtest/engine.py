@@ -209,6 +209,7 @@ def run_backtest(
 
     try:
         for i, date in enumerate(eval_index):
+            industry_row = payload['industries'].loc[date]
             if benchmark_kind in {'same_cluster_equal_weight', 'industry_equal_weight'} and ledger.positions:
                 # Benchmark matching uses the holdings before today's orders.
                 # A liquidation later today must not hide a missing classification.
@@ -254,6 +255,11 @@ def run_backtest(
             targets = scheduled.pop(date, None)
             if targets is not None:
                 targets = {inst:weight for inst,weight in targets.items() if not bool(risk_exit.get(inst,False))}
+                from strategy.execution_policy import policy_targets
+                targets = policy_targets(targets, {k: ledger.weight_of(k) for k in ledger.positions},
+                    profile.extra.get('execution_policy', {}), constraints=profile.constraints,
+                    industries=industry_row.dropna().to_dict(),
+                    clusters=payload['clusters'].loc[date].dropna().to_dict())
                 sells, buys = _rebalance_orders(ledger, targets, pending)
             else:
                 sells, buys = [], []
@@ -285,13 +291,13 @@ def run_backtest(
             if date in signal_days and i + 1 < len(eval_index):
                 candidates = sig.scores.loc[date].rename("score").rename_axis("code").reset_index()
                 candidates["cluster_id"] = candidates.code.map(payload["clusters"].loc[date])
-                candidates["industry_code"] = candidates.code.map(payload["industries"].loc[date])
+                candidates["industry_code"] = candidates.code.map(industry_row)
                 candidates["in_universe"] = candidates.code.map(payload["mask"].loc[date]) & ~candidates.code.map(current_risk).fillna(False)
                 candidates['close'] = candidates.code.map(close.loc[date])
                 weights = construct(candidates, Constraints(**profile.constraints.model_dump()),
                                     breadth=payload["breadth"].get(date), regime=profile.risk.regime_filter.model_dump(),
                                     star_market_enabled=config.star_market_enabled,
-                                    capital=float(ledger.nav) if profile.extra.get('account_binding') else None)
+                                    capital=float(ledger.nav), slippage_bps=float(protocol.slippage_bps))
                 scheduled[eval_index[i + 1]] = dict(zip(weights.code, map(lambda x:Decimal(str(x)),weights.weight)))
 
             nav_now = float(ledger.nav)
@@ -315,13 +321,14 @@ def run_backtest(
             )
             prev_nav = nav_now
             for snap in ledger.snapshot_positions():
-                position_rows.append({"date": date, **snap})
+                position_rows.append({"date": date, **snap,
+                    "industry_code": str(industry_row.get(snap["instrument"], "unknown"))})
         # -- 落盘与指标 --
         fill_columns = [f.name for f in dataclass_fields(Fill)]
         trades_frame = pd.DataFrame([asdict(f) for f in trades], columns=fill_columns)
         nav_frame = pd.DataFrame(nav_rows)
         positions_frame = pd.DataFrame(
-            position_rows, columns=["date", "instrument", "market_value", "shares_nominal", "weight"]
+            position_rows, columns=["date", "instrument", "market_value", "shares_nominal", "weight", "industry_code"]
         )
         store.write_daily("trades", trades_frame)
         store.write_daily("positions", positions_frame)

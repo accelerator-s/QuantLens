@@ -18,7 +18,30 @@ class Constraints:
 
 
 def construct(candidates, constraints=Constraints(), *, breadth=None, regime=None,
-              star_market_enabled=True, capital=None):
+              star_market_enabled=True, capital=None, slippage_bps=10):
+    """Reallocate when a final target cannot fund its first board lot.
+
+    Feasibility at max_weight alone is insufficient: score and regime allocation
+    can assign much smaller weights. Remove infeasible names and refill from the
+    same ranking, without changing any concentration or exposure constraints.
+    """
+    remaining = candidates
+    while True:
+        frame = _construct(remaining, constraints, breadth=breadth, regime=regime,
+                           star_market_enabled=star_market_enabled, capital=capital)
+        if capital is None or frame.empty:
+            return frame
+        from backtest.tradability import board_of
+        from market_rules import MarketRuleRegistry, RuleEngine
+        engine = RuleEngine(MarketRuleRegistry().resolve('CN-A', 'stock'))
+        minimum = frame.code.map(lambda code: engine.resolve_min_unit(board_of(str(code)))[0])
+        affordable = frame.weight*float(capital) + 1e-9 >= minimum*frame.close*(1+slippage_bps/10000)
+        if affordable.all():
+            return frame
+        remaining = remaining.loc[~remaining.code.isin(frame.loc[~affordable, 'code'])]
+
+
+def _construct(candidates, constraints, *, breadth, regime, star_market_enabled, capital):
     """Allocate positive score mass subject to overlapping group capacities."""
     frame=candidates.copy()
     if frame.code.duplicated().any(): raise ValueError('Duplicate portfolio code')

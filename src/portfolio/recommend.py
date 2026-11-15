@@ -213,6 +213,11 @@ def _validate_pair(
             suggested_action="请选择与策略市场 / 品种一致的账户",
         )
 
+class TargetWeights(dict):
+    industries: dict
+    clusters: dict
+
+
 def _target_weights(profile,signal_date,*,account,nav,runtime_factors=None):
     from quantlens.research_candidate import prepare_profile
     from quantlens.compute import submit
@@ -229,7 +234,10 @@ def _target_weights(profile,signal_date,*,account,nav,runtime_factors=None):
     sync(batch_id)
     rows=ads.query('portfolio_target','strategy_id=? AND as_of=? AND run_id=?',
                    [target_id,signal_date,ads.provenance('portfolio_target')['run_id']],limit=10000,order='weight DESC,code')
-    return {row['code']:Decimal(str(row['weight'])) for row in rows}
+    weights = TargetWeights({row['code']:Decimal(str(row['weight'])) for row in rows})
+    weights.industries = {r['code']: r['industry_code'] for r in rows if r.get('industry_code') is not None}
+    weights.clusters = {r['code']: r['cluster_id'] for r in rows if r.get('cluster_id') is not None}
+    return weights
 
 # 计划构建（纯计算）
 
@@ -313,6 +321,11 @@ def build_plan(
 
     # 顺延替补选股
     target_weights = _target_weights(profile, signal_date, account=account, nav=nav, runtime_factors=runtime_factors)
+    from strategy.execution_policy import policy_targets
+    current_weights = {inst: p['qty']*price_map[inst]/nav for (inst, _), p in positions.items()} if nav else {}
+    target_weights = policy_targets(target_weights, current_weights, profile.extra.get('execution_policy', {}),
+                                    constraints=profile.constraints, industries=getattr(target_weights, 'industries', None),
+                                    clusters=getattr(target_weights, 'clusters', None))
     ranking = list(target_weights)
     selected: dict[str, int] = {}
     skipped: list[SkippedCandidate] = []

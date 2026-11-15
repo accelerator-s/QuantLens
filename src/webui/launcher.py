@@ -17,7 +17,6 @@ import httpx
 import uvicorn
 
 from exceptions import ContractViolation
-from webui.deployment import public_origin
 
 
 @contextmanager
@@ -128,7 +127,6 @@ def launch(root: Path, build_app, port=None, *, open_browser=True):
     except (TypeError, ValueError) as exc:
         raise ContractViolation(code='QL_INVALID_PORT', message='启动端口必须为 1 至 65535 的整数',
                                 suggested_action='检查 --port 或 QUANTLENS_PORT 设置') from exc
-    origin = public_origin()
     url = f'http://127.0.0.1:{port}'
     frontend = root / 'src/webui/frontend'
     for name in ('index.html', 'app.js', 'core/api.js', 'components/lens/lens.js'):
@@ -182,11 +180,8 @@ def launch(root: Path, build_app, port=None, *, open_browser=True):
             opener = threading.Thread(target=open_ready, daemon=True)
             opener.start()
             try:
-                if origin:
-                    with _loopback_sockets(port) as listeners:
-                        server.run(sockets=listeners)
-                else:
-                    server.run()
+                with _loopback_sockets(port) as listeners:
+                    server.run(sockets=listeners)
             except SystemExit as exc:
                 if exc.code:
                     raise ContractViolation(code='QL_START_FAILED', message='QuantLens 服务启动失败',

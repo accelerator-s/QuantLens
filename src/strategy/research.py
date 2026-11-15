@@ -36,7 +36,7 @@ class ResearchSpec(BaseModel):
     top_n: int = Field(default=20, ge=1, le=100)
     rebalance_frequency: Literal['weekly', 'monthly', 'quarterly'] = 'monthly'
     label_horizon: Literal[1, 5, 10, 20] = 20
-    max_candidates: int = Field(default=3, ge=1, le=3)
+    max_candidates: int = Field(default=3, ge=1, le=12)
 
     @model_validator(mode="after")
     def check_windows(self):
@@ -140,7 +140,7 @@ def run_research(name: str, report, *, analyst=None, evaluator=None) -> dict:
     from quantlens.sync_ads import sync
     from quantlens.backtest_publication import publication_lock
     from strategy.account_binding import account_snapshot, require_binding
-    from strategy.training import Candidate, search, configured_responder, beats
+    from strategy.training import Candidate, search, configured_responder, beats, selection_score
     from factor_evolution.diagnostics import digest
     from strategy.capital_guard import check_account, assert_generation
     doc = require_strategy(name)
@@ -200,7 +200,8 @@ def run_research(name: str, report, *, analyst=None, evaluator=None) -> dict:
                 if item[key] != frozen['results'][0][key]:
                     raise ValueError('最终评估的数据或计算代码与内层研究不一致')
         fold = final['folds'][0]
-        accepted = (fold['metrics']['returns']['annualized_return'] > 0 and
+        accepted = (selection_score(frozen['results'][frozen['winner']]) is not None and
+                    fold['metrics']['returns']['annualized_return'] > 0 and
                     fold['metrics']['objective']['eligible'] and
                     (final_baseline is None or beats(final, final_baseline)))
         result = {'state': 'completed', 'run_id': run_id, 'spec': spec.model_dump(mode='json'),
@@ -219,12 +220,17 @@ def run_research(name: str, report, *, analyst=None, evaluator=None) -> dict:
                       '通过启用门槛。' if accepted else '未通过启用门槛，保留研究结果，不发布可用策略。'])}
         from lifecycle.experiment_summary import generate_summary
         try:
-            result['experiment_summary'] = generate_summary({
+            summary_evidence = {
                 'kind': 'strategy', 'state': 'completed', 'training_completed': True,
                 'candidate_beats_training_baseline': bool(frozen['winner']),
                 'final_evaluation_completed': True, 'accepted': bool(accepted),
                 'selected_method': final_candidate.method,
-            }, model_name=doc.extra.get('discussion_model') or None)
+            }
+            if analyst is None:
+                result['experiment_summary'] = generate_summary(summary_evidence, model_name=doc.extra.get('discussion_model') or None)
+            else:
+                result['experiment_summary'] = {'conclusion': '通过固定准入条件。' if accepted else '未通过固定准入条件。',
+                    'ai_generated': False, 'model_name': getattr(analyst, 'model_name', 'development'), 'evidence': summary_evidence}
         except Exception as exc:
             result['experiment_summary_error'] = str(exc)
             report('实验总结生成失败，计算结果已保留')

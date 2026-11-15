@@ -141,7 +141,7 @@ class Launcher(unittest.TestCase):
         self.assertEqual(raised.exception.code, 'QL_PORT_BUSY')
         kill.assert_not_called()
 
-    def test_public_origin_listens_on_both_loopback_families(self):
+    def test_default_launch_listens_on_both_loopback_families(self):
         if not socket.has_ipv6:
             self.skipTest('IPv6 is unavailable')
         try:
@@ -150,8 +150,7 @@ class Launcher(unittest.TestCase):
         except OSError:
             self.skipTest('IPv6 loopback is unavailable')
         import httpx
-        with patch.dict(os.environ, {'QUANTLENS_PUBLIC_ORIGIN': 'https://quant.example.com'}):
-            process = self.start()
+        process = self.start()
         status = self.ready(process)
         response = httpx.get(f'http://[::1]:{self.port}/api/status', trust_env=False, timeout=3)
         self.assertEqual(response.status_code, 200)
