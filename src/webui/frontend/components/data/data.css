@@ -34,7 +34,6 @@
   font-weight: 600;
 }
 
-.data__last-check { position: relative; top: -2px; }
 
 .data [data-tables] .table { min-width: 780px; }
 .data [data-tables] :is(th, td) { padding: 8px 12px; vertical-align: middle; }

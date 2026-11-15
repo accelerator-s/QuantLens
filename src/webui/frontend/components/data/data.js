@@ -82,13 +82,6 @@ export async function mount(root, ctx) {
 
   function renderUpdateCheck(data) {
     checkHost.innerHTML = "";
-    if (data.last_check?.reason) {
-      const previous = data.last_check;
-      const reason = previous.state === "blocked" && /打包.*0%/.test(previous.reason)
-        ? "打包进度停在 0%，检查已取消。"
-        : previous.reason;
-      checkHost.append(el("p", "item-row__meta data__last-check", `上次检查：${reason}`));
-    }
     const indexSchedules = (data.schedules || []).filter(item => ['index_basic', 'index_daily'].includes(item.table));
     if (indexSchedules.length) {
       const schedule = el('article', 'card detail-card');
