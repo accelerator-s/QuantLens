@@ -200,12 +200,16 @@ class CSMARClient:
             self._headers['Token'] = self._token
             self._cookies = saved['cookies']
             response = self.client.get(f'{BASE_MAIN}/isLoggedIn', headers=self._headers, cookies=self._cookies)
+            if response.status_code != 401:
+                response.raise_for_status()
             state = response.json() if response.status_code == 200 else {}
+            self._raise_if_verification_blocked(state, "isLoggedIn")
             if state.get('code') == 0 and str(state.get('data')) == '1':
                 return self._token
             self._token = ''
             self._headers.pop('Token', None)
-            raise ProviderAuthError(code='PROVIDER_SESSION_EXPIRED', message='CSMAR 登录会话已失效，请重新登录；若要求手机验证，请完成验证后重试。', blocking=True)
+            self._cookies = dict(DEFAULT_COOKIES)
+            self.client.cookies.clear()
         if not self.check_network():
             raise ProviderNetworkError(
                 code="PROVIDER_NETWORK_UNAVAILABLE",
