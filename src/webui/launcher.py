@@ -1,6 +1,8 @@
 """Start a fresh local web process on every launcher invocation."""
 from __future__ import annotations
 
+from contextlib import contextmanager, ExitStack
+import errno
 import fcntl
 import logging
 import os
@@ -15,6 +17,29 @@ import httpx
 import uvicorn
 
 from exceptions import ContractViolation
+from webui.deployment import public_origin
+
+
+@contextmanager
+def _loopback_sockets(port: int):
+    with ExitStack() as stack:
+        listeners = []
+        for family, address in ((socket.AF_INET, '127.0.0.1'), (socket.AF_INET6, '::1')):
+            if family == socket.AF_INET6 and not socket.has_ipv6:
+                continue
+            try:
+                sock = stack.enter_context(socket.socket(family, socket.SOCK_STREAM))
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                if family == socket.AF_INET6:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                sock.bind((address, port))
+                listeners.append(sock)
+            except OSError as exc:
+                if family == socket.AF_INET6 and exc.errno in {errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL}:
+                    continue
+                raise ContractViolation(code='QL_PORT_BUSY', message='无法监听本机回环端口',
+                                        suggested_action='检查 IPv4、IPv6 端口占用，或使用 --port 指定其他端口') from exc
+        yield listeners
 
 
 def _service_status(url: str, root: Path) -> dict | None:
@@ -103,6 +128,7 @@ def launch(root: Path, build_app, port=None, *, open_browser=True):
     except (TypeError, ValueError) as exc:
         raise ContractViolation(code='QL_INVALID_PORT', message='启动端口必须为 1 至 65535 的整数',
                                 suggested_action='检查 --port 或 QUANTLENS_PORT 设置') from exc
+    origin = public_origin()
     url = f'http://127.0.0.1:{port}'
     frontend = root / 'src/webui/frontend'
     for name in ('index.html', 'app.js', 'core/api.js', 'components/lens/lens.js'):
@@ -156,7 +182,11 @@ def launch(root: Path, build_app, port=None, *, open_browser=True):
             opener = threading.Thread(target=open_ready, daemon=True)
             opener.start()
             try:
-                server.run()
+                if origin:
+                    with _loopback_sockets(port) as listeners:
+                        server.run(sockets=listeners)
+                else:
+                    server.run()
             except SystemExit as exc:
                 if exc.code:
                     raise ContractViolation(code='QL_START_FAILED', message='QuantLens 服务启动失败',

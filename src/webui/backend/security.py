@@ -1,4 +1,4 @@
-"""Local-only HTTP boundary and bounded request buffering."""
+"""Loopback HTTP boundary, explicit proxy origin and bounded request buffering."""
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +6,7 @@ import ipaddress
 from urllib.parse import urlsplit
 
 from starlette.responses import JSONResponse
+from webui.deployment import public_origin
 
 MAX_BODY_BYTES = 8 * 1024 * 1024
 
@@ -13,6 +14,8 @@ MAX_BODY_BYTES = 8 * 1024 * 1024
 class SecurityMiddleware:
     def __init__(self, app):
         self.app = app
+        origin = public_origin()
+        self.public_origin = urlsplit(origin) if origin else None
 
     async def __call__(self, scope, receive, send):
         if scope['type'] == 'websocket':
@@ -36,7 +39,7 @@ class SecurityMiddleware:
 
         names = [key.lower() for key, _ in scope['headers']]
         if names.count(b'host') != 1 or any(names.count(name) > 1 for name in
-                [b'origin', b'sec-fetch-site', b'content-length', b'transfer-encoding']):
+                [b'origin', b'sec-fetch-site', b'content-length', b'transfer-encoding', b'x-forwarded-proto']):
             return await reject(400, 'Ambiguous request headers')
         if b'content-length' in names and b'transfer-encoding' in names:
             return await reject(400, 'Ambiguous request framing')
@@ -46,12 +49,18 @@ class SecurityMiddleware:
             local = ipaddress.ip_address(peer).is_loopback
         except ValueError:
             local = peer == "testclient"  # Starlette's in-process test transport.
+        public_host = False
         try:
             host = urlsplit('http://' + headers['host'])
+            public_host = bool(self.public_origin and
+                               (host.hostname, host.port if host.port is not None else 443) ==
+                               (self.public_origin.hostname, self.public_origin.port or 443))
             valid_host = (host.hostname in {'127.0.0.1', 'localhost', '::1'}
-                          or (peer == 'testclient' and host.hostname == 'testserver'))
-            valid_host = (valid_host and not host.username and not host.password
+                          or (peer == 'testclient' and host.hostname == 'testserver')
+                          or public_host)
+            valid_host = (valid_host and host.username is None and host.password is None
                           and not host.path and not host.query and not host.fragment
+                          and not host.netloc.endswith(':')
                           and (host.port is None or 1 <= host.port <= 65535))
         except ValueError:
             valid_host = False
@@ -62,13 +71,20 @@ class SecurityMiddleware:
         if origin:
             try:
                 parsed = urlsplit(origin)
-                valid_origin = (parsed.scheme == scope.get("scheme", "http")
-                                and parsed.netloc == headers.get("host")
-                                and not parsed.username and not parsed.password
+                if public_host:
+                    same_origin = (parsed.scheme == self.public_origin.scheme
+                                   and (parsed.hostname, parsed.port if parsed.port is not None else 443) ==
+                                   (self.public_origin.hostname, self.public_origin.port or 443))
+                else:
+                    same_origin = (parsed.scheme == scope.get("scheme", "http")
+                                   and parsed.netloc == headers.get("host"))
+                valid_origin = (same_origin
+                                and parsed.username is None and parsed.password is None
                                 and parsed.path in {"", "/"} and not parsed.query and not parsed.fragment)
             except ValueError:
                 valid_origin = False
-        if not local or not valid_origin or headers.get("sec-fetch-site") in {"cross-site", "same-site"}:
+        proxy_https = not public_host or headers.get('x-forwarded-proto') == 'https'
+        if not local or not proxy_https or not valid_origin or headers.get("sec-fetch-site") in {"cross-site", "same-site"}:
             return await reject(403, {"code": "QL_ORIGIN_DENIED", "message": "请求来源不匹配"})
         try:
             length = int(headers.get("content-length", "0"))
@@ -102,4 +118,6 @@ class SecurityMiddleware:
                 return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
             return await receive()
 
+        if public_host:
+            scope = {**scope, 'scheme': self.public_origin.scheme}
         return await self.app(scope, bounded_receive, secure_send)

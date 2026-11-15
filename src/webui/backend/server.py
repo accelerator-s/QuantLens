@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .security import SecurityMiddleware
+from webui.deployment import trusted_hosts
 
 from version import __version__
 
@@ -22,7 +23,7 @@ _FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
 def create_app() -> FastAPI:
     app = FastAPI(title="QuantLens", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1","localhost","testserver"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts())
     install_error_handlers(app)
 
     app.add_middleware(SecurityMiddleware)
