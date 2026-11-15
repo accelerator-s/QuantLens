@@ -7,7 +7,7 @@ QuantLens（投研工坊）是面向 A 股的日频量化研究工具，提供�
 项目涉及的大数据处理技术有 Hadoop HDFS、YARN、Hive、Spark SQL、Spark MLlib 和 HBase。历史数据存放在 HDFS，Hive 管理分层表，Spark 在 YARN 上完成清洗、因子计算和模型训练，HBase 提供个股及因子快照查询。处理结果以 Parquet 格式保存，网页通过 DuckDB 查询本地发布结果。
 
 项目已经部署在云端，在线预览地址：
-https://quantlen.nomisaki.com
+https://quantlens.nomisaki.com
 
 ## 2. 安装方式
 
