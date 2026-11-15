@@ -342,7 +342,11 @@ def test_local_requests_and_security_headers():
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["cache-control"] == "no-store"
-    assert "script-src 'self'" in response.headers["content-security-policy"]
+    policy = dict(part.strip().split(' ', 1) for part in
+                  response.headers["content-security-policy"].split(';'))
+    assert policy['script-src'].split() == ["'self'", 'https://static.cloudflareinsights.com']
+    assert policy['connect-src'].split() == ["'self'", 'https://cloudflareinsights.com']
+    assert policy['default-src'] == "'self'"
 
 
 def test_large_and_streamed_request_bodies_are_rejected():

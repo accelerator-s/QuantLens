@@ -8,6 +8,13 @@ from urllib.parse import urlsplit
 from starlette.responses import JSONResponse
 
 MAX_BODY_BYTES = 8 * 1024 * 1024
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' https://static.cloudflareinsights.com; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
+    "connect-src 'self' https://cloudflareinsights.com; "
+    "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+)
 
 
 class SecurityMiddleware:
@@ -25,7 +32,7 @@ class SecurityMiddleware:
                     (b"x-content-type-options", b"nosniff"),
                     (b"x-frame-options", b"DENY"),
                     (b"referrer-policy", b"no-referrer"),
-                    (b"content-security-policy", b"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"),
+                    (b"content-security-policy", CONTENT_SECURITY_POLICY.encode("ascii")),
                 ]
                 if scope.get("path", "").startswith("/api/"):
                     message["headers"].append((b"cache-control", b"no-store"))
