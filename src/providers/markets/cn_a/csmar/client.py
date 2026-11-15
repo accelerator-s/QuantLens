@@ -201,9 +201,11 @@ class CSMARClient:
             self._cookies = saved['cookies']
             response = self.client.get(f'{BASE_MAIN}/isLoggedIn', headers=self._headers, cookies=self._cookies)
             state = response.json() if response.status_code == 200 else {}
-            if state.get('code') == 0 and state.get('data'):
+            if state.get('code') == 0 and str(state.get('data')) == '1':
                 return self._token
-            raise ProviderAuthError(code='PROVIDER_SESSION_EXPIRED', message='CSMAR 已验证会话已过期，须重新完成手机号验证。', blocking=True)
+            self._token = ''
+            self._headers.pop('Token', None)
+            raise ProviderAuthError(code='PROVIDER_SESSION_EXPIRED', message='CSMAR 登录会话已失效，请重新登录；若要求手机验证，请完成验证后重试。', blocking=True)
         if not self.check_network():
             raise ProviderNetworkError(
                 code="PROVIDER_NETWORK_UNAVAILABLE",
@@ -357,6 +359,12 @@ class CSMARClient:
                 time_set_field=time_set_field,
             )
         except httpx.HTTPError as e:
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 401:
+                raise ProviderAuthError(
+                    code="PROVIDER_SESSION_EXPIRED",
+                    message="CSMAR 登录会话已失效，请重新登录；若要求手机验证，请完成验证后重试。",
+                    blocking=True,
+                ) from e
             raise ProviderNetworkError(
                 code="PROVIDER_HTTP_TRANSPORT_ERROR",
                 message=f"与 CSMAR 通信失败：{e.__class__.__name__}: {e}",
