@@ -177,11 +177,11 @@ async def dummy_app(scope, receive, send):
     await send({"type": "http.response.body", "body": b"ok"})
 
 
-def http_request(*, headers=None, client="127.0.0.1", body=None):
+def http_request(*, headers=None, client="127.0.0.1", body=None, path="/api/test", method=None):
     async def run():
         transport = httpx.ASGITransport(app=SecurityMiddleware(dummy_app), client=(client, 1234))
         async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8610") as session:
-            return await session.request("POST" if body is not None else "GET", "/api/test", headers=headers, content=body)
+            return await session.request(method or ("POST" if body is not None else "GET"), path, headers=headers, content=body)
     return asyncio.run(run())
 
 
@@ -234,6 +234,22 @@ def test_public_proxy_keeps_fetch_metadata_checks(site):
                         body=b'{}').status_code == 403
 
 
+@pytest.mark.parametrize('site', ['cross-site', 'same-site'])
+@pytest.mark.parametrize('method', ['GET', 'HEAD'])
+def test_external_links_can_open_public_pages(site, method):
+    headers = {'host': 'quantlen.nomisaki.com', 'x-forwarded-proto': 'https',
+               'sec-fetch-site': site, 'sec-fetch-mode': 'navigate',
+               'sec-fetch-dest': 'document'}
+    assert http_request(path='/', method=method, headers=headers).status_code == 200
+    assert http_request(path='/index.html', method=method, headers=headers).status_code == 200
+    for path in ['/api', '/api/status']:
+        assert http_request(path=path, method=method, headers=headers).status_code == 403
+    assert http_request(path='/', headers=headers, body=b'{}').status_code == 403
+    for changes in [{'sec-fetch-dest': 'iframe'}, {'sec-fetch-mode': 'cors'},
+                    {'origin': 'https://other.example'}]:
+        assert http_request(path='/', headers={**headers, **changes}).status_code == 403
+
+
 def test_public_proxy_redirects_keep_https():
     from starlette.responses import PlainTextResponse
     from starlette.routing import Route, Router
@@ -281,6 +297,8 @@ def test_malformed_hosts_are_denied(host):
     [('content-length', '0'), ('content-length', '0')],
     [('content-length', '0'), ('transfer-encoding', 'chunked')],
     [('sec-fetch-site', 'cross-site'), ('sec-fetch-site', 'same-origin')],
+    [('sec-fetch-mode', 'cors'), ('sec-fetch-mode', 'navigate')],
+    [('sec-fetch-dest', 'iframe'), ('sec-fetch-dest', 'document')],
     [('x-forwarded-proto', 'http'), ('x-forwarded-proto', 'https')],
 ])
 def test_ambiguous_security_headers_are_denied(headers):

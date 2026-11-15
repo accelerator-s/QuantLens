@@ -36,7 +36,8 @@ class SecurityMiddleware:
 
         names = [key.lower() for key, _ in scope['headers']]
         if names.count(b'host') != 1 or any(names.count(name) > 1 for name in
-                [b'origin', b'sec-fetch-site', b'content-length', b'transfer-encoding', b'x-forwarded-proto']):
+                [b'origin', b'sec-fetch-site', b'sec-fetch-mode', b'sec-fetch-dest',
+                 b'content-length', b'transfer-encoding', b'x-forwarded-proto']):
             return await reject(400, 'Ambiguous request headers')
         if b'content-length' in names and b'transfer-encoding' in names:
             return await reject(400, 'Ambiguous request framing')
@@ -78,7 +79,15 @@ class SecurityMiddleware:
                                 and not parsed.netloc.endswith(':'))
             except ValueError:
                 valid_origin = False
-        if not local or not valid_origin or headers.get("sec-fetch-site") in {"cross-site", "same-site"}:
+        # Following an external link is a normal top-level page navigation.
+        # Keep cross-origin API reads, embedded resources and writes restricted.
+        path = scope.get("path", "")
+        page_navigation = (scope.get("method") in {"GET", "HEAD"}
+                           and path != "/api" and not path.startswith("/api/")
+                           and headers.get("sec-fetch-mode") == "navigate"
+                           and headers.get("sec-fetch-dest") == "document")
+        cross_origin_fetch = headers.get("sec-fetch-site") in {"cross-site", "same-site"}
+        if not local or not valid_origin or (cross_origin_fetch and not page_navigation):
             return await reject(403, {"code": "QL_ORIGIN_DENIED", "message": "请求来源不匹配"})
         try:
             length = int(headers.get("content-length", "0"))
