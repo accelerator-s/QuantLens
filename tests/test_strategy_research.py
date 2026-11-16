@@ -110,6 +110,39 @@ def test_sync_failure_is_visible_and_prevents_activation(strategy):
     with pytest.raises(ContractViolation):set_status(strategy.profile_name,StrategyStatus.ACTIVE)
 
 
+def test_final_baseline_and_winner_publish_distinct_immutable_batches(strategy):
+    from strategy.training import Candidate
+    exported = set()
+    final_batches = []
+    def compute(*args, **kwargs):
+        fake_compute(*args, **kwargs)
+        candidate = json.loads(args[args.index('--candidate')+1])
+        result = read_result(strategy.profile_name)
+        for fold in result['evaluation']['folds']:
+            fold['metrics']['objective']['value'] = 1 if candidate['max_positions'] == 15 else .5
+        write_result(strategy.profile_name, result)
+        if args[args.index('--stage')+1] == 'final':
+            batch = args[args.index('--batch')+1]
+            assert batch not in exported, 'final export would overwrite the baseline snapshot'
+            exported.add(batch)
+            final_batches.append(batch)
+    def choose(results, mandate, responder, **kwargs):
+        from strategy.training import Action
+        if len(results) > 1:
+            return Action(action='stop', stop_reason='已完成比较'), []
+        return Action(action='candidate', candidate=Candidate(method='equal', max_positions=15, frequency='monthly'),
+                      observation='测试观察', hypothesis='测试假设', alternative='测试替代解释',
+                      falsification='测试证伪', evidence_refs=[{'evidence_id': 'fixture',
+                          'path': ['candidate_0', '0', 'calmar'], 'value': .5}]), []
+    with patch('strategy.training.choose_action', side_effect=choose), \
+         patch('quantlens.compute.submit', side_effect=compute), patch('quantlens.sync_ads.sync') as sync:
+        result = run_research(strategy.profile_name, lambda _: None)
+    assert result['state'] == 'completed' and result['search']['winner'] == 1
+    assert result['final_baseline'] and result['final_evaluation']
+    assert len(final_batches) == 2
+    assert [call.args[0] for call in sync.call_args_list] == final_batches
+
+
 def test_summary_failure_preserves_computed_result(strategy, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError('summary unavailable')

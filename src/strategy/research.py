@@ -168,6 +168,8 @@ def run_research(name: str, report, *, analyst=None, evaluator=None) -> dict:
         def evaluate(candidate, stage='inner'):
             assert_generation(spec.account_id, generation)
             ident = 'BT-'+uuid.uuid4().hex if stage == 'inner' else run_id if candidate == final_candidate else 'BT-'+uuid.uuid4().hex
+            # Baseline and winner publish different immutable ADS snapshots.
+            publication_batch = f'{batch}-{ident}' if stage == 'final' else batch
             if evaluator is not None:
                 result = evaluator(candidate=candidate, stage=stage, profile=profile, spec=spec,
                     protocol=protocol, config=config, run_id=ident, batch=batch)
@@ -178,13 +180,13 @@ def run_research(name: str, report, *, analyst=None, evaluator=None) -> dict:
             with publication_lock():
                 submit("spark_strategy_research", "--profile", profile.model_dump_json(),
                    "--spec", spec.model_dump_json(), "--protocol", protocol.model_dump_json(),
-                   "--config", config.model_dump_json(), "--run-id", ident, "--batch", batch,
+                   "--config", config.model_dump_json(), "--run-id", ident, "--batch", publication_batch,
                    '--stage', stage, '--candidate', candidate.model_dump_json(), reporter=report)
                 result = read_result(name)
                 if not result or result.get('state') != 'computed' or result.get('run_id') != ident or result.get('stage') != stage:
                     raise ContractViolation(code='STRATEGY_RESULT_MISSING', message='策略阶段结果未完整写入。')
                 if stage == 'final':
-                    sync(batch)
+                    sync(publication_batch)
                 return result['evaluation']
         frozen = search(spec, mandate, evaluate, responder, report)
         final_candidate = Candidate.model_validate(frozen['candidate'])
