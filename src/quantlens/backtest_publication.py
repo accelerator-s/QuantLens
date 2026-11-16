@@ -73,7 +73,12 @@ def completed_result(run_id: str) -> dict:
                                 message=f'{run_id} 未通过当前回测口径校验', blocking=True)
     fingerprint = saved.get('data_fingerprint') or {}
     snapshot = fingerprint.get('data_snapshot')
-    if not snapshot or snapshot == 'unpublished':
+    if isinstance(snapshot, list):
+        if not snapshot or any(not isinstance(item, str) or not item or item == 'unpublished' for item in snapshot):
+            raise ValueError(f'{run_id}: missing data snapshot')
+        snapshots = sorted(set(snapshot))
+        snapshot = snapshots[0] if len(snapshots) == 1 else json.dumps(snapshots, separators=(',', ':'))
+    if not isinstance(snapshot, str) or not snapshot or snapshot == 'unpublished':
         raise ValueError(f'{run_id}: missing data snapshot')
     frames = {name: store.read_daily(name) for name in ('nav', 'trades', 'positions')}
     nav = frames['nav']
@@ -122,6 +127,25 @@ def publish_completed_runs(run_ids: list[str], reporter=None) -> str:
            reporter=reporter)
     sync(batch)
     return batch
+
+
+@serialized_publication
+def ensure_published_runs(run_ids: list[str], reporter=None):
+    """A completed experiment must only link to runs served by the results API."""
+    from quantlens import ads
+    ids = list(dict.fromkeys(run_ids))
+    if not ids:
+        return
+    def published():
+        return {row['backtest_run'] for row in ads.query('backtest_summary',
+            'backtest_run IN (' + ','.join('?' for _ in ids) + ')', ids, limit=len(ids))}
+    available = published()
+    missing = [run_id for run_id in ids if run_id not in available]
+    if missing:
+        publish_completed_runs(missing, reporter=reporter)
+    if not set(ids).issubset(published()):
+        raise ContractViolation(code='BACKTEST_PUBLICATION_INCOMPLETE',
+                                message='实验回测尚未全部发布，不能标记实验完成。')
 
 
 if __name__ == '__main__':

@@ -356,7 +356,7 @@ async function mountContent(root, ctx) {
       })],
       ["回测区间", `${run.config?.config?.start || "?"} ~ ${run.config?.config?.end || "?"}`],
       ["初始资金", fmtNum(run.config?.config?.initial_capital, 0)],
-      ["账户", run.config?.config?.account_name || "通用研究"],
+      ["账户", run.account_display_name || run.config?.config?.account_name || "通用研究"],
       ["科创板权限", run.config?.config?.star_market_enabled === false ? "未开通（已排除）" : "包含科创板"],
       ["最近更新", fmtTime(run.status?.updated_at)],
     ]);

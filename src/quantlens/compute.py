@@ -90,7 +90,8 @@ def submit(module, *arguments, reporter=None):
         elif reporter and line.startswith('QUANTLENS_'):
             reporter(line)
     try:
-        compose('exec','-T','spark-client','spark-submit','--master','yarn','--deploy-mode','client',
+        compose('exec','-T','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',
+                'spark-client','spark-submit','--master','yarn','--deploy-mode','client',
                 '/workspace/src/quantlens/'+name+'.py',*map(str,arguments),timeout=14400, **({'on_line': stage_log} if reporter else {}))
     except ContractViolation as exc:
         from storage.hdfs import HDFS

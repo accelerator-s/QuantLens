@@ -31,6 +31,7 @@ def strategy(tmp_path, monkeypatch):
     plan = BenchmarkPlan(return_benchmark={'kind':'universe_equal_weight'}, market_reference='000985', rationale='test')
     monkeypatch.setattr('benchmarks.selection.freeze_profile', lambda profile, *args, **kwargs: profile.model_copy(update={'extra': {**profile.extra, 'benchmark_plan':plan.model_dump(mode='json')}}))
     monkeypatch.setattr('strategy.training.configured_responder', lambda *args: lambda *args: {'action':'stop','stop_reason':'预算结束'})
+    monkeypatch.setattr('quantlens.backtest_publication.ensure_published_runs', lambda *args, **kwargs: None)
     monkeypatch.setattr('lifecycle.experiment_summary.generate_summary', lambda evidence, **kwargs: {
         'conclusion': '已完成最终评估并通过启用条件。', 'ai_generated': True, 'model_name': 'configured-model'})
     for name in ['quality', 'growth']:
@@ -77,7 +78,7 @@ def fake_compute(module, *args, **kwargs):
     weights = {'quality': .5, 'growth': .5}
     for ref in profile['factors']['items']: ref['weight_override']=str(weights[ref['name']])
     evaluation = {'candidate':candidate, 'comparison_hash':stage, 'data_snapshot':'snapshot', 'pipeline_code_hash':'source',
-        'profile':profile, 'folds':[{'window':{'start':'2020-01-01','end':'2020-12-31'},
+        'profile':profile, 'folds':[{'run_id':args[args.index('--run-id')+1], 'window':{'start':'2020-01-01','end':'2020-12-31'},
         'weights':weights,'training':{'days':244,'rows':2440,'latest_label':'2022-12-30'},
         'metrics':{'returns':{'annualized_return':.05},'risk':{'max_drawdown':-.1},'objective':{'eligible':True,'primary':'calmar','value':.5}},
         'diagnostics':{'overview':{},'annual':[],'costs':{},'drawdown':{},'signal':{}}}]}
@@ -88,11 +89,13 @@ def test_workflow_uses_frozen_account_and_inner_selection_before_outer(strategy)
     calls=[]
     def compute(*args, **kwargs):
         calls.append(args[args.index('--stage')+1]);fake_compute(*args, **kwargs)
-    with patch('quantlens.compute.submit', side_effect=compute), patch('quantlens.sync_ads.sync') as sync:
+    with patch('quantlens.compute.submit', side_effect=compute), patch('quantlens.sync_ads.sync') as sync, \
+         patch('quantlens.backtest_publication.ensure_published_runs') as published:
         result = run_research(strategy.profile_name, lambda line: None)
     assert calls == ['inner','final']
     sync.assert_called_once()
     assert result['state']=='completed' and result['accepted']
+    assert published.call_args.args[0] == [result['search']['results'][0]['folds'][0]['run_id'], result['run_id']]
     assert result['experiment_summary']['model_name'] == 'configured-model'
     assert read_result(strategy.profile_name)['experiment_summary'] == result['experiment_summary']
     assert result['account_snapshot']['capital']=='1000000'
@@ -108,6 +111,14 @@ def test_sync_failure_is_visible_and_prevents_activation(strategy):
         with pytest.raises(RuntimeError,match='sync failed'):run_research(strategy.profile_name,lambda _:None)
     assert read_result(strategy.profile_name)['state']=='failed'
     with pytest.raises(ContractViolation):set_status(strategy.profile_name,StrategyStatus.ACTIVE)
+
+
+def test_unpublished_inner_result_prevents_experiment_completion(strategy):
+    with patch('quantlens.compute.submit', side_effect=fake_compute), patch('quantlens.sync_ads.sync'), \
+         patch('quantlens.backtest_publication.ensure_published_runs', side_effect=RuntimeError('inner publication failed')):
+        with pytest.raises(RuntimeError, match='inner publication failed'):
+            run_research(strategy.profile_name, lambda _: None)
+    assert read_result(strategy.profile_name)['state'] == 'failed'
 
 
 def test_final_baseline_and_winner_publish_distinct_immutable_batches(strategy):

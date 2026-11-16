@@ -119,6 +119,17 @@ class ClusterReadiness(unittest.TestCase):
             self.assertEqual(compute.submit('smoke_cluster'), 0)
         ready.assert_not_called()
 
+    def test_spark_launcher_preserves_unicode_arguments(self):
+        argument = '{"account_name":"通用研究（包含科创板）"}'
+        with patch.dict(os.environ, QUANTLENS_COMPUTE_LOCAL='0'), \
+             patch.object(compute, 'ensure_cluster'), patch('quantlens.gpu.ensure_worker'), \
+             patch.object(compute, 'compose') as compose:
+            compute.submit('spark_strategy_research', '--config', argument)
+        args = compose.call_args.args
+        self.assertIn('LANG=C.UTF-8', args)
+        self.assertIn('LC_ALL=C.UTF-8', args)
+        self.assertEqual(args[-1], argument)
+
     def test_every_runtime_service_has_restart_policy_and_healthcheck(self):
         import yaml
         config = yaml.safe_load((Path(__file__).resolve().parents[1] / 'docker/compose.yaml').read_text())

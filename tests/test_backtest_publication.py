@@ -33,7 +33,7 @@ def completed(tmp_path, monkeypatch):
                         'protocol': protocol.model_dump(mode='json'),
                         'protocol_hash': protocol.content_hash(), 'protocol_locked': True,
                         'research_standard': 'cn_a_daily_v3',
-                        'data_fingerprint': {'data_snapshot': 'frozen-snapshot'}})
+                        'data_fingerprint': {'data_snapshot': ['frozen-snapshot']}})
     nav = pd.DataFrame({'date': pd.date_range('2024-01-02', periods=4),
         'nav': [1000., 1001., 1002., 1003.], 'cash': [1000.] * 4,
         'position_value': [0.] * 4, 'daily_return': [0., .001, .000999, .000998],
@@ -59,6 +59,56 @@ def test_valid_current_result_is_normalized_without_mutating_artifacts(completed
     assert result['snapshot'] == 'frozen-snapshot'
     assert result['frames']['nav']['date'].tolist() == ['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05']
     assert (completed.run_dir / 'metrics.yaml').read_bytes() == original
+
+
+@pytest.mark.parametrize('snapshot,expected', [('snapshot', 'snapshot'),
+    (['b', 'a', 'b'], '["a","b"]')])
+def test_snapshot_provenance_is_a_scalar_without_losing_sources(completed, snapshot, expected):
+    saved = completed.read_config()
+    saved['data_fingerprint']['data_snapshot'] = snapshot
+    path = completed.run_dir / 'config.yaml'
+    path.write_text(yaml.safe_dump(saved))
+    original = path.read_bytes()
+    assert completed_result(completed.run_id)['snapshot'] == expected
+    assert path.read_bytes() == original
+
+
+def test_experiment_publication_waits_for_all_links(completed, monkeypatch):
+    from unittest.mock import Mock
+    from quantlens.backtest_publication import ensure_published_runs
+    query = Mock(side_effect=[[{'backtest_run': 'final'}],
+                             [{'backtest_run': 'final'}, {'backtest_run': 'inner'}]])
+    publish = Mock()
+    monkeypatch.setattr('quantlens.ads.query', query)
+    monkeypatch.setattr('quantlens.backtest_publication.publish_completed_runs', publish)
+    ensure_published_runs(['inner', 'final', 'inner'])
+    publish.assert_called_once_with(['inner'], reporter=None)
+    assert query.call_count == 2
+    query.side_effect = [[], []]
+    from exceptions import ContractViolation
+    with pytest.raises(ContractViolation, match='尚未全部发布'):
+        ensure_published_runs(['inner'])
+
+
+def test_damaged_account_label_is_recovered_only_for_display(completed, monkeypatch):
+    from types import SimpleNamespace
+    from webui.backend.routes.backtest import _record, list_runs
+    import json
+    saved = completed.read_config()
+    saved['config'].update(account_id='research-default', account_name='?????????')
+    row = {'backtest_run': completed.run_id, 'strategy_id': saved['config']['profile_name'],
+           'config': json.dumps(saved), 'status': json.dumps(completed.read_status()),
+           'metrics': json.dumps(completed.read_metrics())}
+    monkeypatch.setattr('portfolio.accounts.AccountRegistry.get', lambda self, ident: SimpleNamespace(alias='通用研究（包含科创板）'))
+    monkeypatch.setattr('quantlens.ads.query', lambda *args, **kwargs: [row])
+    monkeypatch.setattr('quantlens.ads.provenance', lambda *args: {})
+    record = _record(row)
+    assert record['account_display_name'] == '通用研究（包含科创板）'
+    assert record['config'] == saved
+    assert list_runs()['items'][0]['account_name'] == record['account_display_name']
+    saved['config']['account_name'] = '历史账户名称'
+    row['config'] = json.dumps(saved)
+    assert _record(row)['account_display_name'] == '历史账户名称'
 
 
 @pytest.mark.parametrize('corrupt', ['metric', 'protocol', 'incomplete', 'date'])

@@ -201,6 +201,10 @@ def run_research(name: str, report, *, analyst=None, evaluator=None) -> dict:
             for key in ['data_snapshot', 'pipeline_code_hash']:
                 if item[key] != frozen['results'][0][key]:
                     raise ValueError('最终评估的数据或计算代码与内层研究不一致')
+        from quantlens.backtest_publication import ensure_published_runs
+        report('核对并发布全部训练内及最终回测，确保实验中的回测链接可读取')
+        ensure_published_runs([fold['run_id'] for evaluation in [*frozen['results'], final,
+            *([final_baseline] if final_baseline else [])] for fold in evaluation.get('folds', [])], reporter=report)
         fold = final['folds'][0]
         accepted = (selection_score(frozen['results'][frozen['winner']]) is not None and
                     fold['metrics']['returns']['annualized_return'] > 0 and

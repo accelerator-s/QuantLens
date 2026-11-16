@@ -15,6 +15,6 @@ ARG NUMPY_VERSION=2.4.6
 ARG PYARROW_VERSION=24.0.0
 RUN /opt/python/bin/pip install --no-cache-dir pandas==${PANDAS_VERSION} numpy==${NUMPY_VERSION} pyarrow==${PYARROW_VERSION} pyyaml==6.0.3 pydantic==2.11.7 httpx==0.28.1 rich==15.0.0 duckdb==1.5.6 && \
     ln -sf /opt/python/bin/python /usr/bin/python3
-ENV JAVA_HOME=/usr/lib/jvm/java-8 PYTHONPATH=/workspace/src:/workspace PYSPARK_PYTHON=/usr/bin/python3
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 JAVA_HOME=/usr/lib/jvm/java-8 PYTHONPATH=/workspace/src:/workspace PYSPARK_PYTHON=/usr/bin/python3
 ENTRYPOINT ["/usr/bin/tini", "--"]
 COPY docker/install_archive.py /opt/quantlens/install_archive.py

@@ -65,8 +65,31 @@ def _record(row):
     if (config.get('protocol') or {}).get('schema_version')!=3:
         raise HTTPException(409,'已发布回测不符合当前协议，必须清理并重新计算。')
     return {'run_id':row['backtest_run'],'profile':profile,'profile_display_name':strategy_display_name(profile),
+            'account_display_name': _account_display_name(config),
             'archived':profile in ARCHIVED_STRATEGIES,'factor_display_names':{item['name']:factor_display_name(item['name']) for item in factors},
             'status':status,'config':config,'metrics':json.loads(row['metrics'])}
+
+
+def _account_display_name(config):
+    """Recover legacy encoding damage for display without altering frozen hashes."""
+    settings = config.get('config') or {}
+    name = settings.get('account_name') or ''
+    if name.strip() and '???' not in name and '\ufffd' not in name:
+        return name
+    account_id = settings.get('account_id')
+    snapshot = ((config.get('profile') or {}).get('extra') or {}).get('research_account_snapshot') or {}
+    if snapshot.get('account_id') == account_id:
+        alias = snapshot.get('alias') or ''
+        if alias.strip() and '???' not in alias and '\ufffd' not in alias:
+            return alias
+    if account_id:
+        from portfolio.accounts import AccountRegistry
+        from exceptions import PortfolioAccountNotFoundError
+        try:
+            return AccountRegistry().get(account_id).alias
+        except PortfolioAccountNotFoundError:
+            return account_id
+    return '通用研究'
 
 
 def _require_valid_run(run_id):
@@ -84,7 +107,7 @@ def list_runs(profile: str = '') -> dict:
         record=_record(row);config=record['config'];settings=config.get('config') or {}
         items.append({key:record[key] for key in ['run_id','profile','profile_display_name','archived']} |
                      {'state':record['status'].get('state'),'start':settings.get('start'),'end':settings.get('end'),
-                      'account_id':settings.get('account_id'),'account_name':settings.get('account_name'),
+                      'account_id':settings.get('account_id'),'account_name':record['account_display_name'],
                       'star_market_enabled':settings.get('star_market_enabled',True),
                       'protocol_locked':config.get('protocol_locked'),'factor_display_names':list(record['factor_display_names'].values()),
                       'updated_at':record['status'].get('updated_at')})
