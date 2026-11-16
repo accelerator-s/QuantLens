@@ -60,7 +60,11 @@ def fold_windows(dates):
     """Three expanding folds entirely inside training, with maturity purging later."""
     days = sorted(set(str(d)[:10] for d in dates))
     if len(days) < 240:
-        raise ValueError('策略内层研究至少需要 240 个交易日')
+        raise ContractViolation(code='STRATEGY_TRAINING_HISTORY_SHORT',
+            message=f'策略内层研究至少需要 240 个共同有效交易日，当前为 {len(days)} 个。',
+            context={'available_days': len(days), 'required_days': 240,
+                     'first_date': days[0] if days else None, 'last_date': days[-1] if days else None},
+            suggested_action='检查所选因子的输入覆盖和训练日期范围；补齐源数据或延长训练区间后重试。')
     blocks = np.array_split(days[len(days)//2:], 3)
     return [{'fit_start': days[0], 'fit_end': days[days.index(str(block[0]))-1],
              'start': str(block[0]), 'end': str(block[-1])} for block in blocks]

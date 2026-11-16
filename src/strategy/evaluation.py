@@ -41,6 +41,8 @@ def evaluate(spark, context, profile, spec, protocol, config, candidate, stage, 
                   for r in profile.factors.items}
     # Inner jobs load neither final features nor final labels.
     end = str(spec.train_end) if stage == 'inner' else str(spec.end)
+    from strategy.data_preparation import ensure_factor_values
+    ensure_factor_values(spark, context, profile, str(spec.train_start), end)
     frame = exposures(spark, names, directions, versions).where(
         (F.col('date') >= str(spec.train_start)) & (F.col('date') <= end)).join(
         spark.table('dwd.universe').where('in_universe').select('code', 'date'), ['code', 'date']).persist()
@@ -51,6 +53,8 @@ def evaluate(spark, context, profile, spec, protocol, config, candidate, stage, 
     try:
         dates = [str(r.date) for r in frame.where(F.col('date') <= str(spec.train_end))
                  .select('date').distinct().orderBy('date').collect()]
+        print(f'QUANTLENS_STRATEGY=所选因子的共同有效训练交易日：{len(dates)}，'
+              f'请求区间 {spec.train_start} 至 {spec.train_end}', flush=True)
         windows = fold_windows(dates) if stage == 'inner' else [{
             'fit_start': str(spec.train_start), 'fit_end': str(spec.train_end),
             'start': str(spec.start), 'end': str(spec.end)}]

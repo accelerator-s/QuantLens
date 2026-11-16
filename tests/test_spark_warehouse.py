@@ -32,6 +32,41 @@ class SparkWarehouse(unittest.TestCase):
         b=labels.where("code='b' AND date='2024-01-01'").first()
         self.assertFalse(b.valid)  # Missing global exit day must not slide to the next stock observation.
 
+    def test_strategy_prepares_selected_missing_versions_without_final_dates(self):
+        from types import SimpleNamespace
+        from strategy.data_preparation import ensure_factor_values
+        from exceptions import ContractViolation
+        days = [date(2020, 1, 1) + timedelta(days=i) for i in range(12)]
+        prices = self.spark.createDataFrame([(day,) for day in days], 'date date')
+        rows = [('alpha', 'v1', days[3], 1.), ('alpha', 'v1', days[5], 1.),
+                ('beta', 'v2', days[3], 1.)]
+        def values():
+            return self.spark.createDataFrame(rows, 'factor string, version string, date date, std_value double')
+        source = SimpleNamespace(catalog=SimpleNamespace(tableExists=lambda _: True),
+            table=lambda table: prices if table == 'dwd.prices_clean' else values())
+        profile = SimpleNamespace(factors=SimpleNamespace(items=[SimpleNamespace(name=n) for n in ['alpha', 'beta']]),
+                                  extra={'factor_versions': {'alpha': 'v1', 'beta': 'v1'}})
+        metadata = SimpleNamespace(version='v1', min_history=2)
+        def compute(spark, context, *, names, start, end):
+            self.assertLessEqual(end, str(days[5]))
+            rows.extend((names[0], 'v1', day, 1.) for day in days if start <= str(day) <= end)
+        with patch('factors.registry.FactorRegistry') as registry, \
+                patch('quantlens.sync_factor_meta.run') as sync, \
+                patch('quantlens.spark_factor_values.run', side_effect=compute) as build:
+            registry.return_value.get.return_value = metadata
+            ensure_factor_values(source, {}, profile, str(days[3]), str(days[5]))
+            self.assertEqual([(c.kwargs['names'], c.kwargs['start'], c.kwargs['end']) for c in build.call_args_list],
+                             [(['alpha'], str(days[4]), str(days[4])), (['beta'], str(days[3]), str(days[5]))])
+            sync.assert_called_once()
+            build.reset_mock()
+            ensure_factor_values(source, {}, profile, str(days[3]), str(days[5]))
+            build.assert_not_called()
+            profile.extra['factor_versions']['alpha'] = 'v0'
+            with self.assertRaises(ContractViolation) as error:
+                ensure_factor_values(source, {}, profile, str(days[3]), str(days[5]))
+            self.assertEqual(error.exception.code, 'STRATEGY_FACTOR_VERSION_UNAVAILABLE')
+            build.assert_not_called()
+
     def test_deduplicate_uses_updated_at(self):
         from quantlens.spark_dwd_prices import deduplicate
         frame=self.spark.createDataFrame([('a','2024-01-01','2024-01-02',1.),('a','2024-01-01','2024-01-03',2.)],['code','date','updated_at','value'])
