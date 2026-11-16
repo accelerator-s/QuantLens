@@ -63,6 +63,54 @@ def test_iterative_selection_uses_cited_training_only_evidence():
     assert len(result['dialogues'][0])==2 and result['freeze_hash']
 
 
+def test_invalid_json_is_corrected_without_repeating_baseline():
+    from exceptions import ModelRouteError
+    evaluations, prompts, logs = [], [], []
+    def respond(context, remaining):
+        prompts.append(deepcopy(context))
+        if len(prompts) == 1:
+            raise ModelRouteError(code='AI_OUTPUT_NOT_JSON', message='missing comma')
+        assert 'missing comma' in context['dialogue'][-1]['validation_error']
+        return {'action': 'stop', 'stop_reason': '当前证据不支持新增候选'}
+    def evaluate(candidate):
+        evaluations.append(candidate.method)
+        return outcome(candidate)
+    result = search(SimpleNamespace(top_n=20, rebalance_frequency='monthly', max_candidates=1, model='auto'),
+                    {'research_id': 'test'}, evaluate, respond, logs.append)
+    assert evaluations == ['equal']
+    assert len(prompts) == 2 and result['winner'] == 0
+    assert prompts[0]['evidence'] == prompts[1]['evidence']
+    assert any('纠正' in line for line in logs)
+
+
+def test_output_repair_is_bounded_and_does_not_retry_transport_errors():
+    from unittest.mock import Mock
+    from exceptions import ModelRouteError
+    results = [outcome(Candidate(method='equal', max_positions=20, frequency='monthly'))]
+    responder = Mock(side_effect=ModelRouteError(code='AI_OUTPUT_NOT_JSON', message='bad JSON'))
+    with pytest.raises(ContractViolation) as error:
+        choose_action(results, {'research_id': 'test'}, responder)
+    assert error.value.code == 'STRATEGY_ANALYSIS_INVALID'
+    assert responder.call_count == 3
+    responder = Mock(side_effect=ModelRouteError(code='AI_HTTP_TRANSPORT_ERROR', message='connection failed'))
+    with pytest.raises(ModelRouteError):
+        choose_action(results, {'research_id': 'test'}, responder)
+    assert responder.call_count == 1
+
+
+def test_repair_never_accepts_fabricated_evidence():
+    results = [outcome(Candidate(method='equal', max_positions=20, frequency='monthly'))]
+    calls = []
+    def respond(context, remaining):
+        calls.append(context)
+        return {'action': 'candidate', 'candidate': {'method': 'model_ridge', 'max_positions': 20, 'frequency': 'monthly'},
+                'observation': '相关', 'hypothesis': '收缩', 'alternative': '无增益', 'falsification': '收益降低',
+                'evidence_refs': [{'evidence_id': 'invented', 'path': ['cost'], 'value': 0}]}
+    with pytest.raises(ContractViolation) as error:
+        choose_action(results, {'research_id': 'test'}, respond)
+    assert error.value.code == 'STRATEGY_ANALYSIS_INVALID' and len(calls) == 3
+
+
 @pytest.fixture
 def bound(tmp_path, monkeypatch):
     monkeypatch.setenv('QUANTLENS_HOME',str(tmp_path))

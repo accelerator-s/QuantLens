@@ -6,9 +6,9 @@ import time
 from typing import Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from exceptions import ContractViolation
+from exceptions import ContractViolation, ModelRouteError
 from factor_evolution.analysis import Citation
 from factor_evolution.diagnostics import EvidenceQueries, digest
 
@@ -135,28 +135,44 @@ def evidence_for(results, mandate):
             'comparison_hash': results[0]['comparison_hash'], 'sections': sections}
 
 
-def choose_action(results, mandate, responder, *, max_turns=6, timeout=300):
+def choose_action(results, mandate, responder, *, max_turns=6, timeout=300, report=lambda _: None):
     queries = EvidenceQueries(evidence_for(results, mandate))
     packets = [queries.query(k) for k in ['overview', 'costs', 'drawdown', 'signal', 'limitations']]
     dialogue = []
+    invalid_attempts = 0
     deadline = time.monotonic()+timeout
     for turn in range(max_turns):
         remaining = deadline-time.monotonic()
         if remaining <= 0:
             raise TimeoutError('策略证据分析超时')
-        raw = responder({'evidence': packets, 'dialogue': dialogue, 'schema': Action.model_json_schema(),
-                         'stage': 'strategy_inner_training_only', 'turns_remaining': max_turns-turn}, remaining)
-        if time.monotonic() > deadline:
-            raise TimeoutError('策略证据分析超时')
-        action = Action.model_validate(raw)
+        try:
+            raw = responder({'evidence': packets, 'dialogue': dialogue, 'schema': Action.model_json_schema(),
+                             'stage': 'strategy_inner_training_only', 'turns_remaining': max_turns-turn}, remaining)
+            if time.monotonic() > deadline:
+                raise TimeoutError('策略证据分析超时')
+            action = Action.model_validate(raw)
+            if action.action == 'candidate':
+                queries.verify(action.evidence_refs)
+        except (ModelRouteError, ContractViolation, ValidationError) as exc:
+            repairable = {'AI_OUTPUT_NOT_JSON', 'AI_OUTPUT_NOT_OBJECT', 'AI_OUTPUT_EMPTY',
+                          'AI_OUTPUT_SCHEMA_INVALID', 'STRATEGY_ANALYSIS_KIND', 'RESEARCH_DIAGNOSTIC_INVALID'}
+            if not isinstance(exc, ValidationError) and exc.code not in repairable:
+                raise
+            invalid_attempts += 1
+            if invalid_attempts >= 3:
+                raise ContractViolation(code='STRATEGY_ANALYSIS_INVALID',
+                    message='策略分析三次未通过格式或证据校验。',
+                    context={'last_error': str(exc)}, suggested_action='检查研究模型的结构化输出能力后重试。') from exc
+            dialogue.append({'validation_error': str(exc),
+                             'instruction': '请纠正输出，返回合法 JSON；引用必须来自已提供的证据，不得修改原始数值。'})
+            report(f'策略分析输出校验未通过，正在请求模型纠正（{invalid_attempts}/3）')
+            continue
         dialogue.append(action.model_dump(mode='json'))
         if action.action == 'query':
             packet = queries.query(action.section)
             if not any(p['evidence_id'] == packet['evidence_id'] for p in packets):
                 packets.append(packet)
             continue
-        if action.action == 'candidate':
-            queries.verify(action.evidence_refs)
         return action, dialogue
     raise ValueError('策略分析达到轮数上限，没有可执行结论')
 
@@ -172,7 +188,9 @@ def configured_responder(model_name=None):
                    '可查询股票、行业和市场环境归因。每次相对 parent_index 指定的已回测候选只修改一个字段：配权、持仓数量、频率或执行规则。'
                    '可以逐步组合已经验证的改动；不能选择预测筛选失败的父候选。不放宽风控、不修改资金、因子版本或基准。'
                    '等权也是合法方案；复杂模型必须用实际扣费结果证明增益。不得要求人工审批。'
-                   '返回 StructuredConfig，config_kind=strategy_training_action，proposed_value 符合 schema。',
+                   '只返回合法 JSON 对象，不使用注释、Markdown、表达式或省略号。'
+                   '顶层必须包含 config_kind="strategy_training_action" 和 proposed_value；'
+                   'proposed_value 是符合 schema 的对象，所有键使用双引号。',
             prompt=json.dumps(context, ensure_ascii=False))
         if raw.get('config_kind') != 'strategy_training_action':
             raise ContractViolation(code='STRATEGY_ANALYSIS_KIND', message='策略分析返回了错误的数据类型。')
@@ -185,13 +203,17 @@ def search(spec, mandate, evaluate, responder, report=lambda _: None):
     """evaluate receives only inner windows until this function returns a frozen winner."""
     mandate = {**mandate, 'selection_policy': SELECTION_POLICY}
     baseline = Candidate(method='equal', max_positions=spec.top_n, frequency=spec.rebalance_frequency)
-    report('运行等权组合的训练内分段基线，核算账户资金、整手与最低佣金')
+    def phase(message):
+        report(message)
+        if hasattr(report, 'progress'):
+            report.progress({'state': 'running', 'step': message})
+    phase('运行等权组合的训练内分段基线，核算账户资金、整手与最低佣金')
     results = [evaluate(baseline)]
     dialogues = []
     winner = 0
     for iteration in range(spec.max_candidates):
-        report(f'策略诊断与候选选择 {iteration+1}/{spec.max_candidates}；最终评估不可见')
-        action, dialogue = choose_action(results, mandate, responder)
+        phase(f'策略诊断与候选选择 {iteration+1}/{spec.max_candidates}；最终评估不可见')
+        action, dialogue = choose_action(results, mandate, responder, report=report)
         dialogues.append(dialogue)
         if action.action == 'stop':
             break
@@ -206,6 +228,7 @@ def search(spec, mandate, evaluate, responder, report=lambda _: None):
             raise ValueError('候选模型超出已指定的研究范围')
         if any(r['candidate'] == candidate.model_dump(mode='json') for r in results):
             raise ValueError('策略候选重复，不重复试验')
+        phase(f'评估策略候选 {iteration+1}：{candidate.method}，{candidate.max_positions} 只，{candidate.frequency}')
         result = evaluate(candidate)
         result['registered_hypothesis'] = action.model_dump(mode='json')
         results.append(result)

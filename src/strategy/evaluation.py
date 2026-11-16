@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+import json
 from decimal import Decimal
 
 import numpy as np
@@ -66,7 +67,9 @@ def evaluate(spark, context, profile, spec, protocol, config, candidate, stage, 
             'data_snapshot': context['data_snapshot'], 'pipeline': context['pipeline_code_hash'],
             'label_horizon': spec.label_horizon})
         prepared = []
-        for window in windows:
+        for index, window in enumerate(windows, 1):
+            step = f'{"训练内分段" if stage == "inner" else "最终评估"} {index}/{len(windows)}：拟合权重与检查成熟标签'
+            print('QUANTLENS_PROGRESS=' + json.dumps({'state': 'running', 'step': step}, ensure_ascii=False), flush=True)
             train = frame.join(labels, ['code', 'date']).where(
                 (F.col('date') >= window['fit_start']) & (F.col('date') <= window['fit_end']) &
                 (F.col('valid_until') <= window['fit_end']) & (F.col('valid_until') < window['start'])
@@ -96,7 +99,9 @@ def evaluate(spark, context, profile, spec, protocol, config, candidate, stage, 
             return {**identity, 'folds': [], 'screening': screening,
                     'prediction_folds': [item[3] for item in prepared]}
         folds = []
-        for window, weights, stats, prediction in prepared:
+        for index, (window, weights, stats, prediction) in enumerate(prepared, 1):
+            step = f'{"训练内分段" if stage == "inner" else "最终评估"} {index}/{len(prepared)}：逐日回测 {window["start"]} 至 {window["end"]}'
+            print('QUANTLENS_PROGRESS=' + json.dumps({'state': 'running', 'step': step}, ensure_ascii=False), flush=True)
             fitted = candidate_profile(profile, candidate, weights)
             current = config.model_copy(update={'start': window['start'], 'end': window['end']})
             ident = run_id if stage == 'final' else 'BT-'+uuid.uuid4().hex
