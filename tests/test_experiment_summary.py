@@ -24,6 +24,36 @@ def test_summary_uses_configured_model_and_retains_provenance():
     assert len(record['evidence_hash']) == 64
     assert json.loads(calls[0]['prompt'])['evidence'] == evidence
     assert calls[0]['model_name'] == 'configured-model'
+    schema = json.loads(calls[0]['prompt'])['schema']
+    assert set(schema['required']) == {'config_kind', 'proposed_value'}
+    assert schema['properties']['config_kind']['const'] == 'experiment_summary'
+    assert schema['properties']['proposed_value']['required'] == ['conclusion']
+
+
+def test_summary_retries_invalid_envelope_without_changing_evidence():
+    from exceptions import ContractViolation
+    from unittest.mock import Mock
+    run = Mock(side_effect=[
+        ContractViolation(code='AI_OUTPUT_SCHEMA_INVALID', message='config_kind missing'),
+        {'config_kind': 'experiment_summary', 'proposed_value': {'conclusion': '最终评估已完成，未通过启用条件。'}},
+    ])
+    router = SimpleNamespace(pick=lambda *a, **k: SimpleNamespace(name='configured-model'), run_task=run)
+    evidence = {'accepted': False, 'final_evaluation_completed': True}
+    result = generate_summary(evidence, router=router)
+    assert result['ai_generated'] and run.call_count == 2
+    requests = [json.loads(call.kwargs['prompt']) for call in run.call_args_list]
+    assert requests[0]['evidence'] == requests[1]['evidence'] == evidence
+    assert 'config_kind missing' in requests[1]['validation_error']
+
+
+def test_summary_does_not_retry_transport_failure():
+    from exceptions import ModelRouteError
+    from unittest.mock import Mock
+    run = Mock(side_effect=ModelRouteError(code='AI_HTTP_TRANSPORT_ERROR', message='unavailable'))
+    router = SimpleNamespace(pick=lambda *a, **k: SimpleNamespace(name='configured-model'), run_task=run)
+    with pytest.raises(ModelRouteError):
+        generate_summary({}, router=router)
+    assert run.call_count == 1
 
 
 @pytest.mark.parametrize('payload', [
