@@ -111,6 +111,61 @@ def test_repair_never_accepts_fabricated_evidence():
     assert error.value.code == 'STRATEGY_ANALYSIS_INVALID' and len(calls) == 3
 
 
+def test_exhausted_analysis_preserves_validated_candidates_for_final_evaluation():
+    from exceptions import ModelRouteError
+    calls, evaluated = [], []
+    def respond(context, remaining):
+        calls.append(context)
+        if len(calls) > 1:
+            raise ModelRouteError(code='AI_OUTPUT_NOT_JSON', message='bad JSON')
+        cost = next(p for p in context['evidence'] if p['section'] == 'costs')
+        return {'action': 'candidate', 'candidate': {'method': 'model_ridge', 'max_positions': 20, 'frequency': 'monthly'},
+                'observation': '费用侵蚀', 'hypothesis': '收缩减少噪声', 'alternative': '无增益', 'falsification': '净收益下降',
+                'evidence_refs': [{'evidence_id': cost['evidence_id'], 'path': ['candidate_0', '0', 'commission'], 'value': 500}]}
+    def evaluate(candidate):
+        evaluated.append(candidate.method)
+        return outcome(candidate, .06 if candidate.method == 'model_ridge' else .05)
+    frozen = search(SimpleNamespace(top_n=20, rebalance_frequency='monthly', max_candidates=6, model='auto'),
+                    {'research_id': 'test'}, evaluate, respond)
+    assert len(calls) == 4 and evaluated == ['equal', 'model_ridge']
+    assert frozen['winner'] == 1 and frozen['trials_evaluated'] == 1
+    assert frozen['termination']['kind'] == 'analysis_invalid'
+    assert frozen['termination']['context']['last_error'].endswith('bad JSON')
+
+
+@pytest.mark.parametrize('candidate,parent', [
+    ({'method': 'equal', 'max_positions': 20, 'frequency': 'monthly'}, 0),
+    ({'method': 'equal', 'max_positions': 25, 'frequency': 'monthly'}, 0),
+    ({'method': 'model_ridge', 'max_positions': 15, 'frequency': 'monthly'}, 0),
+    ({'method': 'model_ridge', 'max_positions': 20, 'frequency': 'monthly'}, 0),
+    ({'method': 'equal', 'max_positions': 15, 'frequency': 'monthly'}, 99),
+])
+def test_invalid_candidate_is_never_evaluated_and_search_stops_safely(candidate, parent):
+    evaluations, calls = [], []
+    def respond(context, remaining):
+        calls.append(context)
+        cost = next(p for p in context['evidence'] if p['section'] == 'costs')
+        return {'action': 'candidate', 'candidate': candidate, 'parent_index': parent,
+                'observation': '观察', 'hypothesis': '假设', 'alternative': '替代解释', 'falsification': '证伪',
+                'evidence_refs': [{'evidence_id': cost['evidence_id'], 'path': ['candidate_0', '0', 'commission'], 'value': 500}]}
+    def evaluate(candidate):
+        evaluations.append(candidate)
+        return outcome(candidate)
+    frozen = search(SimpleNamespace(top_n=20, rebalance_frequency='monthly', max_candidates=6, model='equal'),
+                    {'research_id': 'test'}, evaluate, respond)
+    assert len(calls) == 3 and len(evaluations) == 1
+    assert frozen['winner'] == 0 and frozen['termination']['kind'] == 'analysis_invalid'
+
+
+def test_analysis_query_budget_also_finishes_with_existing_evidence():
+    from unittest.mock import Mock
+    respond = Mock(return_value={'action': 'query', 'section': 'overview'})
+    frozen = search(SimpleNamespace(top_n=20, rebalance_frequency='monthly', max_candidates=6, model='auto'),
+                    {'research_id': 'test'}, outcome, respond)
+    assert respond.call_count == 6 and frozen['trials_evaluated'] == 0
+    assert frozen['termination']['kind'] == 'analysis_invalid'
+
+
 @pytest.fixture
 def bound(tmp_path, monkeypatch):
     monkeypatch.setenv('QUANTLENS_HOME',str(tmp_path))

@@ -135,7 +135,25 @@ def evidence_for(results, mandate):
             'comparison_hash': results[0]['comparison_hash'], 'sections': sections}
 
 
-def choose_action(results, mandate, responder, *, max_turns=6, timeout=300, report=lambda _: None):
+def validate_candidate(action, results, spec):
+    candidate = action.candidate
+    problem = ''
+    if action.parent_index >= len(results) or not results[action.parent_index].get('folds'):
+        problem = '候选父版本不存在或没有完成回测'
+    else:
+        parent = Candidate.model_validate(results[action.parent_index]['candidate'])
+        changed = sum(candidate.model_dump()[k] != parent.model_dump()[k] for k in Candidate.model_fields)
+        if changed != 1 or candidate.max_positions > spec.top_n:
+            problem = '策略候选须相对指定父版本仅修改一个轴，且不能超过持仓数量上限'
+        elif spec.model != 'auto' and candidate.method not in {'equal', spec.model}:
+            problem = '候选模型超出已指定的研究范围'
+        elif any(r['candidate'] == candidate.model_dump(mode='json') for r in results):
+            problem = '策略候选重复，不重复试验'
+    if problem:
+        raise ContractViolation(code='STRATEGY_CANDIDATE_INVALID', message=problem)
+
+
+def choose_action(results, mandate, responder, *, max_turns=6, timeout=300, report=lambda _: None, spec=None):
     queries = EvidenceQueries(evidence_for(results, mandate))
     packets = [queries.query(k) for k in ['overview', 'costs', 'drawdown', 'signal', 'limitations']]
     dialogue = []
@@ -153,9 +171,12 @@ def choose_action(results, mandate, responder, *, max_turns=6, timeout=300, repo
             action = Action.model_validate(raw)
             if action.action == 'candidate':
                 queries.verify(action.evidence_refs)
+                if spec is not None:
+                    validate_candidate(action, results, spec)
         except (ModelRouteError, ContractViolation, ValidationError) as exc:
             repairable = {'AI_OUTPUT_NOT_JSON', 'AI_OUTPUT_NOT_OBJECT', 'AI_OUTPUT_EMPTY',
-                          'AI_OUTPUT_SCHEMA_INVALID', 'STRATEGY_ANALYSIS_KIND', 'RESEARCH_DIAGNOSTIC_INVALID'}
+                          'AI_OUTPUT_SCHEMA_INVALID', 'STRATEGY_ANALYSIS_KIND', 'RESEARCH_DIAGNOSTIC_INVALID',
+                          'STRATEGY_CANDIDATE_INVALID'}
             if not isinstance(exc, ValidationError) and exc.code not in repairable:
                 raise
             invalid_attempts += 1
@@ -174,7 +195,8 @@ def choose_action(results, mandate, responder, *, max_turns=6, timeout=300, repo
                 packets.append(packet)
             continue
         return action, dialogue
-    raise ValueError('策略分析达到轮数上限，没有可执行结论')
+    raise ContractViolation(code='STRATEGY_ANALYSIS_INVALID',
+                            message='策略分析达到轮数上限，没有可执行结论。')
 
 
 def configured_responder(model_name=None):
@@ -211,23 +233,24 @@ def search(spec, mandate, evaluate, responder, report=lambda _: None):
     results = [evaluate(baseline)]
     dialogues = []
     winner = 0
+    termination = {'kind': 'budget_exhausted', 'reason': '已完成候选评估预算。'}
     for iteration in range(spec.max_candidates):
         phase(f'策略诊断与候选选择 {iteration+1}/{spec.max_candidates}；最终评估不可见')
-        action, dialogue = choose_action(results, mandate, responder, report=report)
+        try:
+            action, dialogue = choose_action(results, mandate, responder, report=report, spec=spec)
+        except ContractViolation as exc:
+            if exc.code != 'STRATEGY_ANALYSIS_INVALID':
+                raise
+            termination = {'kind': 'analysis_invalid', 'error_code': exc.code,
+                'reason': '模型在限定轮数内未给出有效结论，停止新增候选；仅从已完成回测的候选中选择最终验证方案。',
+                'context': exc.context}
+            phase(termination['reason'])
+            break
         dialogues.append(dialogue)
         if action.action == 'stop':
+            termination = {'kind': 'model_stop', 'reason': action.stop_reason}
             break
         candidate = action.candidate
-        if action.parent_index >= len(results) or not results[action.parent_index].get('folds'):
-            raise ValueError('候选父版本不存在或没有完成回测')
-        parent = Candidate.model_validate(results[action.parent_index]['candidate'])
-        changed = sum(candidate.model_dump()[k] != parent.model_dump()[k] for k in Candidate.model_fields)
-        if changed != 1 or candidate.max_positions > spec.top_n:
-            raise ValueError('策略候选须相对指定父版本仅修改一个轴，且不能超过持仓数量上限')
-        if spec.model != 'auto' and candidate.method not in {'equal', spec.model}:
-            raise ValueError('候选模型超出已指定的研究范围')
-        if any(r['candidate'] == candidate.model_dump(mode='json') for r in results):
-            raise ValueError('策略候选重复，不重复试验')
         phase(f'评估策略候选 {iteration+1}：{candidate.method}，{candidate.max_positions} 只，{candidate.frequency}')
         result = evaluate(candidate)
         result['registered_hypothesis'] = action.model_dump(mode='json')
@@ -237,6 +260,7 @@ def search(spec, mandate, evaluate, responder, report=lambda _: None):
     frozen = {'winner': winner, 'candidate': results[winner]['candidate'], 'results': results,
               'dialogues': dialogues, 'comparison_hash': results[0]['comparison_hash'],
               'selection_scope': 'inner_training_only', 'mandate': mandate,
-              'selection_policy': SELECTION_POLICY, 'trials_evaluated': len(results)-1}
+              'selection_policy': SELECTION_POLICY, 'trials_evaluated': len(results)-1,
+              'termination': termination}
     frozen['freeze_hash'] = digest(frozen)
     return frozen

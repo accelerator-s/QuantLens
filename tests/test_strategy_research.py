@@ -154,6 +154,29 @@ def test_summary_failure_preserves_computed_result(strategy, monkeypatch):
     assert read_result(strategy.profile_name)['experiment_summary_error'] == 'summary unavailable'
 
 
+@pytest.mark.parametrize('eligible', [True, False])
+def test_invalid_analysis_still_runs_final_evaluation_and_preserves_risk_gates(strategy, monkeypatch, eligible):
+    from exceptions import ModelRouteError
+    from unittest.mock import Mock
+    responder = Mock(side_effect=ModelRouteError(code='AI_OUTPUT_NOT_JSON', message='bad JSON'))
+    monkeypatch.setattr('strategy.training.configured_responder', lambda *args: responder)
+    stages = []
+    def compute(*args, **kwargs):
+        stages.append(args[args.index('--stage')+1])
+        fake_compute(*args, **kwargs)
+        result = read_result(strategy.profile_name)
+        for fold in result['evaluation']['folds']:
+            fold['metrics']['objective']['eligible'] = eligible
+        write_result(strategy.profile_name, result)
+    with patch('quantlens.compute.submit', side_effect=compute), patch('quantlens.sync_ads.sync'):
+        result = run_research(strategy.profile_name, lambda _: None)
+    assert stages == ['inner', 'final'] and responder.call_count == 3
+    assert result['state'] == 'completed' and result['accepted'] is eligible
+    assert result['search']['termination']['kind'] == 'analysis_invalid'
+    assert result['search']['trials_evaluated'] == 0
+    assert '停止新增候选' in result['report']
+
+
 def test_stop_during_compute_wins(strategy):
     def compute(*args,**kwargs):
         set_status(strategy.profile_name,StrategyStatus.DISABLED)

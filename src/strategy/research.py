@@ -217,6 +217,7 @@ def run_research(name: str, report, *, analyst=None, evaluator=None) -> dict:
                   'report': '\n'.join([f'# {doc.display_name}', '',
                       f'关联账户：{snapshot["alias"]}；本次研究资金 {snapshot["capital"]} 元。',
                       f'方法：{final_candidate.method}；持仓上限 {final_candidate.max_positions}；调仓 {final_candidate.frequency}。',
+                      f'候选搜索：{frozen["termination"]["reason"]}',
                       '训练内分段诊断后冻结方案，最终评估结果不再用于本轮调参。历史上已经查看的区间不能视为全新样本外。',
                       f'最终年化净收益 {fold["metrics"]["returns"]["annualized_return"]:.2%}；最大回撤 {fold["metrics"]["risk"]["max_drawdown"]:.2%}。',
                       '通过启用门槛。' if accepted else '未通过启用门槛，保留研究结果，不发布可用策略。'])}
@@ -227,6 +228,7 @@ def run_research(name: str, report, *, analyst=None, evaluator=None) -> dict:
                 'candidate_beats_training_baseline': bool(frozen['winner']),
                 'final_evaluation_completed': True, 'accepted': bool(accepted),
                 'selected_method': final_candidate.method,
+                'candidate_search_termination': frozen['termination']['reason'],
             }
             if analyst is None:
                 result['experiment_summary'] = generate_summary(summary_evidence, model_name=doc.extra.get('discussion_model') or None)
