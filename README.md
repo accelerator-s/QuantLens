@@ -54,6 +54,8 @@ python main.py --port 8611
 
 首次使用时，在「设置 → 数据同步」中点击「检查更新并同步」。系统按计划下载 CSMAR 数据，完成入库、清洗和页面数据发布。因子计算和模型训练由研究任务单独执行。
 
+服务器使用已有 `sjtuvpn.service` 分流连接校园网时，执行 `sudo bash deploy/install-vpn-check.sh` 安装断线检查。它每分钟检查主隧道、CSMAR 子隧道及 IPv4 路由，缺失时自动重连，并将 `data.csmar.com` 加入分流清单。VPN 账号沿用服务器配置，不写入仓库；手动停止 `sjtuvpn.service` 后不会自动连接。可通过 `journalctl -u quantlens-vpn-check.service` 查看恢复记录。
+
 ## 4. 功能介绍
 
 网页主导航包括工作台、条件选股、因子研究、策略研究、回测结果、账户持仓和设置。

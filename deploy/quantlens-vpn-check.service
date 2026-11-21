@@ -1,0 +1,10 @@
+[Unit]
+Description=Check SJTU tunnels and CSMAR routes
+After=network-online.target strongswan.service sjtuvpn.service
+
+[Service]
+Type=oneshot
+# Respect an operator deliberately stopping the VPN.
+ExecCondition=/usr/bin/systemctl --quiet is-active sjtuvpn.service
+ExecStart=/usr/bin/python3 /usr/local/lib/quantlens/ensure_sjtuvpn.py
+TimeoutStartSec=300

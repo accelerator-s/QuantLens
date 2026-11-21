@@ -11,6 +11,18 @@ from providers.exceptions import ProviderAuthError, ProviderNetworkError, Provid
 from providers.markets.cn_a.csmar.client import CSMARClient
 
 
+def test_institution_ip_failure_explains_campus_route(tmp_path, monkeypatch):
+    monkeypatch.setenv('QUANTLENS_HOME', str(tmp_path))
+    client = CSMARClient()
+    def respond(request):
+        return httpx.Response(200, json={'code': -1, 'msg': '当前IP没有可用机构账号'})
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client._client:
+        with pytest.raises(ProviderAuthError) as error:
+            client.login()
+    assert error.value.code == 'PROVIDER_CAMPUS_NETWORK_REQUIRED'
+    assert 'data.csmar.com' in error.value.suggested_action
+
+
 @pytest.mark.parametrize('state,valid', [('0', False), (0, False), (None, False),
                                          ('', False), ('1', True), (1, True)])
 def test_cached_session_requires_logged_in_state(tmp_path, monkeypatch, state, valid):

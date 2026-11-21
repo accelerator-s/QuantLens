@@ -238,6 +238,13 @@ class CSMARClient:
         data = resp.json()
         self._raise_if_verification_blocked(data, "automaticLogin")
         if data.get("code") != 0:
+            if "当前IP没有可用机构账号" in str(data.get("msg", "")).replace(" ", ""):
+                raise ProviderAuthError(
+                    code="PROVIDER_CAMPUS_NETWORK_REQUIRED",
+                    message="CSMAR 未识别到校园网机构授权：当前出口 IP 没有可用机构账号。",
+                    blocking=True,
+                    suggested_action="检查校园 VPN 实际隧道及 data.csmar.com 分流路由；服务显示已启动不代表隧道仍连接。恢复校园网出口后重新同步，系统会自动登录。",
+                )
             raise ProviderAuthError(
                 code="PROVIDER_AUTH_FAILED",
                 message=f"CSMAR 登录失败：{data.get('msg', '未知错误')}",
