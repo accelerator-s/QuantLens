@@ -26,12 +26,32 @@ def hive_type(dtype):
     raise ValueError(f'Unsupported staged type: {dtype}')
 
 
+def staged_schema(table, files):
+    schema = pq.read_schema(files[0])
+    manifest_path = workspace().data / 'ingest_manifest.json'
+    if manifest_path.exists():
+        version = json.loads(manifest_path.read_text()).get('schema_versions', {}).get(table)
+        if version:
+            artifact = workspace().root / f'docker/ddl/ods_{table}_{version}.json'
+            published = json.loads(artifact.read_text())
+            names = [field['name'] for field in published['fields']]
+            if len(names) == len(schema.names) and set(names) == set(schema.names):
+                # Incremental merges can move key columns. Keep the published
+                # order without changing types, nullability or field membership.
+                schema = pa.schema([schema.field(name) for name in names], metadata=schema.metadata)
+    for path in files[1:]:
+        candidate = pq.read_schema(path)
+        if len(candidate.names) == len(schema.names) and set(candidate.names) == set(schema.names):
+            candidate = pa.schema([candidate.field(name) for name in schema.names])
+        if not schema.equals(candidate, check_metadata=False):
+            raise ValueError(f'{table}: staged schemas differ')
+    return schema
+
+
 def export(root=None, upload=True):
     result = []
     for table, files in staged_tables(root).items():
-        schema = pq.read_schema(files[0])
-        if any(not schema.equals(pq.read_schema(f), check_metadata=False) for f in files[1:]):
-            raise ValueError(f'{table}: staged schemas differ')
+        schema = staged_schema(table, files)
         fields = [{'name': f.name, 'arrow_type': str(f.type), 'hive_type': hive_type(f.type), 'nullable': f.nullable} for f in schema]
         digest = hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()[:16]
         doc = {'table': table, 'schema_version': digest, 'fields': fields}

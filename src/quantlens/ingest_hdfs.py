@@ -39,12 +39,20 @@ def ingest(root=None, *, cluster_checked=False):
     for schema in schemas:
         old=previous.get('schema_versions',{}).get(schema['table'])
         if old and old != schema['schema_version']:
-            raise ValueError(f"{schema['table']}: schema changed ({old} -> {schema['schema_version']}); apply a reviewed DDL migration before publishing")
+            from exceptions import ContractViolation
+            raise ContractViolation(
+                code='INGEST_SCHEMA_CHANGED',
+                message=f"{schema['table']} 字段定义发生变化，已停止入库，需核对表结构迁移。",
+                context={'table': schema['table'], 'previous': old, 'current': schema['schema_version']},
+                blocking=True,
+            )
     manifest['schema_versions']={s['table']:s['schema_version'] for s in schemas}
     landing = workspace().data/'landing'/run['run_id']
     landing.mkdir(parents=True)
     try:
         for table, sources in staged_tables(root).items():
+            schema = next(doc for doc in schemas if doc['table'] == table)
+            columns = [field['name'] for field in schema['fields']]
             table_root = landing/table
             table_root.mkdir()
             # Hard links expose original staged bytes without retaining another data copy.
@@ -63,7 +71,7 @@ def ingest(root=None, *, cluster_checked=False):
             try:
                 for source in links:
                     for batch in pq.ParquetFile(source).iter_batches(batch_size=131072):
-                        data = pa.Table.from_batches([batch])
+                        data = pa.Table.from_batches([batch]).select(columns)
                         years = pc.utf8_slice_codeunits(pc.cast(data[date_column], pa.string()), 0, 4) if date_column else pa.array(['0000']*len(data))
                         for year in sorted(set(years.to_pylist()), key=lambda x: x or ''):
                             year = year or '0000'
